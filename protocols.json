@@ -1,0 +1,176 @@
+{
+  "kerja": {
+    "aliases": [
+      "work",
+      "mode kerja",
+      "work mode",
+      "kantor"
+    ],
+    "description": "Siapkan lingkungan kerja: VS Code, GitHub, volume pelan",
+    "steps": [
+      {
+        "tool": "media_control",
+        "args": {
+          "action": "pause"
+        }
+      },
+      {
+        "tool": "open_application",
+        "args": {
+          "name": "vs code"
+        }
+      },
+      {
+        "tool": "open_website",
+        "args": {
+          "site": "github"
+        }
+      },
+      {
+        "tool": "set_volume",
+        "args": {
+          "level": 30
+        }
+      }
+    ]
+  },
+  "santai": {
+    "aliases": [
+      "relax",
+      "chill",
+      "mode santai",
+      "rileks"
+    ],
+    "description": "Musik lofi santai dan layar lebih nyaman",
+    "steps": [
+      {
+        "tool": "play_youtube",
+        "args": {
+          "query": "lofi hip hop chill beats",
+          "mix": true
+        }
+      },
+      {
+        "tool": "set_volume",
+        "args": {
+          "level": 35
+        }
+      },
+      {
+        "tool": "set_brightness",
+        "args": {
+          "level": 60
+        }
+      }
+    ]
+  },
+  "fokus": {
+    "aliases": [
+      "focus",
+      "pomodoro",
+      "belajar",
+      "mode fokus"
+    ],
+    "description": "Sesi fokus Pomodoro 25 menit dengan musik konsentrasi",
+    "steps": [
+      {
+        "tool": "window_action",
+        "args": {
+          "action": "minimize_all"
+        }
+      },
+      {
+        "tool": "play_youtube",
+        "args": {
+          "query": "deep focus music for studying",
+          "mix": true
+        }
+      },
+      {
+        "tool": "set_volume",
+        "args": {
+          "level": 25
+        }
+      },
+      {
+        "tool": "set_timer",
+        "args": {
+          "minutes": 25,
+          "message": "Sesi fokus 25 menit selesai. Saatnya istirahat 5 menit."
+        }
+      }
+    ]
+  },
+  "tidur": {
+    "aliases": [
+      "sleep",
+      "malam",
+      "good night",
+      "mode tidur",
+      "selamat tidur"
+    ],
+    "description": "Hentikan musik, redupkan layar, pelankan suara, lalu sleep",
+    "steps": [
+      {
+        "tool": "media_control",
+        "args": {
+          "action": "pause"
+        }
+      },
+      {
+        "tool": "set_brightness",
+        "args": {
+          "level": 10
+        }
+      },
+      {
+        "tool": "set_volume",
+        "args": {
+          "level": 10
+        }
+      },
+      {
+        "tool": "sleep_pc",
+        "args": {}
+      }
+    ]
+  },
+  "bersih": {
+    "aliases": [
+      "clean slate",
+      "cleanup",
+      "bersih-bersih",
+      "pembersihan"
+    ],
+    "description": "Clean Slate Protocol: hapus file temp dan kosongkan Recycle Bin",
+    "steps": [
+      {
+        "tool": "system_cleanup",
+        "args": {}
+      }
+    ]
+  },
+  "pesta": {
+    "aliases": [
+      "house party",
+      "party",
+      "house party protocol"
+    ],
+    "description": "House Party Protocol: musik pesta, volume besar",
+    "steps": [
+      {
+        "tool": "play_youtube",
+        "args": {
+          "query": "party hits mix",
+          "mix": true
+        }
+      },
+      {
+        "tool": "set_volume",
+        "args": {
+          "level": 70
+        }
+      }
+    ]
+  }
+}

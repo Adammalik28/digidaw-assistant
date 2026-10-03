@@ -1,0 +1,35 @@
+# ── secrets ──
+.env
+
+# ── personal data (each user gets their own, created on first run) ──
+settings.json
+memory.json
+memory_semantic.json
+habits.json
+alarms.json
+media_state.json
+project_versions.json
+
+# ── runtime / caches / downloads ──
+logs/
+temp_audio/
+models/
+browser_profile/
+browser_profile_linux/
+browser_profile_firefox/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.tmp
+
+# ── test leftovers ──
+test.mp3
+test_edge.mp3
+neural_test.mp3
+
+# ── editors / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,1551 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DIGIDAW HUD</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%23041018' stroke='%233fd8ff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='17' fill='none' stroke='%233fd8ff' stroke-width='6' stroke-dasharray='6 4'/%3E%3Ccircle cx='32' cy='32' r='8' fill='%23e8fbff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #02070d;
+    --panel: rgba(6, 26, 42, 0.55);
+    --panel-strong: rgba(8, 36, 58, 0.85);
+    --line: rgba(64, 214, 255, 0.20);
+    --line-strong: rgba(64, 214, 255, 0.55);
+    --cyan: #3fd8ff;
+    --cyan-soft: #8ceaff;
+    --amber: #ffb547;
+    --red: #ff5d5d;
+    --green: #4dffb5;
+    --text: #d6f5ff;
+    --muted: #6f9fb3;
+    --accent: var(--cyan);
+    --font-display: 'Orbitron', 'Segoe UI', sans-serif;
+    --font-body: 'Rajdhani', 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', Consolas, monospace;
+  }
+  body.state-thinking { --accent: var(--amber); }
+  body.state-paused { --accent: #7d8b99; }
+  body.state-paused .reactor-wrap, body.state-paused #reactor { filter: grayscale(0.85) brightness(0.7); }
+  .top-btn.on { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 14px rgba(255, 181, 71, 0.35); }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 50% 42%, rgba(20, 120, 170, 0.22), transparent 62%),
+      linear-gradient(rgba(63, 216, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(63, 216, 255, 0.035) 1px, transparent 1px);
+    background-size: 100% 100%, 42px 42px, 42px 42px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    overflow: hidden;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
+    opacity: 0.35;
+  }
+
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; padding: 14px 18px 16px; gap: 12px; }
+
+  /* ── top bar ── */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--cyan); box-shadow: 0 0 14px var(--cyan), inset 0 0 12px var(--cyan); position: relative; }
+  .logo::after { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: radial-gradient(circle, #fff 0 25%, var(--cyan) 60%, transparent 72%); }
+  .brand-name { font-family: var(--font-display); font-weight: 900; font-size: 22px; letter-spacing: 0.32em; color: var(--cyan-soft); text-shadow: 0 0 12px rgba(63, 216, 255, 0.6); }
+  .brand-sub { font-size: 10.5px; letter-spacing: 0.34em; color: var(--muted); }
+  .status-strip { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.08em; flex-wrap: wrap; justify-content: center; }
+  .status-strip b { color: var(--cyan-soft); font-weight: 500; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); display: inline-block; margin-right: 6px; box-shadow: 0 0 8px currentColor; }
+  .dot.on { background: var(--green); }
+  .dot.warn { background: var(--amber); }
+  .dot.check { background: var(--cyan); animation: blink 1s infinite; }
+  .ai-ind { background: none; border: 0; padding: 2px 4px; margin: -2px -4px; font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
+  .ai-ind:hover b, .ai-ind:focus-visible b { color: #fff; }
+  .ai-ind:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+  .ai-ind.bad b { color: #ff9b9b; }
+  .ai-ind.warn b { color: var(--amber); }
+  .badge { border: 1px solid var(--amber); color: var(--amber); padding: 1px 8px; font-size: 10.5px; letter-spacing: 0.14em; display: none; }
+  .badge.show { display: inline-block; animation: blink 1.2s infinite; }
+  .clock { text-align: right; }
+  .clock #clock { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: 0.1em; color: var(--cyan-soft); }
+  .clock #date { font-size: 12px; letter-spacing: 0.24em; color: var(--muted); text-transform: uppercase; }
+
+  /* ── layout ── */
+  .main { display: grid; grid-template-columns: 300px minmax(0, 1fr) 370px; gap: 16px; min-height: 0; }
+  .main > * { min-width: 0; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+
+  .panel { position: relative; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px 14px; backdrop-filter: blur(6px); }
+  .panel::before, .panel::after { content: ""; position: absolute; width: 14px; height: 14px; border: 0 solid var(--cyan); }
+  .panel::before { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
+  .panel::after { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
+  .panel-title { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.28em; color: var(--cyan); margin-bottom: 10px; text-transform: uppercase; }
+  .panel-title .tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+
+  /* ── gauges ── */
+  .gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
+  .gauge { position: relative; text-align: center; }
+  .gauge svg { width: 100%; max-width: 112px; transform: rotate(-90deg); display: block; margin: 0 auto; }
+  .gauge .track { fill: none; stroke: rgba(63, 216, 255, 0.12); stroke-width: 7; }
+  .gauge .bar { fill: none; stroke: var(--cyan); stroke-width: 7; stroke-linecap: butt; transition: stroke-dashoffset 0.8s ease, stroke 0.4s; filter: drop-shadow(0 0 4px rgba(63, 216, 255, 0.7)); }
+  .gauge .ticks { fill: none; stroke: rgba(63, 216, 255, 0.35); stroke-width: 2; stroke-dasharray: 1 5.6; }
+  .gauge.warn .bar { stroke: var(--amber); filter: drop-shadow(0 0 4px rgba(255, 181, 71, 0.7)); }
+  .gauge.crit .bar { stroke: var(--red); filter: drop-shadow(0 0 4px rgba(255, 93, 93, 0.8)); }
+  .gauge-val { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-78%); font-family: var(--font-display); font-weight: 700; font-size: 19px; color: var(--text); }
+  .gauge-val small { font-size: 10px; color: var(--muted); margin-left: 1px; }
+  .gauge-label { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.22em; color: var(--muted); margin-top: 4px; }
+  .gauge-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--cyan-soft); opacity: 0.8; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-family: var(--font-mono); font-size: 12px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .kv span:nth-child(even) { text-align: right; color: var(--text); }
+  #netChart { width: 100%; height: 54px; display: block; margin-top: 8px; }
+
+  .weather-main { display: flex; align-items: baseline; gap: 12px; }
+  .weather-temp { font-family: var(--font-display); font-size: 34px; font-weight: 700; color: var(--cyan-soft); text-shadow: 0 0 14px rgba(63, 216, 255, 0.4); }
+  .weather-cond { font-size: 16px; font-weight: 600; text-transform: capitalize; }
+  .weather-place { font-size: 12px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .quick { justify-content: center; margin-top: 10px; }
+  .chip { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.18em; color: var(--cyan-soft); background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); padding: 7px 10px; cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
+  .chip:hover, .chip:focus-visible { background: rgba(63, 216, 255, 0.18); box-shadow: 0 0 12px rgba(63, 216, 255, 0.35); outline: none; }
+
+  /* ── reactor ── */
+  .center { display: flex; flex-direction: column; min-height: 0; }
+  .reactor-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+  #reactor { width: min(100%, 52vh, 460px); aspect-ratio: 1; display: block; }
+  .state-label { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: 0.5em; color: var(--accent); text-shadow: 0 0 14px var(--accent); margin-top: 6px; padding-left: 0.5em; }
+  .state-hint { font-size: 13px; letter-spacing: 0.12em; color: var(--muted); margin-top: 4px; text-align: center; }
+  .transcript { width: 100%; max-width: 760px; margin: 14px auto 0; text-align: center; min-height: 86px; }
+  .you-line { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .digidaw-line { font-size: 21px; font-weight: 600; line-height: 1.35; color: var(--text); margin-top: 6px; text-shadow: 0 0 10px rgba(63, 216, 255, 0.25); }
+  .digidaw-line .caret { display: inline-block; width: 9px; height: 1em; background: var(--cyan); margin-left: 3px; vertical-align: -2px; animation: blink 0.9s steps(1) infinite; }
+
+  .command-bar { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  .command-bar input { flex: 1; min-width: 0; background: var(--panel-strong); border: 1px solid var(--line-strong); color: var(--text); font-family: var(--font-body); font-size: 16px; font-weight: 500; padding: 12px 16px; outline: none; letter-spacing: 0.02em; }
+  .command-bar input:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 18px rgba(63, 216, 255, 0.25); }
+  .command-bar input::placeholder { color: var(--muted); }
+  .icon-btn { flex: none; width: 46px; height: 46px; display: grid; place-items: center; background: rgba(63, 216, 255, 0.08); border: 1px solid var(--line-strong); color: var(--cyan-soft); cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
+  .icon-btn:hover, .icon-btn:focus-visible { background: rgba(63, 216, 255, 0.2); box-shadow: 0 0 14px rgba(63, 216, 255, 0.4); outline: none; }
+  .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+  .icon-btn svg { width: 20px; height: 20px; }
+  .icon-btn.live { background: rgba(63, 216, 255, 0.28); box-shadow: 0 0 18px var(--cyan); animation: pulse 1.1s infinite; }
+  #stopBtn { display: none; border-color: var(--amber); color: var(--amber); }
+  body.state-speaking #stopBtn { display: grid; }
+
+  /* ── comms log ── */
+  .log-panel { flex: 1; min-height: 230px; display: flex; flex-direction: column; }
+
+  /* ── workspace panels ── */
+  .loc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; width: 100%; text-align: left;
+             background: none; border: 0; border-top: 1px dashed var(--line); padding: 8px 2px; color: var(--text); cursor: pointer; font: inherit; }
+  .loc-row:first-child { border-top: 0; padding-top: 2px; }
+  .loc-row:hover .loc-name, .loc-row:focus-visible .loc-name { color: #fff; }
+  .loc-row:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+  .loc-row svg { width: 18px; height: 18px; color: var(--cyan); grid-row: span 2; }
+  .loc-name { font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.18em; color: var(--cyan-soft); text-transform: uppercase; }
+  .loc-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); grid-row: span 2; align-self: center; }
+  .loc-path { font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .sec-top { display: flex; align-items: center; gap: 14px; }
+  .sec-ring { width: 56px; height: 56px; flex: none; position: relative; }
+  .sec-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .sec-ring .track { fill: none; stroke: rgba(63, 216, 255, 0.12); stroke-width: 6; }
+  .sec-ring .bar { fill: none; stroke: var(--green); stroke-width: 6; transition: stroke-dashoffset 0.8s ease; }
+  .sec-ring b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-size: 17px; }
+  .sec-lines { font-family: var(--font-mono); font-size: 11px; color: var(--muted); line-height: 1.55; min-width: 0; }
+  .sec-lines span { color: var(--text); }
+  .mini-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .mini-actions .btn { padding: 5px 9px; font-size: 9.5px; letter-spacing: 0.12em; }
+  .proj-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; padding: 7px 0; border-top: 1px dashed var(--line); }
+  .proj-row:first-child { border-top: 0; }
+  .proj-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .proj-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .proj-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+  .proj-row .build-actions { margin: 0; gap: 6px; }
+  .proj-row .btn { padding: 3px 8px; font-size: 9.5px; }
+  .sub-title { font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.24em; color: var(--muted); margin: 10px 0 4px; }
+  .gen-job { padding: 6px 0 8px; border-bottom: 1px dashed var(--line); margin-bottom: 8px; }
+  .gen-job .proj-name { font-size: 13px; }
+  .gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .gal-item { position: relative; aspect-ratio: 1; border: 1px solid var(--line); background: rgba(63, 216, 255, 0.05); cursor: pointer; overflow: hidden; padding: 0; color: var(--cyan-soft); }
+  .gal-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gal-item:hover, .gal-item:focus-visible { border-color: var(--cyan); box-shadow: 0 0 10px rgba(63, 216, 255, 0.35); outline: none; }
+  .gal-file { display: grid; place-items: center; height: 100%; font-family: var(--font-display); font-size: 11px; letter-spacing: 0.1em; }
+  .gal-file small { display: block; font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0; margin-top: 3px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-family: var(--font-display);
+         font-size: 10.5px; letter-spacing: 0.24em; padding: 0 2px 5px; cursor: pointer; text-transform: uppercase; }
+  .tab + .tab { margin-left: 14px; }
+  .tab.on { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .tab:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+  .tab .n { font-family: var(--font-mono); letter-spacing: 0; margin-left: 5px; color: var(--muted); }
+  .tab .n.live { color: var(--amber); }
+  .ws-title { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .ws-title .tag { font-family: var(--font-mono); font-size: 10px; color: var(--muted); padding-bottom: 6px; }
+  #netChart { height: 36px; }
+  .chip.accent { border-color: var(--cyan); color: #fff; background: rgba(63, 216, 255, 0.14); }
+  #log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .msg { margin-bottom: 10px; animation: fadein 0.35s ease; }
+  .msg-head { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
+  .msg-body { font-size: 14.5px; line-height: 1.35; margin-top: 2px; word-wrap: break-word; }
+  .msg.user .msg-head { color: var(--amber); }
+  .msg.user .msg-body { color: #ffe3b8; }
+  .msg.digidaw .msg-head { color: var(--cyan); }
+  .msg.tool { margin: -4px 0 8px; font-family: var(--font-mono); font-size: 11px; color: var(--green); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg.alert .msg-head { color: var(--red); }
+  .msg.alert .msg-body { color: #ffd0d0; }
+  .empty { color: var(--muted); font-size: 13px; letter-spacing: 0.06em; }
+
+  /* ── now playing ── */
+  .np-title { font-size: 16px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .np-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-progress { height: 3px; background: rgba(63, 216, 255, 0.15); margin: 10px 0 4px; position: relative; overflow: hidden; }
+  .np-progress div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transition: width 0.9s linear; }
+  .np-times { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+  .np-controls { display: flex; justify-content: center; gap: 12px; margin-top: 8px; }
+  .np-controls .icon-btn { width: 40px; height: 40px; }
+  .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; margin-right: 6px; vertical-align: -1px; }
+  .eq i { width: 3px; background: var(--green); animation: eq 0.9s infinite ease-in-out; }
+  .eq i:nth-child(2) { animation-delay: -0.3s; } .eq i:nth-child(3) { animation-delay: -0.6s; }
+  .eq.off i { animation: none; height: 3px; background: var(--muted); }
+
+  .timer-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 22px; gap: 0 10px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .timer-row:last-child { border-bottom: 0; }
+  .timer-row svg { width: 18px; height: 18px; color: var(--cyan); }
+  .timer-row .t-label { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .timer-row .t-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+  .timer-row b { font-family: var(--font-mono); font-weight: 500; color: var(--cyan-soft); font-size: 14px; }
+  .timer-row .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; }
+  .timer-row .x:hover, .timer-row .x:focus-visible { color: var(--red); outline: none; }
+  .alarm-banner[hidden] { display: none; }
+  .alarm-banner { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(2, 8, 14, 0.78); }
+  .alarm-card { text-align: center; padding: 28px 36px; border: 1px solid var(--amber); background: rgba(30, 20, 5, 0.95);
+                box-shadow: 0 0 60px rgba(255, 181, 71, 0.45); animation: alarmPulse 1s ease-in-out infinite; min-width: min(420px, 90vw); }
+  .alarm-card .a-kind { font-family: var(--font-display); letter-spacing: 0.4em; color: var(--amber); font-size: 13px; }
+  .alarm-card .a-time { font-family: var(--font-display); font-size: 64px; font-weight: 700; color: #fff; margin: 6px 0; text-shadow: 0 0 20px rgba(255, 181, 71, 0.8); }
+  .alarm-card .a-label { font-size: 18px; margin-bottom: 18px; }
+  .alarm-card .a-hint { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 12px; }
+  .alarm-card .btn { font-size: 13px; padding: 12px 22px; margin: 0 6px; }
+  @keyframes alarmPulse { 0%, 100% { box-shadow: 0 0 40px rgba(255, 181, 71, 0.35); } 50% { box-shadow: 0 0 80px rgba(255, 181, 71, 0.7); } }
+
+  /* ── toasts ── */
+  #toasts { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; width: min(560px, 92vw); pointer-events: none; }
+  .toast { background: rgba(40, 12, 12, 0.92); border: 1px solid var(--red); color: #ffe0e0; padding: 10px 14px; font-size: 15px; font-weight: 600; box-shadow: 0 0 24px rgba(255, 93, 93, 0.35); animation: fadein 0.3s ease; }
+  .toast.info, .toast.reminder { background: rgba(8, 36, 58, 0.95); border-color: var(--cyan); color: var(--text); box-shadow: 0 0 24px rgba(63, 216, 255, 0.35); }
+
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes pulse { 50% { box-shadow: 0 0 4px var(--cyan); } }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @keyframes eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+
+  @media (max-width: 1180px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; }
+    .main { grid-template-columns: 1fr 1fr; }
+    .center { grid-column: 1 / -1; order: -1; min-height: 560px; }
+    .log-panel { min-height: 360px; }
+  }
+  @media (max-width: 760px) {
+    .app { padding: 12px 16px; }
+    .main { grid-template-columns: 1fr; }
+    .status-strip { display: none; }
+    .brand-sub { display: none; }
+    .brand-name { font-size: 16px; letter-spacing: 0.2em; }
+    .logo { width: 30px; height: 30px; }
+    .logo::after { inset: 7px; }
+    .clock #clock { font-size: 18px; }
+    .clock #date { font-size: 10px; letter-spacing: 0.12em; }
+    .command-bar { gap: 6px; }
+    .icon-btn { width: 42px; height: 42px; }
+    .digidaw-line { font-size: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
+  }
+
+  /* ── top actions ── */
+  .top-right { display: flex; align-items: center; gap: 16px; }
+  .top-btn { width: 38px; height: 38px; display: grid; place-items: center; background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); color: var(--cyan-soft); cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
+  .top-btn:hover, .top-btn:focus-visible { background: rgba(63, 216, 255, 0.2); box-shadow: 0 0 14px rgba(63, 216, 255, 0.4); outline: none; }
+  .top-btn svg { width: 19px; height: 19px; }
+  .top-btn.danger { color: #ff9b9b; border-color: rgba(255, 93, 93, 0.55); }
+  .top-btn.danger:hover { background: rgba(255, 93, 93, 0.18); box-shadow: 0 0 14px rgba(255, 93, 93, 0.4); }
+
+  /* ── conversation countdown ── */
+  .listen-bar { flex: none; width: 180px; height: 3px; margin: 8px auto 0; background: rgba(63, 216, 255, 0.12); overflow: hidden; visibility: hidden; }
+  .listen-bar.on { visibility: visible; }
+  .listen-bar div { height: 100%; width: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transform-origin: left; }
+  .msg.heard { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin: -2px 0 8px; }
+  .msg.heard .said { font-style: italic; opacity: 0.75; }
+  .build-status { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.2em; margin-top: 4px; }
+  .build-status.building, .build-status.starting { color: var(--amber); }
+  .build-status.running, .build-status.done { color: var(--green); }
+  .build-status.failed, .build-status.cancelled { color: var(--red); }
+  .build-step { font-family: var(--font-mono); font-size: 11.5px; color: var(--cyan-soft); margin-top: 6px; line-height: 1.4; word-break: break-word; }
+  .build-bar { height: 3px; margin-top: 8px; background: rgba(255, 181, 71, 0.15); overflow: hidden; }
+  .build-bar div { height: 100%; width: 35%; background: var(--amber); animation: indeterminate 1.4s ease-in-out infinite; }
+  @keyframes indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  .build-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .build-actions .btn { padding: 4px 10px; font-size: 10px; }
+  .build-status.queued { color: var(--cyan-soft); }
+  .job { padding: 10px 0; border-top: 1px dashed var(--line); }
+  .job:first-child { border-top: none; padding-top: 2px; }
+  .job-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .job-head .np-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-preview { display: block; width: 100%; margin-top: 8px; border: 1px solid var(--line); cursor: zoom-in; background: #000; }
+  .preview-zoom { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  .preview-zoom img { max-width: 92vw; max-height: 88vh; border: 1px solid var(--cyan); box-shadow: 0 0 30px rgba(63, 216, 255, 0.35); }
+  .alias-btn { font-family: var(--font-mono); font-size: 10px; color: var(--cyan-soft); background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line); padding: 2px 6px; margin: 4px 4px 0 0; cursor: pointer; }
+  .alias-btn:hover, .alias-btn:focus-visible { background: rgba(63, 216, 255, 0.2); outline: none; }
+  .alias-btn:disabled { color: var(--green); border-color: var(--green); cursor: default; }
+
+  /* ── control panel ── */
+  .overlay { position: fixed; inset: 0; z-index: 20; background: rgba(1, 6, 12, 0.78); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; padding: 24px; }
+  .overlay.open { display: flex; animation: fadein 0.25s ease; }
+  .cp { width: min(1040px, 100%); height: min(720px, 100%); display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: rgba(5, 20, 33, 0.97); border: 1px solid var(--line-strong); box-shadow: 0 0 60px rgba(63, 216, 255, 0.15); position: relative; }
+  .cp::before, .cp::after { content: ""; position: absolute; width: 18px; height: 18px; border: 0 solid var(--cyan); }
+  .cp::before { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
+  .cp::after { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
+  .cp-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .cp-title { font-family: var(--font-display); font-size: 15px; letter-spacing: 0.32em; color: var(--cyan-soft); }
+  .cp-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; letter-spacing: 0.04em; }
+  .cp-nav { border-right: 1px solid var(--line); padding: 12px 0; overflow-y: auto; }
+  .cp-nav button { display: block; width: 100%; text-align: left; background: none; border: 0; border-left: 2px solid transparent; color: var(--muted); font-family: var(--font-display); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; padding: 12px 20px; cursor: pointer; }
+  .cp-nav button:hover { color: var(--text); background: rgba(63, 216, 255, 0.05); }
+  .cp-nav button.active { color: var(--cyan-soft); border-left-color: var(--cyan); background: rgba(63, 216, 255, 0.08); }
+  .cp-body { overflow-y: auto; padding: 8px 28px 20px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .cp-section-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.26em; color: var(--cyan); text-transform: uppercase; margin: 18px 0 6px; }
+  .field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap: 8px 24px; align-items: center; padding: 14px 0; border-bottom: 1px dashed var(--line); }
+  .field-label { font-size: 15.5px; font-weight: 600; color: var(--text); }
+  .field-help { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .field-restart { font-family: var(--font-mono); font-size: 10px; color: var(--amber); letter-spacing: 0.08em; margin-left: 6px; }
+  .field input[type=text], .field input[type=password], .field input[type=number], .field select { width: 100%; background: var(--panel-strong); border: 1px solid var(--line-strong); color: var(--text); font-family: var(--font-body); font-size: 15px; font-weight: 500; padding: 9px 11px; outline: none; }
+  .field input:focus, .field select:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan); }
+  .field select option { background: #06192a; }
+  .folder-row { display: flex; gap: 6px; }
+  .folder-row input { flex: 1; min-width: 0; }
+  .btn { background: rgba(63, 216, 255, 0.08); border: 1px solid var(--line-strong); color: var(--cyan-soft); font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.16em; padding: 10px 14px; cursor: pointer; white-space: nowrap; }
+  .btn:hover, .btn:focus-visible { background: rgba(63, 216, 255, 0.2); outline: none; }
+  .btn.primary { background: rgba(63, 216, 255, 0.22); color: #fff; border-color: var(--cyan); }
+  .btn.warn { color: var(--amber); border-color: rgba(255, 181, 71, 0.6); }
+  .btn.danger { color: #ff9b9b; border-color: rgba(255, 93, 93, 0.6); }
+  .switch { position: relative; width: 52px; height: 28px; justify-self: end; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; background: rgba(63, 216, 255, 0.08); border: 1px solid var(--line-strong); cursor: pointer; transition: background 0.2s; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; background: var(--muted); transition: transform 0.2s, background 0.2s; }
+  .switch input:checked + span { background: rgba(63, 216, 255, 0.3); border-color: var(--cyan); }
+  .switch input:checked + span::after { transform: translateX(24px); background: var(--cyan-soft); box-shadow: 0 0 10px var(--cyan); }
+  .switch input:focus-visible + span { box-shadow: 0 0 0 2px var(--cyan); }
+  .cp-actions { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 0; }
+  .cp-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .cp-status { font-size: 14px; color: var(--muted); min-height: 20px; }
+  .cp-status.ok { color: var(--green); } .cp-status.err { color: var(--red); } .cp-status.warn { color: var(--amber); }
+  .cp-foot .btns { display: flex; gap: 10px; }
+
+  /* ── offline curtain ── */
+  .curtain { position: fixed; inset: 0; z-index: 30; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(1, 5, 10, 0.92); }
+  .curtain.open { display: flex; }
+  .curtain b { font-family: var(--font-display); letter-spacing: 0.4em; font-size: 20px; color: var(--cyan-soft); }
+  .curtain span { color: var(--muted); letter-spacing: 0.08em; }
+
+  @media (max-width: 760px) {
+    .overlay { padding: 0; }
+    .cp { grid-template-columns: 1fr; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; }
+    .cp-nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 0; }
+    .cp-nav button { width: auto; white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; padding: 12px 14px; }
+    .cp-nav button.active { border-bottom-color: var(--cyan); }
+    .cp-body { padding: 4px 16px 16px; }
+    .field { grid-template-columns: 1fr; }
+    .switch { justify-self: start; }
+    .top-right { gap: 8px; }
+    .top-btn { width: 34px; height: 34px; }
+  }
+</style>
+</head>
+<body class="state-idle">
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <div>
+        <div class="brand-name">DIGIDAW</div>
+        <div class="brand-sub">ASISTEN KECERDASAN DIGITAL</div>
+      </div>
+    </div>
+    <div class="status-strip">
+      <span><span class="dot" id="connDot"></span><b id="connText">MENGHUBUNGKAN</b></span>
+      <span>MODE <b id="modeText">—</b></span>
+      <span>PUSH-TO-TALK <b id="hotkey">CTRL+ALT+D</b></span>
+      <button class="ai-ind" id="aiInd" type="button" title="Status AI — klik untuk memeriksa ulang"><span class="dot check" id="aiDot"></span>AI <b id="aiText">—</b></button>
+      <span class="badge" id="dictBadge">MODE DIKTE AKTIF</span>
+      <span class="badge" id="briefBadge">BRIEF PROJECT</span>
+    </div>
+    <div class="top-right">
+      <button class="top-btn" id="pauseBtn" title="Jeda pendengaran (Digidaw berhenti mendengarkan)" aria-label="Jeda pendengaran">
+        <svg viewBox="0 0 24 24" fill="currentColor" id="pauseIcon"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+      </button>
+      <button class="top-btn" id="cpBtn" title="Control Panel" aria-label="Buka Control Panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+      <button class="top-btn" id="restartBtn" title="Restart Digidaw (memuat ulang kode &amp; pengaturan, ±10 detik)" aria-label="Restart Digidaw">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+      </button>
+      <button class="top-btn danger" id="powerBtn" title="Matikan Digidaw" aria-label="Matikan Digidaw">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+      </button>
+      <div class="clock"><div id="clock">00:00:00</div><div id="date">—</div></div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- LEFT -->
+    <section class="col">
+      <div class="panel">
+        <div class="panel-title">Diagnostik Sistem <span class="tag" id="uptime">UPTIME —</span></div>
+        <div class="gauges">
+          <div class="gauge" id="g-cpu">
+            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
+            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
+            <div class="gauge-label">CPU</div><div class="gauge-sub" id="cpuSub">—</div>
+          </div>
+          <div class="gauge" id="g-ram">
+            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
+            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
+            <div class="gauge-label">MEMORI</div><div class="gauge-sub" id="ramSub">—</div>
+          </div>
+          <div class="gauge" id="g-bat">
+            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
+            <div class="gauge-val"><span class="num">—</span><small>%</small></div>
+            <div class="gauge-label">DAYA</div><div class="gauge-sub" id="batSub">—</div>
+          </div>
+          <div class="gauge" id="g-disk">
+            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
+            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
+            <div class="gauge-label">DISK C</div><div class="gauge-sub" id="diskSub">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Jaringan · Cuaca <span class="tag" id="procCount">— PROSES</span></div>
+        <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 14px; align-items: center;">
+          <div class="kv">
+            <span>▼ UNDUH</span><span id="netDown">0 KB/s</span>
+            <span>▲ UNGGAH</span><span id="netUp">0 KB/s</span>
+          </div>
+          <div style="text-align:right"><span class="weather-temp" id="wTemp" style="font-size:28px">--°</span></div>
+        </div>
+        <canvas id="netChart"></canvas>
+        <div style="display:flex; gap:10px; align-items:baseline; margin-top:6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);">
+          <span class="weather-cond" id="wCond" style="font-size:12.5px; color: var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">memuat…</span>
+          <span id="weatherPlace" hidden></span>
+          <span>LEMBAP <b id="wHum" style="color:var(--text); font-weight:500">—</b></span><span>ANGIN <b id="wWind" style="color:var(--text); font-weight:500">—</b></span>
+        </div>
+      </div>
+
+      <div class="panel" id="secPanel">
+        <div class="panel-title">Keamanan <span class="tag" id="secTag">—</span></div>
+        <div class="sec-top">
+          <div class="sec-ring"><svg viewBox="0 0 64 64"><circle class="track" cx="32" cy="32" r="27"/><circle class="bar" id="secBar" cx="32" cy="32" r="27"/></svg><b id="secScore">--</b></div>
+          <div class="sec-lines">
+            <div>Terakhir: <span id="secLast">—</span></div>
+            <div>Otomatis: <span id="secNext">—</span></div>
+            <div>Penjaga unduhan: <span id="secGuard">—</span></div>
+          </div>
+        </div>
+        <div class="mini-actions">
+          <button class="btn" data-cmd="analisis keamanan sistem">SCAN</button>
+          <button class="btn" data-cmd="buka laporan keamanan" id="secReport">LAPORAN</button>
+          <button class="btn" data-cmd="jalankan quick scan">DEFENDER</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Lokasi <span class="tag">KLIK UNTUK MEMBUKA</span></div>
+        <div id="locList"><div class="empty">Memuat…</div></div>
+      </div>
+
+    </section>
+
+    <!-- CENTER -->
+    <section class="center">
+      <div class="reactor-wrap">
+        <canvas id="reactor" aria-label="Status DIGIDAW"></canvas>
+        <div class="state-label" id="stateLabel">SIAGA</div>
+        <div class="listen-bar" id="listenBar"><div></div></div>
+        <div class="state-hint" id="stateHint">Ucapkan "Digidaw" atau ketik perintah di bawah</div>
+        <div class="transcript">
+          <div class="you-line" id="youLine">&nbsp;</div>
+          <div class="digidaw-line" id="digidawLine">Semua sistem online.</div>
+        </div>
+      </div>
+      <form class="command-bar" id="cmdForm" autocomplete="off">
+        <button type="button" class="icon-btn" id="micBtn" title="Bicara sekarang">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <input id="cmdInput" placeholder="Ketik perintah untuk DIGIDAW…  (tekan / untuk fokus)" maxlength="2000">
+        <button type="button" class="icon-btn" id="stopBtn" title="Hentikan suara (Esc)">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
+        <button type="submit" class="icon-btn" title="Kirim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+      <div class="chips quick" aria-label="Protokol cepat">
+        <button class="chip accent" data-fill="buatkan gambar ">+ GAMBAR</button>
+        <button class="chip accent" data-fill="buatkan file ">+ FILE</button>
+        <button class="chip accent" data-cmd="buat project">+ PROJECT</button>
+        <button class="chip" data-cmd="jalankan protokol kerja">KERJA</button>
+        <button class="chip" data-cmd="jalankan protokol santai">SANTAI</button>
+        <button class="chip" data-cmd="jalankan protokol fokus">FOKUS</button>
+        <button class="chip" data-cmd="house party protocol">HOUSE PARTY</button>
+        <button class="chip" data-cmd="jalankan protokol bersih">CLEAN SLATE</button>
+        <button class="chip" data-cmd="berikan briefing harian">BRIEFING</button>
+        <button class="chip" data-cmd="lihat layar saya dan jelaskan apa yang ada">ANALISIS LAYAR</button>
+        <button class="chip" data-cmd="analisis keamanan sistem">SCAN KEAMANAN</button>
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="col">
+      <div class="panel log-panel">
+        <div class="panel-title">Log Komunikasi <span class="tag" id="logCount">0</span></div>
+        <div id="log"><div class="empty">Belum ada percakapan.</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Sedang Diputar <span class="tag" id="npApp">—</span></div>
+        <div class="np-title" id="npTitle"><span class="eq off" id="npEq"><i></i><i></i><i></i></span>Tidak ada media</div>
+        <div class="np-sub" id="npSub">Ucapkan "Digidaw, putar lagu …"</div>
+        <div class="np-progress"><div id="npBar"></div></div>
+        <div class="np-times"><span id="npPos">0:00</span><span id="npDur">0:00</span></div>
+        <div class="np-controls">
+          <button class="icon-btn" data-action="previous" title="Sebelumnya"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+          <button class="icon-btn" data-action="toggle" title="Play / Pause" id="npToggle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>
+          <button class="icon-btn" data-action="next" title="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+        </div>
+      </div>
+
+      <div class="panel" id="wsPanel">
+        <div class="ws-title">
+          <div class="tabs" role="tablist">
+            <button class="tab on" role="tab" id="tabProject" aria-selected="true" data-tab="project">Project<span class="n" id="tabProjectN"></span></button>
+            <button class="tab" role="tab" id="tabGenerate" aria-selected="false" data-tab="generate">Generate<span class="n" id="tabGenerateN"></span></button>
+          </div>
+          <span class="tag" id="wsTag"></span>
+        </div>
+      <div id="buildPanel">
+        <span id="buildCount" hidden></span>
+        <div id="buildJobs"></div>
+        <div class="sub-title" id="projRecentTitle" hidden>TERBARU</div>
+        <div id="projList"><div class="empty">Belum ada project. Ucapkan "Digidaw, buat project …"</div></div>
+      </div>
+
+      <div id="genPanel" hidden>
+        <span id="genTag" hidden></span>
+        <div id="genJobs"></div>
+        <div class="gallery" id="gallery"></div>
+        <div class="empty" id="genEmpty">Belum ada hasil. Coba "Digidaw, buatkan gambar kucing astronot".</div>
+        <div class="mini-actions">
+          <button class="btn" data-open="images">FOLDER GAMBAR</button>
+          <button class="btn" data-open="files">FOLDER FILE</button>
+        </div>
+      </div>
+      </div>
+
+      <div class="panel" id="timerPanel" hidden>
+        <div class="panel-title">Timer & Pengingat</div>
+        <div id="timers"><div class="empty">Tidak ada timer aktif.</div></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<div class="alarm-banner" id="alarmBanner" hidden role="alertdialog" aria-labelledby="alarmKind">
+  <div class="alarm-card">
+    <div class="a-kind" id="alarmKind">ALARM</div>
+    <div class="a-time" id="alarmTime">--:--</div>
+    <div class="a-label" id="alarmLabel"></div>
+    <button class="btn primary" id="alarmStop">STOP</button>
+    <button class="btn" id="alarmSnooze">TUNDA</button>
+    <div class="a-hint">Ucapkan "stop" atau "tunda" · Esc / Ctrl+Alt+D untuk mematikan</div>
+  </div>
+</div>
+
+<div class="overlay" id="cpOverlay" role="dialog" aria-modal="true" aria-labelledby="cpTitle">
+  <div class="cp">
+    <div class="cp-head">
+      <div><div class="cp-title" id="cpTitle">CONTROL PANEL</div><div class="cp-sub">Atur cara Digidaw mendengar, berbicara, dan bekerja untuk Anda.</div></div>
+      <button class="top-btn" id="cpClose" title="Tutup (Esc)" aria-label="Tutup Control Panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <nav class="cp-nav" id="cpNav"></nav>
+    <div class="cp-body" id="cpBody"><div class="empty">Memuat pengaturan…</div></div>
+    <div class="cp-foot">
+      <div class="cp-status" id="cpStatus" aria-live="polite"></div>
+      <div class="btns">
+        <button class="btn warn" id="cpRestart" hidden>RESTART SEKARANG</button>
+        <button class="btn" id="cpCancel">BATAL</button>
+        <button class="btn primary" id="cpSave">SIMPAN</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="curtain" id="curtain"><b id="curtainTitle">DIGIDAW OFFLINE</b><span id="curtainText">Jalankan lagi dari shortcut Digidaw di Desktop.</span></div>
+
+<script>
+(() => {
+  const TOKEN = "__DIGIDAW_TOKEN__";
+  const $ = (id) => document.getElementById(id);
+  const HARI = ["MINGGU", "SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU"];
+  const BULAN = ["JAN", "FEB", "MAR", "APR", "MEI", "JUN", "JUL", "AGU", "SEP", "OKT", "NOV", "DES"];
+  const STATES = {
+    idle:      { label: "SIAGA", hint: 'Ucapkan "Digidaw" atau ketik perintah di bawah' },
+    listening: { label: "MENDENGARKAN", hint: "Silakan bicara…" },
+    thinking:  { label: "MEMPROSES", hint: "Menganalisis permintaan" },
+    speaking:  { label: "BERBICARA", hint: "Tekan Esc atau ■ untuk menyela" },
+    paused:    { label: "DIJEDA", hint: 'Tidak mendengarkan — ucapkan "Digidaw, aktif", tekan Esc / Ctrl+Alt+D, atau ▶ di atas' },
+  };
+  let paused = false;
+  let escToTalk = "off", lastEsc = 0;
+  function renderPaused(on) {
+    paused = on;
+    const b = $("pauseBtn");
+    b.classList.toggle("on", on);
+    b.title = on ? "Aktifkan pendengaran lagi" : "Jeda pendengaran (Digidaw berhenti mendengarkan)";
+    b.setAttribute("aria-label", b.title);
+    $("pauseIcon").innerHTML = on ? '<path d="M7 5v14l12-7z"/>' : '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/>';
+  }
+  let voiceEnabled = false;
+  let userTitle = "Sir";
+
+  // ── clock ──
+  function tickClock() {
+    const d = new Date();
+    $("clock").textContent = d.toLocaleTimeString("id-ID", { hour12: false }).replace(/\./g, ":");
+    $("date").textContent = `${HARI[d.getDay()]} · ${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`;
+    renderTimers();
+    advanceMedia();
+    renderBuildTime();
+    if (ai.state === "quota") drawAi();          // countdown
+  }
+
+  // ── API ──
+  async function post(path, body) {
+    try {
+      await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify(body) });
+    } catch (e) { toast("Tidak bisa menghubungi DIGIDAW", "warning"); }
+  }
+  const sendCommand = (text) => post("/api/command", { text });
+  const sendAction = (action) => post("/api/action", { action });
+
+  $("cmdForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("cmdInput").value.trim();
+    if (!text) return;
+    sendCommand(text);
+    $("cmdInput").value = "";
+  });
+  $("micBtn").addEventListener("click", () => sendAction("talk"));
+  $("stopBtn").addEventListener("click", () => sendAction("stop_speaking"));
+  document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => sendCommand(b.dataset.cmd)));
+  document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => sendAction(b.dataset.action)));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && document.activeElement !== $("cmdInput")) { e.preventDefault(); $("cmdInput").focus(); }
+    if (e.key === "Escape") {
+      if (e.repeat) return;
+      if (!$("alarmBanner").hidden) { sendAction("alarm_stop"); return; }
+      if (cp.open) { closeSettings(); return; }
+      const zoom = document.querySelector(".preview-zoom");
+      if (zoom) { zoom.remove(); return; }
+      const input = $("cmdInput");
+      if (document.activeElement === input && input.value) { input.value = ""; return; }
+      if (escToTalk === "off") { sendAction("stop_speaking"); return; }
+      const now = Date.now();
+      if (escToTalk === "double" && now - lastEsc > 450) { lastEsc = now; return; }
+      lastEsc = 0;
+      sendAction("escape");     // talk now, or cancel listening / speaking
+    }
+  });
+
+  // ── state ──
+  function setStatus(status) {
+    const s = STATES[status] ? status : "idle";
+    document.body.className = `state-${s}`;
+    reactor.state = s;
+    $("stateLabel").textContent = STATES[s].label;
+    $("stateHint").textContent = s === "idle" && !voiceEnabled ? "Mode teks: ketik perintah di bawah"
+      : s === "listening" && listenKind === "conversation" ? "Silakan lanjut bicara — tanpa perlu memanggil Digidaw"
+      : s === "idle" && escToTalk !== "off" ? `Ucapkan "Digidaw", tekan Esc${escToTalk === "double" ? " 2×" : ""} di jendela ini, atau ketik perintah`
+      : s === "listening" && escToTalk !== "off" ? "Silakan bicara… (Esc untuk batal)" : STATES[s].hint;
+    if (s !== "listening") { $("listenBar").classList.remove("on"); listenKind = ""; }
+    $("micBtn").classList.toggle("live", s === "listening");
+    if (s === "listening") reactor.ripple();
+  }
+
+  // ── comms log ──
+  let logCount = 0;
+  function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString("id-ID", { hour12: false }).replace(/\./g, ":"); }
+  function addLog(ev, animate = true) {
+    const log = $("log");
+    const empty = log.querySelector(".empty");
+    if (empty) empty.remove();
+    const el = document.createElement("div");
+    if (ev.type === "heard") {
+      el.className = "msg heard";
+      const said = document.createElement("div");
+      said.className = "said";
+      said.textContent = `terdengar: "${ev.text}" — diabaikan`;
+      el.appendChild(said);
+      // one click teaches Digidaw that this is how Google hears its name
+      const words = ev.text.trim().split(/\s+/);
+      const options = [...new Set([words.length <= 2 ? words.join(" ") : null, words[0], words[words.length - 1]]
+        .filter((w) => w && w.length >= 3 && w.length <= 20).map((w) => w.toLowerCase()))];
+      options.forEach((alias) => {
+        const b = document.createElement("button");
+        b.className = "alias-btn";
+        b.textContent = `+ "${alias}" = Digidaw`;
+        b.title = `Anggap "${alias}" sebagai panggilan Digidaw (di awal/akhir kalimat)`;
+        b.addEventListener("click", async () => {
+          const r = await fetch("/api/wake-alias", { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify({ alias }) });
+          if (r.ok) { b.textContent = `✓ "${alias}" ditambahkan`; b.disabled = true; }
+        });
+        el.appendChild(b);
+      });
+    } else if (ev.type === "tool") {
+      el.className = "msg tool";
+      const args = Object.entries(ev.args || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+      el.textContent = `⚙ ${ev.name}(${args})`;
+      el.title = el.textContent;
+    } else {
+      el.className = `msg ${ev.type}`;
+      const label = { user: ev.source === "voice" ? "ANDA · SUARA" : ev.source === "dictation" ? "DIKTE" : "ANDA", digidaw: "DIGIDAW", alert: "PERINGATAN" }[ev.type] || ev.type.toUpperCase();
+      const head = document.createElement("div");
+      head.className = "msg-head";
+      head.textContent = `${label} · ${fmtTime(ev.ts)}`;
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.textContent = ev.text;
+      el.append(head, body);
+    }
+    if (!animate) el.style.animation = "none";
+    log.appendChild(el);
+    while (log.children.length > 120) log.firstChild.remove();
+    log.scrollTop = log.scrollHeight;
+    logCount++;
+    $("logCount").textContent = logCount;
+  }
+
+  // ── subtitles ──
+  let typeTimer = null;
+  function typeDigidaw(text) {
+    const el = $("digidawLine");
+    clearInterval(typeTimer);
+    let i = 0;
+    el.textContent = "";
+    const span = document.createElement("span");
+    const caret = document.createElement("span");
+    caret.className = "caret";
+    el.append(span, caret);
+    typeTimer = setInterval(() => {
+      i += 2;
+      span.textContent = text.slice(0, i);
+      if (i >= text.length) { clearInterval(typeTimer); setTimeout(() => caret.remove(), 1500); }
+    }, 22);
+  }
+
+  // ── toasts ──
+  function toast(text, level = "warning") {
+    const t = document.createElement("div");
+    t.className = `toast ${level}`;
+    t.textContent = text;
+    $("toasts").appendChild(t);
+    setTimeout(() => t.remove(), 7000);
+  }
+
+  // ── gauges ──
+  const CIRC = 2 * Math.PI * 40;
+  document.querySelectorAll(".gauge .bar").forEach((b) => { b.style.strokeDasharray = CIRC; b.style.strokeDashoffset = CIRC; });
+  function setGauge(id, value, { warn = 75, crit = 90, invert = false } = {}) {
+    const g = $(id);
+    const v = value == null ? 0 : Math.max(0, Math.min(100, value));
+    g.querySelector(".bar").style.strokeDashoffset = CIRC * (1 - v / 100);
+    g.querySelector(".num").textContent = value == null ? "—" : Math.round(v);
+    const level = invert ? (v <= crit ? "crit" : v <= warn ? "warn" : "") : (v >= crit ? "crit" : v >= warn ? "warn" : "");
+    g.classList.toggle("warn", level === "warn");
+    g.classList.toggle("crit", level === "crit");
+  }
+  function fmtRate(kb) { return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB/s` : `${Math.round(kb)} KB/s`; }
+  function fmtUptime(s) { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return `UPTIME ${d ? d + "H " : ""}${h}J ${m}M`; }
+
+  const net = { down: Array(60).fill(0), up: Array(60).fill(0) };
+  function updateStats(s) {
+    if (!s || s.cpu == null) return;
+    setGauge("g-cpu", s.cpu);
+    $("cpuSub").textContent = `${Math.round(s.cpu)}% beban`;
+    setGauge("g-ram", s.ram, { warn: 80, crit: 92 });
+    $("ramSub").textContent = `${s.ram_used}/${s.ram_total} GB`;
+    setGauge("g-disk", s.disk, { warn: 85, crit: 95 });
+    $("diskSub").textContent = `${s.disk_free} GB bebas`;
+    if (s.battery == null) { setGauge("g-bat", 100); $("g-bat").querySelector(".num").textContent = "AC"; $("batSub").textContent = "daya listrik"; }
+    else { setGauge("g-bat", s.battery, { warn: s.plugged ? -1 : 30, crit: s.plugged ? -1 : 15, invert: true }); $("batSub").textContent = s.plugged ? "⚡ mengisi" : "baterai"; }
+    $("netDown").textContent = fmtRate(s.down);
+    $("netUp").textContent = fmtRate(s.up);
+    $("uptime").textContent = fmtUptime(s.uptime);
+    $("procCount").textContent = `${s.processes} PROSES`;
+    net.down.push(s.down); net.up.push(s.up);
+    if (net.down.length > 60) { net.down.shift(); net.up.shift(); }
+    drawNet();
+  }
+  function drawNet() {
+    const c = $("netChart"), dpr = window.devicePixelRatio || 1;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const max = Math.max(50, ...net.down, ...net.up);
+    [["down", "rgba(63,216,255,0.9)", "rgba(63,216,255,0.12)"], ["up", "rgba(255,181,71,0.85)", null]].forEach(([k, stroke, fill]) => {
+      const data = net[k];
+      if (data.length < 2) return;
+      ctx.beginPath();
+      data.forEach((v, i) => { const x = (i / 59) * w, y = h - 2 - (v / max) * (h - 6); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke();
+      if (fill) { ctx.lineTo(((data.length - 1) / 59) * w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
+    });
+  }
+
+  // ── weather ──
+  function updateWeather(w) {
+    if (!w || !w.temp) return;
+    $("wTemp").textContent = w.temp.replace("C", "");
+    $("wCond").textContent = w.condition;
+    $("weatherPlace").textContent = (w.place || "").toUpperCase();
+    $("wHum").textContent = w.humidity;
+    $("wWind").textContent = w.wind;
+  }
+
+  // ── media ──
+  const media = { playing: false, position: 0, duration: 0, at: 0 };
+  function fmtDur(s) { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+  function updateMedia(m) {
+    const has = m && m.title;
+    const eq = $("npEq");
+    $("npTitle").textContent = "";
+    $("npTitle").append(eq, document.createTextNode(has ? m.title : "Tidak ada media"));
+    eq.classList.toggle("off", !(has && m.playing));
+    $("npSub").textContent = has ? [m.artist, m.app].filter(Boolean).join(" · ") : 'Ucapkan "Digidaw, putar lagu …"';
+    $("npApp").textContent = has ? (m.playing ? "▶ DIPUTAR" : "❚❚ JEDA") : "—";
+    $("npToggle").innerHTML = has && m.playing
+      ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>';
+    Object.assign(media, { playing: !!(has && m.playing), position: (m && m.position) || 0, duration: (m && m.duration) || 0, at: Date.now() });
+    advanceMedia();
+  }
+  function advanceMedia() {
+    const pos = media.position + (media.playing ? (Date.now() - media.at) / 1000 : 0);
+    const valid = media.duration > 0;
+    $("npBar").style.width = valid ? `${Math.min(100, (pos / media.duration) * 100)}%` : "0";
+    $("npPos").textContent = valid ? fmtDur(Math.min(pos, media.duration)) : "--:--";
+    $("npDur").textContent = valid ? fmtDur(media.duration) : "--:--";
+  }
+
+  // ── timers ──
+  let timers = [];
+  const TIMER_ICONS = {
+    timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/>',
+    alarm: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2 2M4 4l3 2.5M20 4l-3 2.5"/>',
+    reminder: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+    action: '<path d="M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0"/>',
+  };
+  const KIND_NAMES = { timer: "TIMER", alarm: "ALARM", reminder: "PENGINGAT", action: "OTOMATIS" };
+  function renderTimers() {
+    const box = $("timers");
+    $("timerPanel").hidden = !timers.length;
+    if (!timers.length) { if (!box.querySelector(".empty")) box.innerHTML = '<div class="empty">Tidak ada timer aktif.</div>'; return; }
+    box.textContent = "";
+    timers.forEach((t) => {
+      const due = new Date(t.due), left = Math.max(0, (due - Date.now()) / 1000);
+      const h = Math.floor(left / 3600), m = Math.floor(left % 3600 / 60), s = Math.floor(left % 60);
+      const kind = t.kind || "timer";
+      const row = document.createElement("div");
+      row.className = "timer-row";
+      row.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${TIMER_ICONS[kind] || TIMER_ICONS.timer}</svg>
+        <div style="min-width:0"><div class="t-label"></div><div class="t-sub"></div></div><b></b><button class="x" title="Batalkan" aria-label="Batalkan">✕</button>`;
+      row.querySelector(".t-label").textContent = t.label || t.message;
+      const clock = due.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":");
+      const sameDay = due.toDateString() === new Date().toDateString();
+      row.querySelector(".t-sub").textContent = `${KIND_NAMES[kind] || ""}${kind !== "timer" ? ` · ${sameDay ? "" : due.toLocaleDateString("id-ID", { weekday: "short", day: "numeric" }) + " "}${clock}` : ""}${t.repeat ? " · " + t.repeat : ""}`;
+      row.querySelector("b").textContent = left < 86400 ? `${h ? h + ":" : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${Math.round(left / 86400)} hr`;
+      row.querySelector(".x").addEventListener("click", () => sendAction(`cancel_timer:${t.id}`));
+      box.appendChild(row);
+    });
+  }
+  function renderAlarm(ev) {
+    const banner = $("alarmBanner");
+    if (!ev.ringing) { banner.hidden = true; return; }
+    $("alarmKind").textContent = KIND_NAMES[ev.kind] || "ALARM";
+    $("alarmTime").textContent = (ev.time || new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })).replace(".", ":");
+    $("alarmLabel").textContent = ev.label || (ev.kind === "timer" ? "Waktu habis" : "");
+    banner.hidden = false;
+    $("alarmStop").focus();
+  }
+  $("alarmStop").addEventListener("click", () => sendAction("alarm_stop"));
+  $("alarmSnooze").addEventListener("click", () => sendAction("alarm_snooze"));
+
+  // ── events ──
+  function handle(ev) {
+    switch (ev.type) {
+      case "hello":
+        voiceEnabled = !!ev.state.voice_enabled;
+        userTitle = ev.user_title || "Sir";
+        $("modeText").textContent = voiceEnabled ? "SUARA + TEKS" : "TEKS";
+        $("hotkey").textContent = ev.hotkey || "CTRL+ALT+D";
+        $("micBtn").disabled = !voiceEnabled;
+        $("dictBadge").classList.toggle("show", !!ev.state.dictation);
+        $("log").innerHTML = '<div class="empty">Belum ada percakapan.</div>';
+        logCount = 0;
+        (ev.history || []).forEach((h) => addLog(h, false));
+        const lastJ = [...(ev.history || [])].reverse().find((h) => h.type === "digidaw");
+        if (lastJ) $("digidawLine").textContent = lastJ.text;
+        const lastU = [...(ev.history || [])].reverse().find((h) => h.type === "user");
+        if (lastU) $("youLine").textContent = `› ${lastU.text}`;
+        escToTalk = ev.esc_to_talk || "off";
+        setStatus(ev.state.status);
+        updateStats(ev.stats);
+        updateMedia(ev.media);
+        updateWeather(ev.weather);
+        timers = ev.timers || [];
+        renderBuild(ev.build);
+        renderPaused(!!ev.state.paused);
+        renderAi(ev.ai);
+        renderAlarm(ev.state.alarm || { ringing: false });
+        renderWorkspace(ev.workspace);
+        break;
+      case "status": setStatus(ev.status); break;
+      case "paused": renderPaused(ev.paused); if (!ev.paused && document.body.classList.contains("state-paused")) setStatus("idle"); break;
+      case "user": addLog(ev); $("youLine").textContent = `› ${ev.text}`; break;
+      case "digidaw": addLog(ev); typeDigidaw(ev.text); break;
+      case "tool": addLog(ev); break;
+      case "alert": addLog(ev); toast(ev.text, ev.level); typeDigidaw(ev.text); break;
+      case "stats": updateStats(ev); break;
+      case "media": updateMedia(ev); break;
+      case "weather": updateWeather(ev); break;
+      case "timers": timers = ev.timers || []; renderTimers(); break;
+      case "alarm": renderAlarm(ev); break;
+      case "dictation": $("dictBadge").classList.toggle("show", !!ev.active); break;
+      case "listening": startCountdown(ev.seconds, ev.kind || "wake"); break;
+      case "heard": addLog({ type: "heard", text: ev.text, ts: ev.ts }); break;
+      case "brief":
+        $("briefBadge").classList.toggle("show", !!ev.active);
+        if (ev.active) {
+          $("digidawLine").textContent = ev.text ? `📝 ${ev.text.slice(-220)}` : "📝 Ceritakan project Anda…";
+          $("stateHint").textContent = 'Ceritakan project Anda — ucapkan "selesai" kalau sudah';
+        }
+        break;
+      case "build": renderBuild(ev); updateTabCounts(); if (ACTIVE_BUILD.includes(ev.status)) autoTab("project"); if (["running", "done", "failed", "cancelled"].includes(ev.status)) refreshWorkspaceSoon(); break;
+      case "generate": genJobs[ev.id] = ev; autoTab("generate"); renderGenerate({ jobs: [], results: (workspace.generate || {}).results || [] }); if (ev.status !== "working") refreshWorkspaceSoon(); break;
+      case "toast": toast(ev.text, ev.level || "info"); break;
+      case "security": if (ev.status === "done" || ev.status === "running") refreshWorkspaceSoon();
+        if (ev.status === "running" && ev.step === "Memulai analisis…") toast("Analisis keamanan berjalan…", "info");
+        else if (ev.status === "done") toast(`Analisis keamanan selesai — skor ${ev.score}/100 (${ev.high} tinggi, ${ev.medium} sedang)`,
+                                             ev.high ? "danger" : ev.medium ? "warning" : "info");
+        break;
+      case "ai": renderAi(ev); break;
+      case "settings": refreshWorkspaceSoon(); if (!cp.open) toast("Pengaturan Digidaw diperbarui.", "info"); break;
+      case "shutdown":
+        $("curtainTitle").textContent = ev.restart ? "MEMULAI ULANG…" : "DIGIDAW DIMATIKAN";
+        $("curtainText").textContent = ev.restart ? "HUD akan tersambung kembali otomatis." : "Jalankan lagi dari shortcut Digidaw di Desktop.";
+        $("curtain").classList.add("open");
+        break;
+    }
+  }
+
+  function connect() {
+    const es = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
+    es.onopen = () => { $("connDot").classList.add("on"); $("connText").textContent = "ONLINE"; $("curtain").classList.remove("open"); };
+    es.onerror = () => {
+      $("connDot").classList.remove("on"); $("connText").textContent = "OFFLINE"; setStatus("idle");
+      // after a restart Digidaw uses a new security token: reload the page to pick it up
+      setTimeout(async () => {
+        try {
+          const r = await fetch(`/api/state?token=${encodeURIComponent(TOKEN)}`);
+          if (r.status === 401) location.reload();
+        } catch (e) { /* still offline: EventSource keeps retrying */ }
+      }, 2000);
+    };
+    es.onmessage = (e) => { try { handle(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  }
+
+  // ── arc reactor ──
+  const reactor = {
+    canvas: $("reactor"), state: "idle", t: 0, level: 0, ripples: [], last: performance.now(),
+    ripple() { this.ripples.push({ r: 0.55, a: 0.8 }); },
+  };
+  const COLORS = { idle: [63, 216, 255], listening: [120, 232, 255], thinking: [255, 181, 71], speaking: [63, 216, 255], paused: [125, 139, 153] };
+  const SPEED = { idle: 0.25, listening: 0.9, thinking: 2.2, speaking: 0.6, paused: 0.08 };
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  let col = [...COLORS.idle];
+
+  function drawReactor(now) {
+    const c = reactor.canvas, dpr = window.devicePixelRatio || 1;
+    const size = c.clientWidth;
+    if (!size) return requestAnimationFrame(drawReactor);
+    if (c.width !== Math.round(size * dpr)) { c.width = c.height = Math.round(size * dpr); }
+    const ctx = c.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const dt = Math.min(0.05, (now - reactor.last) / 1000);
+    reactor.last = now;
+    const st = reactor.state;
+    reactor.t += dt * SPEED[st];
+    const target = COLORS[st];
+    col = col.map((v, i) => v + (target[i] - v) * 0.08);
+
+    let lvl = 0.05;
+    if (st === "speaking") lvl = 0.45 + 0.4 * Math.abs(Math.sin(now / 95) * Math.sin(now / 247)) + Math.random() * 0.2;
+    else if (st === "listening") lvl = 0.3 + 0.12 * Math.sin(now / 260);
+    else if (st === "thinking") lvl = 0.25;
+    reactor.level += (lvl - reactor.level) * 0.18;
+    const L = reactor.level;
+
+    const cx = size / 2, cy = size / 2, R = size / 2 * 0.94;
+    ctx.clearRect(0, 0, size, size);
+
+    // glow
+    const glow = ctx.createRadialGradient(cx, cy, R * 0.05, cx, cy, R);
+    glow.addColorStop(0, rgba(col, 0.28 + L * 0.3));
+    glow.addColorStop(0.45, rgba(col, 0.07 + L * 0.06));
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // outer tick ring
+    ctx.save();
+    ctx.rotate(reactor.t * 0.15);
+    for (let i = 0; i < 120; i++) {
+      const a = (i / 120) * Math.PI * 2, long = i % 10 === 0;
+      const r1 = R * 0.985, r2 = R * (long ? 0.92 : 0.95);
+      ctx.strokeStyle = rgba(col, long ? 0.85 : 0.3);
+      ctx.lineWidth = long ? 2 : 1;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); ctx.stroke();
+    }
+    ctx.restore();
+
+    // segmented arcs (counter-rotating)
+    ctx.save();
+    ctx.rotate(-reactor.t * 0.45);
+    ctx.lineWidth = R * 0.03;
+    ctx.strokeStyle = rgba(col, 0.75);
+    ctx.shadowColor = rgba(col, 0.9); ctx.shadowBlur = 12;
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.845, a0, a0 + (Math.PI * 2 / 6) * 0.62); ctx.stroke();
+    }
+    ctx.restore();
+
+    // audio bars
+    const bars = 72;
+    for (let i = 0; i < bars; i++) {
+      const a = (i / bars) * Math.PI * 2 + reactor.t * 0.1;
+      const n = Math.abs(Math.sin(i * 1.7 + now / 120) * Math.cos(i * 0.6 - now / 190));
+      const len = R * (0.015 + L * 0.11 * n);
+      const r1 = R * 0.72;
+      ctx.strokeStyle = rgba(col, 0.25 + L * 0.6);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * (r1 + len), Math.sin(a) * (r1 + len)); ctx.stroke();
+    }
+
+    // dashed ring
+    ctx.save();
+    ctx.rotate(reactor.t * 0.8);
+    ctx.setLineDash([R * 0.018, R * 0.03]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = rgba(col, 0.55);
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.68, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+
+    // thinking orbiters
+    if (st === "thinking") {
+      for (let i = 0; i < 3; i++) {
+        const a = reactor.t * 2.4 + i * 0.5;
+        ctx.fillStyle = rgba(col, 1 - i * 0.28);
+        ctx.shadowColor = rgba(col, 1); ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.6, Math.sin(a) * R * 0.6, R * 0.022 - i * 1.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    // arc reactor coils
+    ctx.save();
+    ctx.rotate(reactor.t * 0.12);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2, span = (Math.PI * 2 / 10) * 0.72;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.53, a, a + span);
+      ctx.arc(0, 0, R * 0.39, a + span, a, true);
+      ctx.closePath();
+      ctx.fillStyle = rgba(col, 0.16 + L * 0.35);
+      ctx.fill();
+      ctx.strokeStyle = rgba(col, 0.85);
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // inner ring + core
+    ctx.strokeStyle = rgba(col, 0.9);
+    ctx.lineWidth = 2;
+    ctx.shadowColor = rgba(col, 1); ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.33, 0, Math.PI * 2); ctx.stroke();
+    const coreR = R * (0.24 + L * 0.05);
+    const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+    core.addColorStop(0, "rgba(255,255,255,1)");
+    core.addColorStop(0.35, rgba(col.map((v) => Math.min(255, v + 90)), 0.95));
+    core.addColorStop(0.75, rgba(col, 0.45));
+    core.addColorStop(1, rgba(col, 0));
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(0, 0, coreR, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // ripples (listening)
+    reactor.ripples = reactor.ripples.filter((rp) => rp.a > 0.02);
+    reactor.ripples.forEach((rp) => {
+      rp.r += dt * 0.35; rp.a *= 0.965;
+      ctx.strokeStyle = rgba(col, rp.a);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, R * rp.r, 0, Math.PI * 2); ctx.stroke();
+    });
+    if (st === "listening" && Math.random() < 0.02) reactor.ripple();
+
+    ctx.restore();
+    requestAnimationFrame(drawReactor);
+  }
+  // ── project builder ──
+  const BUILD_LABELS = { queued: "ANTRE", building: "SEDANG DIKERJAKAN", starting: "MENJALANKAN & MENGECEK",
+                         running: "BERJALAN", done: "SELESAI DIBUAT", failed: "GAGAL", cancelled: "DIBATALKAN" };
+  const ACTIVE_BUILD = ["building", "starting"];
+  let builds = {};
+  function renderBuild(b) {
+    if (b && Array.isArray(b.jobs)) {           // full snapshot
+      builds = {};
+      b.jobs.forEach((j) => { builds[j.id] = j; });
+    } else if (b && b.id) {                     // one job changed
+      const old = builds[b.id];
+      if (old && old.status !== b.status && ["running", "failed", "done"].includes(b.status))
+        toast(b.status === "failed" ? `Project ${b.name} gagal: ${b.error}`
+              : `Project ${b.name} ${b.status === "running" ? "sudah berjalan" : "selesai dibuat"}`, b.status === "failed" ? "warning" : "info");
+      builds[b.id] = b;
+    }
+    drawBuilds();
+  }
+  function jobList() {
+    const order = { building: 0, starting: 0, queued: 1 };
+    return Object.values(builds).sort((a, b) => ((order[a.status] ?? 2) - (order[b.status] ?? 2)) || (b.queued_at - a.queued_at)).slice(0, 4);
+  }
+  function drawBuilds() {
+    const jobs = jobList().filter((j) => [...ACTIVE_BUILD, "queued"].includes(j.status) || Date.now() / 1000 - (j.started || 0) < 1800), box = $("buildJobs");
+    box.hidden = !jobs.length;
+    if (!jobs.length) { box.replaceChildren(); $("buildCount").textContent = `${(workspace.projects || []).length ? workspace.project_count : 0} PROJECT`; return; }
+    const busy = jobs.filter((j) => ACTIVE_BUILD.includes(j.status)).length, queued = jobs.filter((j) => j.status === "queued").length;
+    $("buildCount").textContent = busy || queued ? `${busy} AKTIF${queued ? ` · ${queued} ANTRE` : ""}` : `${jobs.length} PROJECT`;
+    box.replaceChildren(...jobs.map((j) => {
+      const el = document.createElement("div");
+      el.className = "job";
+      el.dataset.id = j.id;
+      const files = j.files ? ` · ${j.files} file` : "";
+      const step = j.status === "failed" ? j.error : j.status === "queued" ? `Menunggu giliran (antrean ${j.position || "?"})`
+        : `${j.mode === "change" ? "Perubahan — " : ""}${j.step || ""}${files}`;
+      el.innerHTML = `<div class="job-head"><div class="np-title"></div><span class="tag"></span></div>
+        <div class="build-status ${j.status}"></div><div class="build-step"></div>
+        ${ACTIVE_BUILD.includes(j.status) ? '<div class="build-bar"><div></div></div>' : ""}
+        ${j.preview ? `<img class="job-preview" alt="" src="/api/project-preview?id=${encodeURIComponent(j.id)}&t=${j.preview}&token=${encodeURIComponent(TOKEN)}">` : ""}
+        <div class="build-actions"></div>`;
+      el.querySelector(".np-title").textContent = j.name;
+      el.querySelector(".tag").textContent = j.agent === "claude" ? "CLAUDE CODE" : "ANTIGRAVITY";
+      el.querySelector(".build-step").textContent = step;
+      const actions = el.querySelector(".build-actions");
+      const btn = (label, kind, fn) => { const b = document.createElement("button"); b.className = `btn ${kind}`; b.textContent = label; b.addEventListener("click", fn); actions.appendChild(b); };
+      if (!["queued", "cancelled"].includes(j.status)) btn("BUKA", "", () => sendCommand(`buka project ${j.name}`));
+      if (j.url && j.status === "running") btn("STOP", "", () => sendCommand(`hentikan project ${j.name}`));
+      if ([...ACTIVE_BUILD, "queued"].includes(j.status))
+        btn("BATALKAN", "danger", () => { if (confirm(`Batalkan ${j.name}?`)) sendCommand(`batalkan pembuatan project ${j.name}`); });
+      const img = el.querySelector(".job-preview");
+      if (img) {
+        img.addEventListener("error", () => img.remove());
+        img.addEventListener("click", () => {
+          const z = document.createElement("div");
+          z.className = "preview-zoom";
+          z.innerHTML = `<img alt="" src="${img.src}">`;
+          z.addEventListener("click", () => z.remove());
+          document.body.appendChild(z);
+        });
+      }
+      return el;
+    }));
+    renderBuildTime();
+  }
+  function renderBuildTime() {
+    document.querySelectorAll("#buildJobs .job").forEach((el) => {
+      const j = builds[el.dataset.id];
+      if (!j) return;
+      const secs = Math.max(0, Math.floor(Date.now() / 1000 - j.started));
+      const active = ACTIVE_BUILD.includes(j.status);
+      el.querySelector(".build-status").textContent = `${BUILD_LABELS[j.status] || j.status}${active ? ` · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : ""}${j.status === "running" && j.url ? ` · ${j.url.replace(/^https?:\/\//, "")}` : ""}`;
+    });
+  }
+
+  // ── workspace tabs (Project / Generate) ──
+  let wsTab = "project", wsTabPinned = 0;
+  function setTab(name, byUser = false) {
+    wsTab = name;
+    if (byUser) wsTabPinned = Date.now();
+    $("buildPanel").hidden = name !== "project";
+    $("genPanel").hidden = name !== "generate";
+    ["project", "generate"].forEach((t) => {
+      const b = $(t === "project" ? "tabProject" : "tabGenerate");
+      b.classList.toggle("on", t === name); b.setAttribute("aria-selected", t === name);
+    });
+    updateTabCounts();
+  }
+  function autoTab(name) { if (Date.now() - wsTabPinned > 60000) setTab(name); }
+  function updateTabCounts() {
+    const busyBuilds = Object.values(builds).filter((j) => [...ACTIVE_BUILD, "queued"].includes(j.status)).length;
+    const busyGen = Object.values(genJobs || {}).filter((j) => j.status === "working").length;
+    const pn = $("tabProjectN"), gn = $("tabGenerateN");
+    pn.textContent = busyBuilds ? `${busyBuilds}` : `${workspace.project_count || 0}`;
+    pn.classList.toggle("live", !!busyBuilds);
+    const gc = (workspace.generate && workspace.generate.counts) || {};
+    gn.textContent = busyGen ? `${busyGen}` : `${(gc.image || 0) + (gc.file || 0)}`;
+    gn.classList.toggle("live", !!busyGen);
+    $("wsTag").textContent = wsTab === "project" ? (busyBuilds ? "SEDANG DIKERJAKAN" : "TERBARU") : (busyGen ? "SEDANG DIBUAT" : "HASIL TERBARU");
+  }
+  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab, true)));
+
+  // ── workspace: lokasi, keamanan, project list, generate ──
+  let workspace = {};
+  const ICONS = {
+    projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 13l2 2-2 2M13 17h3"/>',
+    generate: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+    notes: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+    screenshots: '<rect x="3" y="6" width="18" height="13" rx="2"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8 6l1.5-2h5L16 6"/>',
+    focus: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  };
+  const LOC_LABELS = { projects: "Project Builder", generate: "Hasil Generate", notes: "Catatan", screenshots: "Screenshot", focus: "Project Fokus" };
+  const when = (ts) => {
+    if (!ts) return "belum pernah";
+    const d = new Date(ts * 1000), start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+    const days = Math.round((start(new Date()) - start(d)) / 86400000);
+    return days <= 0 ? `hari ini ${d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":")}` : days === 1 ? "kemarin" : `${days} hari lalu`;
+  };
+  function renderWorkspace(w) {
+    if (!w) return;
+    workspace = w;
+    // lokasi
+    const loc = w.locations || {}, gc = (w.generate && w.generate.counts) || {};
+    const counts = { projects: `${w.project_count || 0} project`, generate: `${gc.image || 0} gbr · ${gc.file || 0} file` };
+    $("locList").replaceChildren(...Object.keys(LOC_LABELS).filter((k) => loc[k]).map((k) => {
+      const b = document.createElement("button");
+      b.className = "loc-row"; b.type = "button"; b.title = `Buka ${loc[k]}`;
+      b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${ICONS[k]}</svg><span class="loc-name"></span><span class="loc-count"></span><span class="loc-path"></span>`;
+      b.querySelector(".loc-name").textContent = LOC_LABELS[k];
+      b.querySelector(".loc-count").textContent = counts[k] || "";
+      b.querySelector(".loc-path").textContent = `\u200e${loc[k]}`;
+      b.addEventListener("click", () => sendAction(`open_location:${k}`));
+      return b;
+    }));
+    // keamanan
+    const sec = w.security || {}, score = sec.score;
+    const circ = 2 * Math.PI * 27, bar = $("secBar");
+    bar.style.strokeDasharray = circ;
+    bar.style.strokeDashoffset = circ * (1 - (score || 0) / 100);
+    bar.style.stroke = score == null ? "var(--muted)" : score >= 80 ? "var(--green)" : score >= 55 ? "var(--amber)" : "var(--red)";
+    $("secScore").textContent = score == null ? "--" : score;
+    $("secTag").textContent = sec.running ? "MEMINDAI…" : score == null ? "BELUM DISCAN" : `${sec.issues || 0} CATATAN`;
+    $("secLast").textContent = when(sec.last_scan);
+    $("secNext").textContent = sec.auto_days ? (sec.next_scan ? `tiap ${sec.auto_days} hari · berikutnya ${new Date(sec.next_scan * 1000).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}` : `tiap ${sec.auto_days} hari`) : "mati";
+    $("secGuard").textContent = sec.download_guard ? "aktif" : "mati";
+    $("secReport").disabled = !sec.has_report;
+    // project list
+    const list = w.projects || [];
+    $("projRecentTitle").hidden = !list.length || $("buildJobs").hidden;
+    $("projList").replaceChildren(...(list.length ? list.slice(0, 5).map((pr) => {
+      const row = document.createElement("div");
+      row.className = "proj-row";
+      row.innerHTML = `<span class="proj-dot ${pr.running ? "on" : ""}"></span><div style="min-width:0"><div class="proj-name"></div><div class="proj-sub"></div></div><div class="build-actions"></div>`;
+      row.querySelector(".proj-name").textContent = pr.name;
+      row.querySelector(".proj-sub").textContent = `${pr.running ? "berjalan" : when(pr.updated)}${pr.versions ? ` · ${pr.versions} versi` : ""}${pr.running && pr.url ? ` · ${pr.url.replace(/^https?:\/\//, "")}` : ""}`;
+      const acts = row.querySelector(".build-actions");
+      const add = (label, cmd, kind = "") => { const b = document.createElement("button"); b.className = `btn ${kind}`; b.textContent = label; b.addEventListener("click", () => sendCommand(cmd)); acts.appendChild(b); };
+      add(pr.running ? "LIHAT" : "BUKA", `buka project ${pr.name}`);
+      if (pr.running) add("STOP", `hentikan project ${pr.name}`);
+      else if (pr.versions > 1) add("VERSI", `riwayat versi project ${pr.name}`);
+      return row;
+    }) : [Object.assign(document.createElement("div"), { className: "empty", textContent: 'Belum ada project. Ucapkan "Digidaw, buat project …"' })]));
+    if ($("buildJobs").hidden) $("buildCount").textContent = `${w.project_count || 0} PROJECT`;
+    renderGenerate(w.generate);
+    updateTabCounts();
+  }
+  let genJobs = {};
+  function renderGenerate(g) {
+    if (!g) return;
+    (g.jobs || []).forEach((j) => { genJobs[j.id] = j; });
+    const active = Object.values(genJobs).filter((j) => j.status === "working");
+    $("genJobs").replaceChildren(...active.map((j) => {
+      const el = document.createElement("div");
+      el.className = "gen-job";
+      const secs = Math.max(0, Math.floor(Date.now() / 1000 - j.started));
+      el.innerHTML = `<div class="proj-name"></div><div class="build-status building"></div><div class="build-step"></div><div class="build-bar"><div></div></div>`;
+      el.querySelector(".proj-name").textContent = `${j.kind === "image" ? "Gambar" : "File"}: ${j.request}`;
+      el.querySelector(".build-status").textContent = `SEDANG DIBUAT · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+      el.querySelector(".build-step").textContent = j.step || "";
+      return el;
+    }));
+    const results = g.results || [];
+    $("genEmpty").hidden = !!results.length || !!active.length;
+    $("genTag").textContent = active.length ? `${active.length} BERJALAN` : `${results.length ? results.length + " TERBARU" : "—"}`;
+    updateTabCounts();
+    $("gallery").replaceChildren(...results.slice(0, 8).map((r) => {
+      const b = document.createElement("button");
+      b.className = "gal-item"; b.type = "button";
+      b.title = `${r.name}\n${r.request || ""}\nKlik: buka · Klik kanan: tampilkan di folder`;
+      if (r.is_image) {
+        const img = document.createElement("img");
+        img.alt = r.name; img.loading = "lazy";
+        img.src = `/api/generated-file?id=${encodeURIComponent(r.id)}&token=${encodeURIComponent(TOKEN)}`;
+        b.appendChild(img);
+      } else {
+        const ext = (r.name.split(".").pop() || "FILE").toUpperCase();
+        b.innerHTML = `<div class="gal-file"><div>${ext.replace(/[^A-Z0-9]/g, "").slice(0, 5)}<small></small></div></div>`;
+        b.querySelector("small").textContent = r.name;
+      }
+      b.addEventListener("click", () => sendAction(`open_result:${r.id}`));
+      b.addEventListener("contextmenu", (e) => { e.preventDefault(); sendAction(`reveal_result:${r.id}`); });
+      return b;
+    }));
+  }
+  async function loadWorkspace() {
+    try {
+      const r = await fetch(`/api/workspace?token=${encodeURIComponent(TOKEN)}`);
+      if (r.ok) renderWorkspace(await r.json());
+    } catch (e) { /* offline: keep what we have */ }
+  }
+  let wsTimer = null;
+  function refreshWorkspaceSoon() { clearTimeout(wsTimer); wsTimer = setTimeout(loadWorkspace, 600); }
+  setInterval(loadWorkspace, 30000);
+  setInterval(() => { if (Object.values(genJobs).some((j) => j.status === "working")) renderGenerate({ jobs: [], results: (workspace.generate || {}).results || [] }); }, 1000);
+  document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => sendAction(`open_location:${b.dataset.open}`)));
+  document.querySelectorAll("[data-fill]").forEach((b) => b.addEventListener("click", () => {
+    const input = $("cmdInput"); input.value = b.dataset.fill; input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  }));
+
+  // ── AI status (honest cause, not always "quota") ──
+  let ai = { state: "unknown" };
+  const AI_TEXT = { checking: "MEMERIKSA…", busy: "SERVER SIBUK", network: "OFFLINE", key: "API KEY DITOLAK",
+                    nokey: "BELUM DIATUR", request: "ERROR", internal: "ERROR", unknown: "—" };
+  const AI_HELP = {
+    ok: "AI berfungsi normal.", checking: "Sedang memeriksa koneksi ke AI…",
+    quota: "Batas pemakaian AI gratis sedang penuh; terbuka lagi otomatis.", busy: "Server AI Google sedang sibuk.",
+    network: "Tidak ada koneksi internet ke server AI.", key: "Google menolak kunci API Gemini — periksa di Control Panel → AI.",
+    nokey: "Kunci API Gemini belum diisi (Control Panel → AI).", request: "Google menolak permintaan dari Digidaw.",
+    internal: "Ada error di dalam Digidaw saat menyiapkan permintaan AI.", unknown: "Belum ada permintaan AI." };
+  const AI_BAD = ["network", "key", "nokey", "request", "internal"];
+  function renderAi(h) {
+    if (!h) return;
+    const state = h.state || (h.model ? "ok" : "unknown");
+    const prev = ai.state;
+    ai = { ...ai, ...h, state };
+    if (prev && prev !== state && AI_BAD.includes(state) && prev !== "unknown")
+      toast(`AI: ${AI_HELP[state]}${h.detail && state !== "nokey" ? " (" + h.detail + ")" : ""}`, "warning");
+    drawAi();
+  }
+  function drawAi() {
+    const s = ai.state, text = $("aiText"), dot = $("aiDot"), ind = $("aiInd");
+    const left = ai.retry_at ? Math.max(0, Math.ceil(ai.retry_at - Date.now() / 1000)) : 0;
+    let label;
+    if (s === "ok") label = ai.model ? `${ai.model.replace("gemini-", "")} ${ai.used}/${ai.limit}` : "SIAP";
+    else if (s === "quota") label = ai.per_day ? "KUOTA HARIAN HABIS" : left > 0 ? `KUOTA PENUH · ${left} dtk` : "SIAP";
+    else label = AI_TEXT[s] || s.toUpperCase();
+    text.textContent = label;
+    const ready = s === "ok" || (s === "quota" && !ai.per_day && left === 0);
+    dot.className = `dot ${ready ? "on" : s === "checking" ? "check" : AI_BAD.includes(s) ? "" : s === "unknown" ? "check" : "warn"}`;
+    ind.classList.toggle("bad", AI_BAD.includes(s));
+    ind.classList.toggle("warn", (s === "quota" && !ready) || s === "busy");
+    ind.title = `${AI_HELP[ready ? "ok" : s] || ""}${ai.detail ? "\n" + ai.detail : ""}\nKlik untuk memeriksa ulang.`;
+  }
+  $("aiInd").addEventListener("click", () => { renderAi({ state: "checking", detail: "" }); sendAction("ai_check"); });
+
+  // ── conversation countdown ──
+  let listenKind = "";
+  function startCountdown(seconds, kind) {
+    listenKind = kind;
+    const bar = $("listenBar"), fill = bar.firstElementChild;
+    bar.classList.add("on");
+    fill.style.transition = "none";
+    fill.style.transform = "scaleX(1)";
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.transition = `transform ${seconds}s linear`;
+      fill.style.transform = "scaleX(0)";
+    }));
+    if (kind === "conversation") $("stateHint").textContent = "Silakan lanjut bicara — tanpa perlu memanggil Digidaw";
+  }
+
+  // ── control panel ──
+  const cp = { open: false, fields: [], section: "", dirty: {} };
+  function cpStatus(text, kind = "") { const el = $("cpStatus"); el.textContent = text; el.className = `cp-status ${kind}`; }
+
+  async function openSettings() {
+    cp.open = true; cp.dirty = {};
+    $("cpOverlay").classList.add("open");
+    $("cpRestart").hidden = true;
+    cpStatus("");
+    try {
+      const r = await fetch(`/api/settings?token=${encodeURIComponent(TOKEN)}`);
+      const data = await r.json();
+      cp.fields = data.fields;
+      renderSettings(cp.section || cp.fields[0].section);
+    } catch (e) { cpStatus("Tidak bisa memuat pengaturan.", "err"); }
+  }
+  function closeSettings() { cp.open = false; $("cpOverlay").classList.remove("open"); }
+
+  function renderSettings(section) {
+    cp.section = section;
+    const sections = [...new Set(cp.fields.map((f) => f.section)), "Tentang & Daya"];
+    const nav = $("cpNav"); nav.textContent = "";
+    sections.forEach((name) => {
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.className = name === section ? "active" : "";
+      b.addEventListener("click", () => renderSettings(name));
+      nav.appendChild(b);
+    });
+    const body = $("cpBody"); body.textContent = "";
+    const title = document.createElement("div");
+    title.className = "cp-section-title"; title.textContent = section;
+    body.appendChild(title);
+    if (section === "Tentang & Daya") return renderPower(body);
+    cp.fields.filter((f) => f.section === section).forEach((f) => body.appendChild(renderField(f)));
+  }
+
+  function renderField(f) {
+    const row = document.createElement("div"); row.className = "field";
+    const info = document.createElement("div");
+    const label = document.createElement("div"); label.className = "field-label"; label.textContent = f.label;
+    if (f.restart) { const r = document.createElement("span"); r.className = "field-restart"; r.textContent = "· perlu restart"; label.appendChild(r); }
+    info.appendChild(label);
+    if (f.help) { const h = document.createElement("div"); h.className = "field-help"; h.textContent = f.help; info.appendChild(h); }
+    row.appendChild(info);
+    const current = f.key in cp.dirty ? cp.dirty[f.key] : f.value;
+    const set = (v) => { cp.dirty[f.key] = v; cpStatus("Ada perubahan yang belum disimpan.", "warn"); };
+    let control;
+    if (f.type === "bool") {
+      control = document.createElement("label"); control.className = "switch";
+      const input = document.createElement("input"); input.type = "checkbox"; input.checked = !!current;
+      input.setAttribute("aria-label", f.label);
+      input.addEventListener("change", () => set(input.checked));
+      control.append(input, document.createElement("span"));
+    } else if (f.type === "choice") {
+      control = document.createElement("select"); control.setAttribute("aria-label", f.label);
+      f.options.forEach((o) => { const opt = document.createElement("option"); opt.value = o.value; opt.textContent = o.label; if (String(o.value) === String(current)) opt.selected = true; control.appendChild(opt); });
+      control.addEventListener("change", () => set(control.value));
+    } else if (f.type === "folder") {
+      control = document.createElement("div"); control.className = "folder-row";
+      const input = document.createElement("input"); input.type = "text"; input.value = current || ""; input.placeholder = "Belum diatur";
+      input.setAttribute("aria-label", f.label);
+      input.addEventListener("change", () => set(input.value));
+      const pick = document.createElement("button"); pick.className = "btn"; pick.textContent = "PILIH…";
+      pick.addEventListener("click", async () => {
+        cpStatus("Pilih folder di jendela yang muncul…");
+        const r = await fetch("/api/pick-folder", { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify({ initial: input.value }) });
+        const { path } = await r.json();
+        if (path) { input.value = path; set(path); } else cpStatus("");
+      });
+      const clear = document.createElement("button"); clear.className = "btn"; clear.textContent = "✕"; clear.title = "Kosongkan";
+      clear.addEventListener("click", () => { input.value = ""; set(""); });
+      control.append(input, pick, clear);
+    } else {
+      control = document.createElement("input");
+      control.type = f.type === "secret" ? "password" : f.type === "int" ? "number" : "text";
+      if (f.type === "int") { control.min = f.min; control.max = f.max; }
+      control.value = f.type === "secret" ? (cp.dirty[f.key] || "") : (current ?? "");
+      if (f.type === "secret") control.placeholder = f.has_value ? "•••••••• (tersimpan — isi untuk mengganti)" : "Tempel API key di sini";
+      control.setAttribute("aria-label", f.label);
+      control.addEventListener("input", () => set(control.value));
+    }
+    row.appendChild(control);
+    return row;
+  }
+
+  function renderPower(body) {
+    const text = document.createElement("div"); text.className = "field-help";
+    text.textContent = "Digidaw berjalan di latar belakang tanpa jendela CMD. Menutup HUD tidak mematikan Digidaw — panggil namanya atau tekan hotkey HUD untuk membukanya lagi.";
+    const actions = document.createElement("div"); actions.className = "cp-actions";
+    [["TES SUARA", "", () => sendAction("test_voice")],
+     ["BUKA FOLDER LOG", "", () => sendAction("open_logs")],
+     ["BUKA FOLDER DIGIDAW", "", () => sendAction("open_folder")],
+     ["RESTART DIGIDAW", "warn", () => sendAction("restart")],
+     ["MATIKAN DIGIDAW", "danger", () => { if (confirm("Matikan Digidaw sekarang?")) sendAction("shutdown"); }]]
+      .forEach(([label, kind, fn]) => { const b = document.createElement("button"); b.className = `btn ${kind}`; b.textContent = label; b.addEventListener("click", fn); actions.appendChild(b); });
+    body.append(text, actions);
+  }
+
+  async function saveSettings() {
+    if (!Object.keys(cp.dirty).length) { cpStatus("Tidak ada perubahan.", ""); return; }
+    cpStatus("Menyimpan…");
+    try {
+      const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify({ values: cp.dirty }) });
+      const data = await r.json();
+      if (!r.ok) { cpStatus(data.error || "Gagal menyimpan.", "err"); return; }
+      cp.fields = data.fields; cp.dirty = {};
+      renderSettings(cp.section);
+      if (data.restart && data.restart.length) {
+        cpStatus(`Tersimpan. Aktif setelah restart: ${data.restart.join(", ")}.`, "warn");
+        $("cpRestart").hidden = false;
+      } else cpStatus("Tersimpan dan langsung aktif.", "ok");
+    } catch (e) { cpStatus("Gagal menyimpan.", "err"); }
+  }
+
+  $("cpBtn").addEventListener("click", openSettings);
+  $("pauseBtn").addEventListener("click", () => sendAction(paused ? "resume_listening" : "pause_listening"));
+  $("cpClose").addEventListener("click", closeSettings);
+  $("cpCancel").addEventListener("click", closeSettings);
+  $("cpSave").addEventListener("click", saveSettings);
+  $("cpRestart").addEventListener("click", () => sendAction("restart"));
+  $("cpOverlay").addEventListener("click", (e) => { if (e.target === $("cpOverlay")) closeSettings(); });
+  $("powerBtn").addEventListener("click", () => {
+    if (confirm("Matikan Digidaw?\n\nDigidaw berhenti total sampai dijalankan lagi dari shortcut di Desktop.\n(Untuk memuat ulang saja, pakai tombol ⟳ Restart di sebelahnya.)")) sendAction("shutdown");
+  });
+  $("restartBtn").addEventListener("click", () => {
+    const busy = Object.values(builds).some((j) => [...ACTIVE_BUILD, "queued"].includes(j.status))
+      || Object.values(genJobs).some((j) => j.status === "working");
+    if (busy && !confirm("Ada project atau generate yang sedang berjalan; pemantauannya bisa terputus.\nTetap restart Digidaw?")) return;
+    sendAction("restart");
+  });
+
+  // ── start (after every declaration above) ──
+  requestAnimationFrame(drawReactor);
+  window.addEventListener("resize", drawNet);
+  setInterval(tickClock, 1000);
+  tickClock();
+  connect();
+})();
+</script>
+</body>
+</html>
