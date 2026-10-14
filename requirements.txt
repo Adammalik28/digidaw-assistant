@@ -91,3 +91,6 @@ tokenizers==0.23.2
 tqdm==4.70.1
 typer==0.27.2
 xlsxwriter==3.2.9
+segno>=1.6        # QR code for opening the HUD on a phone
+google-auth-oauthlib>=1.2   # optional: sync the agenda to Google Calendar
+piper-tts>=1.2    # local fallback voice (models/piper) when the Edge voice is down

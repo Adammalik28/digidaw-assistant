@@ -182,6 +182,7 @@ def snapshot() -> dict:
         "state": events.state, "history": list(events.history), "stats": _latest["stats"],
         "media": _latest["media"], "weather": _latest["weather"],
         "timers": system_control.timers_snapshot(), "user_title": config.USER_TITLE,
+        "agenda": __import__("agenda").snapshot(),
         "build": __import__("project_builder").snapshot(),
         "workspace": workspace(),
         "hotkey": config.PUSH_TO_TALK_HOTKEY.upper(),

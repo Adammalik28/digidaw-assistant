@@ -483,6 +483,16 @@ def set_reminder_at(time_hhmm: str, message: str, date: str = "") -> str:
     m = re.match(r"^\s*(\d{1,2})[:.](\d{2})\s*$", time_hhmm or "")
     if not m:
         return f"Format waktu harus HH:MM, {T}."
+    if date and not parse_repeat(date):
+        # a calendar date ("2026-10-30", "30 oktober") is an agenda event; this module only knows besok / lusa / day
+        # names and used to put such a reminder on TOMORROW
+        import agenda
+        try:
+            day = datetime.date.fromisoformat(date.strip())
+        except ValueError:
+            day, _ = agenda.parse_date(date.lower())
+        if day and (day - datetime.date.today()).days > 2:
+            return agenda.add_event(message, day.isoformat(), f"{int(m.group(1)):02d}:{m.group(2)}", remind_days_before=0)
     return _reminder_at(int(m.group(1)), int(m.group(2)), message, date, parse_repeat(date) if date else None)
 
 

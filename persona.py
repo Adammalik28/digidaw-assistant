@@ -274,7 +274,13 @@ def warm_phrases() -> list[str]:
     replies += [f"Pindah ke workspace {n}, {T}." for n in range(1, 7)]
     replies += [f"Volume diatur ke {n} persen, {T}." for n in (10, 20, 30, 40, 50, 60, 70, 80, 100)]
     replies += [f"Melanjutkan pemutaran, {T}.", f"Media di-pause, {T}.", f"Teks sudah saya ketik, {T}."]
-    phrases = []
-    for reply in replies:
-        phrases += variants(reply, tries=6)[:3]
+    # the same wordings every start (a fixed seed): restarts reuse the recordings instead of ordering new ones
+    state = random.getstate()
+    random.seed(20261014)
+    try:
+        phrases = []
+        for reply in replies:
+            phrases += variants(reply, tries=6)[:3]
+    finally:
+        random.setstate(state)
     return phrases

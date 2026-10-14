@@ -42,7 +42,10 @@ SPEAK_SCRIPT = config.BASE_DIR / "speak.ps1"
 CACHE_MAX_CHARS = 90
 CACHE_MAX_FILES = 1500        # ~10 KB each; frequent replies then always play instantly
 EDGE_MAX_ATTEMPTS = 5       # instant connection resets are retried this many times (IPv6 path)
-EDGE_FIRST_AUDIO_DEADLINE = 5.5   # no Edge audio after this long -> use the fallback voice
+EDGE_FIRST_AUDIO_DEADLINE = 4.0   # no Edge audio after this long -> use the fallback voice
+EDGE_BREAK_SECONDS = 90           # after an Edge failure, sentences skip Edge for this long...
+EDGE_PROBE_EVERY = 30             # ...while a background check retries it every 30 s
+PIPER_MODEL = config.BASE_DIR / "models" / "piper" / "id_ID-news_tts-medium.onnx"   # local fallback voice
 
 ID_WORDS = {
     "tuan", "saya", "selamat", "apakah", "bisa", "adalah", "ini", "itu", "dan", "di", "ke",
@@ -283,6 +286,9 @@ class NeuralVoice:
         self.first_audio_delay = None
         self._spoken_at = 0.0
         self.link = EdgeLink()
+        self.edge_down_until = 0.0        # circuit breaker: Edge failed, don't make every sentence wait for it
+        self._piper = None
+        self._probing = False
         self._init_mixer()
 
     def _init_mixer(self):
@@ -398,7 +404,9 @@ class NeuralVoice:
                     edge_timeout: float = 20, use_link: bool = True) -> tuple[Path | None, bool]:
         """Download the whole phrase to an mp3. Returns (path, is_cached_file)."""
         if engines is None:
-            engines = {"edge": ["edge", "gtts"], "gtts": ["gtts", "edge"]}.get(config.TTS_ENGINE, [])
+            engines = {"edge": ["edge", "piper", "gtts"], "gtts": ["gtts", "edge"]}.get(config.TTS_ENGINE, [])
+        if not self.edge_ok():
+            engines = [e for e in engines if e != "edge"] or ["piper", "gtts"]
         cacheable = len(text) <= CACHE_MAX_CHARS
         for engine in engines:
             keep = cacheable and engine == "edge"      # a fallback recording is never kept: Edge gets the next try
@@ -407,10 +415,12 @@ class NeuralVoice:
                 if path.exists() and path.stat().st_size > 0:
                     return path, True
             else:
-                path = AUDIO_DIR / f"speech_{uuid.uuid4().hex[:12]}.mp3"
+                path = AUDIO_DIR / f"speech_{uuid.uuid4().hex[:12]}.{'wav' if engine == 'piper' else 'mp3'}"
             try:
                 if engine == "edge":
                     self._synth_edge(text, path, timeout=edge_timeout, use_link=use_link)
+                elif engine == "piper":
+                    self._synth_piper(text, path)
                 else:
                     self._synth_gtts(text, path)
                 if path.exists() and path.stat().st_size > 0:
@@ -420,8 +430,63 @@ class NeuralVoice:
             except Exception as e:
                 if engine == "edge":
                     note_edge_failure(e)
+                    self.edge_failed()
+                elif engine == "piper":
+                    print(f"[TTS] suara lokal Piper gagal: {str(e)[:100]}")
             path.unlink(missing_ok=True)
         return None, False
+
+    # ── circuit breaker for the Edge voice ──
+    def edge_ok(self) -> bool:
+        return time.time() >= self.edge_down_until
+
+    def edge_failed(self):
+        """Edge didn't answer: for a while every sentence goes straight to the fallback voice (no 13 s waits), and
+        a background check brings Edge back as soon as it answers again."""
+        self.edge_down_until = time.time() + EDGE_BREAK_SECONDS
+        if not self._probing:
+            self._probing = True
+            threading.Thread(target=self._probe_edge, daemon=True, name="tts-edge-probe").start()
+
+    def _probe_edge(self):
+        try:
+            while True:
+                time.sleep(EDGE_PROBE_EVERY)
+                test = AUDIO_DIR / f"probe_{uuid.uuid4().hex[:8]}.mp3"
+                try:
+                    self._synth_edge("Ya.", test, timeout=6, use_link=False)
+                    ok = test.exists() and test.stat().st_size > 0
+                except Exception:
+                    ok = False
+                finally:
+                    test.unlink(missing_ok=True)
+                if ok:
+                    self.edge_down_until = 0.0
+                    print("[TTS] suara Edge pulih kembali")
+                    return
+                self.edge_down_until = time.time() + EDGE_BREAK_SECONDS
+        finally:
+            self._probing = False
+
+    def _piper_voice(self):
+        if self._piper is None:
+            from piper import PiperVoice
+            self._piper = PiperVoice.load(str(PIPER_MODEL))
+        return self._piper
+
+    def _synth_piper(self, text: str, path: Path):
+        """The fallback voice when Edge is down: Piper, on this laptop (~0.1 s, no internet, no quota). Only for
+        Indonesian; English text goes on to the next engine."""
+        import wave
+        if not is_indonesian(text) or not PIPER_MODEL.exists():
+            raise RuntimeError("tidak ada suara Piper untuk teks ini")
+        with wave.open(str(path), "wb") as out:
+            self._piper_voice().synthesize_wav(text, out)
+
+    def preload_fallback(self):
+        """Load the Piper voice in the background, so the first fallback sentence isn't slower."""
+        if PIPER_MODEL.exists():
+            threading.Thread(target=lambda: self._piper_voice(), daemon=True, name="piper-load").start()
 
     def preload(self, phrases: list[str]):
         """Warm the cache in the background so these phrases play instantly later."""
@@ -614,13 +679,14 @@ class NeuralVoice:
             cache = self._cache_path(chunk, "edge" if config.TTS_ENGINE == "edge" else "gtts")
             if cache.exists() and cache.stat().st_size > 0:
                 path, cached = cache, True
-        if path is None and config.TTS_ENGINE == "edge" and self._stream_edge(chunk):
-            return
+        edge = config.TTS_ENGINE == "edge"
+        if path is None and edge and self.edge_ok():
+            if self._stream_edge(chunk):
+                return
+            self.edge_failed()          # no audio in time: the next sentences don't wait for Edge again
         if path is None and not self._stop.is_set():
-            # the stream failed or was slow: try Edge once more as a whole download before the (robotic) Google voice
-            # (bounded: a reply must never wait half a minute for a voice)
-            path, cached = self._synthesize(chunk, ["edge", "gtts"] if config.TTS_ENGINE == "edge" else None,
-                                            edge_timeout=5)
+            # Edge is down: the local Piper voice (instant), the Google voice only as the last resort
+            path, cached = self._synthesize(chunk, ["piper", "gtts"] if edge else None)
         try:
             if self._stop.is_set():
                 return
@@ -730,21 +796,43 @@ def is_cached(text: str) -> bool:
         return False
 
 
-def warm_cache(phrases: list[str], pause: float = 1.0):
-    """Fill the voice cache with these replies, slowly, in the background (one request a second)."""
+WARM_PER_RUN, WARM_PER_DAY = 25, 60      # new recordings per start / per day: bursts got the voice service throttled
+WARM_STATE = CACHE_DIR / "warm_state.json"
+
+
+def warm_cache(phrases: list[str], pause: float = 2.5):
+    """Fill the voice cache with these replies, slowly, in the background. Capped (WARM_PER_RUN / WARM_PER_DAY) and
+    paused while Edge is failing: many requests in a row made Microsoft throttle the voice for minutes."""
     def run():
+        import datetime
+        import json
+        today = datetime.date.today().isoformat()
+        try:
+            state = json.loads(WARM_STATE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            state = {}
+        done_today = state.get("count", 0) if state.get("day") == today else 0
+        made = 0
         for phrase in phrases:
-            if tts_engine.speaking:
-                time.sleep(2)
+            if made >= WARM_PER_RUN or done_today + made >= WARM_PER_DAY:
+                break
+            while tts_engine.speaking or not tts_engine.edge_ok():
+                time.sleep(5)
             for chunk in tts_engine._chunks(clean_for_speech(phrase)):
                 path = tts_engine._cache_path(chunk, "edge")
                 if len(chunk) > CACHE_MAX_CHARS or path.exists():
                     continue
                 try:
                     tts_engine._synth_edge(chunk, path, timeout=10, use_link=False)
+                    made += 1
                 except Exception:
                     path.unlink(missing_ok=True)
+                    tts_engine.edge_failed()
                 time.sleep(pause)
+        try:
+            WARM_STATE.write_text(json.dumps({"day": today, "count": done_today + made}), encoding="utf-8")
+        except OSError:
+            pass
     threading.Thread(target=run, daemon=True, name="tts-warm-cache").start()
 
 
@@ -767,6 +855,10 @@ def spoke_since(t: float) -> bool:
 
 def is_audible() -> bool:
     return tts_engine.is_audible()
+
+
+def preload_fallback():
+    tts_engine.preload_fallback()
 
 
 def preload(phrases: list[str]):

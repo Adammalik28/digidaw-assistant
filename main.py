@@ -125,6 +125,7 @@ import security_scan
 import screen_context
 import generator
 import alarms
+import agenda
 import antigravity_analysis
 from core import DigidawCore, FILLERS
 
@@ -320,8 +321,10 @@ def main(args=ARGS):
     security_scan.ANNOUNCE = core.announce
     generator.ANNOUNCE = core.announce
     alarms.ANNOUNCE = core.announce
+    agenda.ANNOUNCE = core.announce
     antigravity_analysis.ANNOUNCE = core.announce
     alarms.start()
+    agenda.start()
     security_scan.start_background()
     screen_context.start()
     if config.STT_PRIVACY_MODE or config.OFFLINE_STT:
@@ -346,6 +349,9 @@ def main(args=ARGS):
     hud_ok = False
     if config.HUD_ENABLED and not args.no_hud:
         hud_ok = hud_server.start(core.submit, core.handle_action)
+        import mobile_server
+        if mobile_server.start():
+            console.print(f"[dim]   HUD HP: {mobile_server.url()} (masuk dengan PIN)[/dim]")
         if hud_ok and config.HUD_AUTO_OPEN and not args.background:
             hud_server.open_window()
     hotkey_ok = False
@@ -382,10 +388,9 @@ def main(args=ARGS):
     import persona
     persona.is_cached = tts.is_cached
     threading.Timer(20, lambda: tts.warm_cache(persona.warm_phrases())).start()
-    first_today = _first_start_today()
-    if not args.restarted and config.STARTUP_BRIEFING and first_today:
-        threading.Thread(target=_speak_startup_briefing, daemon=True, name="startup-briefing").start()
-    elif not args.background and not args.restarted:
+    tts.preload_fallback()          # the local fallback voice ready before it is ever needed
+    # the day's summary now comes with the first "Digidaw" (core._morning_briefing), not at boot
+    if not args.background and not args.restarted:
         greeting = f"{ai_skills.greeting()}, {config.USER_TITLE}. Digidaw online."
         if voice_enabled:
             greeting += " Panggil saya kapan saja." if config.REQUIRE_WAKE_WORD else " Saya mendengarkan."
@@ -402,7 +407,10 @@ def main(args=ARGS):
                 threading.Thread(target=core.console_loop, kwargs={"prompt": False}, daemon=True).start()
             core.voice_loop()
         elif NO_CONSOLE:
-            core.shutdown.wait()          # the HUD is the keyboard now
+            # the HUD is the keyboard now. Wait in short steps: a stop signal (SIGTERM) can land on any thread, and
+            # Python runs its handler only when the main thread runs; an endless wait made stopping take ~45 s
+            while not core.shutdown.wait(0.5):
+                pass
         else:
             core.console_loop()
     except KeyboardInterrupt:

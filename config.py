@@ -41,7 +41,8 @@ THINKING_FILLER_SECONDS = 3.0  # say "Sebentar, Sir." if an answer takes longer 
 PUSH_TO_TALK_HOTKEY = "ctrl+alt+d"   # global hotkey: talk now / interrupt DIGIDAW
 
 # ── Media ───────────────────────────────────────────────────────────
-MEDIA_BROWSER = "auto"         # browser for the YouTube player: auto (= default browser) | firefox | chrome | edge | brave
+MEDIA_BROWSER = "auto"         # YouTube player: auto (a Chromium browser) | chrome | edge | brave | firefox (not recommended:
+                               # YouTube treats the remote-controlled Firefox as a bot and restarts songs every ~45 s)
 MEDIA_DEBUG_PORT = 9223        # local DevTools port of the DIGIDAW media browser
 MEDIA_BRING_TO_FRONT = True    # show the video window when something starts playing
 PAUSE_OTHER_MEDIA_ON_PLAY = True
@@ -53,6 +54,11 @@ DUCK_LEVEL = 0.3               # ducked volume = original x DUCK_LEVEL
 # ── HUD (holographic dashboard) ─────────────────────────────────────
 HUD_ENABLED = True
 HUD_PORT = 8765
+# HUD for a phone on the home Wi-Fi (music, agenda, typed commands). Off until switched on with a PIN.
+MOBILE_HUD = False
+MOBILE_HUD_PORT = 8766
+MOBILE_PIN = ""                # 4-12 digits; set in the Control Panel
+MOBILE_SCREEN = False          # let the phone see the PC's screen and use it as a touchpad / keyboard (off by default)
 HUD_AUTO_OPEN = True
 SHOW_HUD_HOTKEY = "ctrl+alt+h"   # bring the HUD window back from anywhere
 
@@ -77,7 +83,7 @@ GENERATE_DIR = ""              # where generated images/files go ("" = Documents
 GENERATE_OPEN_RESULT = True    # open the image/file as soon as it's ready
 GENERATE_TIMEOUT_MINUTES = 10
 ESC_TO_TALK = "single"          # in the HUD window: Esc = talk now / Esc again = cancel. "double" = double-tap, "off"
-STARTUP_BRIEFING = True        # first start of the day: date, weather, security, ... (also when started with Windows)
+STARTUP_BRIEFING = True        # first bare "Digidaw" of the day: agenda, weather, battery (never at boot)
 STT_PRIVACY_MODE = True        # recognise speech on this laptop first; only phrases for Digidaw go to Google
 OFFLINE_STT = True             # without internet, recognise commands on this laptop (Whisper "base")
 LOCAL_STT_THREADS = 4

@@ -22,6 +22,9 @@ import security_scan
 import screen_context
 import generator
 import alarms
+import agenda
+import mobile_server
+import gcal_sync
 import antigravity_analysis
 import habits
 import persona
@@ -189,7 +192,7 @@ def forget_correction(word: str) -> str:
 
 
 ALL_SKILLS = (sc.AI_TOOLS + media.AI_TOOLS + window_manager.AI_TOOLS + ai_skills.AI_TOOLS
-              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
+              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
 def _usable(fn) -> bool:
     """Gemini must be able to build a schema from the function signature; one bad tool would make every
     AI request fail, so such a tool is left out (and reported) instead."""
@@ -395,6 +398,7 @@ LOCAL_TOOL_NAMES = [
     "play_youtube", "media_control", "now_playing", "play_spotify", "set_volume", "volume_up", "volume_down",
     "volume_mute", "set_brightness", "take_screenshot", "type_text", "press_keys", "write_note", "read_last_note",
     "set_timer", "set_alarm", "set_reminder_at", "list_timers", "cancel_timers", "get_time", "get_date",
+    "add_event", "list_events", "delete_event",
     "get_weather", "get_system_status", "open_folder", "open_file", "find_files", "remember", "recall_memories",
     "learned_habits", "lock_workstation", "shutdown_pc", "restart_pc", "sleep_pc", "google_search",
 ]
@@ -406,7 +410,8 @@ ONLINE_TOPIC_RE = re.compile(
     r"googling|browsing|search|cek (?:di )?internet|link|website (?:resmi|untuk))\b")
 RECENT_RE = re.compile(r"\b(?:terbaru|terkini|hari ini|kemarin|semalam|minggu ini|bulan ini|tahun ini|barusan|"
                        r"sekarang|saat ini|update|20[2-3]\d)\b")
-ASKING_RE = re.compile(r"\b(?:apa|apakah|siapa|berapa|kapan|bagaimana|gimana|mana|kenapa|mengapa|ada)\b|\?")
+# "ada" asks only at the start ("ada acara apa?"); "tanggal 2 ada pameran" is a statement
+ASKING_RE = re.compile(r"\b(?:apa|apakah|siapa|berapa|kapan|bagaimana|gimana|mana|kenapa|mengapa)\b|^ada\b|\?")
 GEMINI_SKILL_RE = re.compile(
     r"\b(?:layar|screen|lihat ini|baca ini|apa ini|error (?:apa|ini)|dokumen|file ini|pdf|halaman ini|artikel ini|"
     r"rangkum|ringkas|terjemahkan|teks yang (?:saya |aku )?(?:blok|pilih|sorot)|project|proyek|gambar|logo|poster|"
@@ -440,7 +445,9 @@ ACTION_CLAIM_RE = re.compile(
 # questions about THIS computer's current state: only a tool knows the answer
 STATE_QUESTION_RE = re.compile(
     r"\b(?:berapa|apa saja|sisa|status|penggunaan|pemakaian|kondisi)\b.*\b(?:ram|memori|cpu|baterai|batre|disk|"
-    r"penyimpanan|aplikasi|jendela|window|tab|timer|alarm|volume|kecerahan|wifi|jaringan|internet)\b|"
+    r"penyimpanan|aplikasi|jendela|window|tab|timer|alarm|volume|kecerahan|wifi|jaringan|internet|jadwal|agenda|"
+    r"acara|kegiatan)(?:ku|nya)?\b|\b(?:jadwal|agenda|acara)(?:ku|nya)?\b.*\b(?:apa|apa saja|ada|hari ini|besok)\b|"
+    r"\b(?:apa|ada)\b.*\b(?:jadwal|agenda|acara|kegiatan)(?:ku|nya)?\b|"
     r"\b(?:ram|memori|cpu|baterai|aplikasi|jendela|timer|alarm|volume)\b.*\b(?:berapa|apa saja|yang (?:terbuka|aktif|berjalan))\b")
 # small talk that may mention a PC word ("makasih sudah buka musiknya") but asks for nothing
 CHAT_RE = re.compile(r"\b(?:makasih|terima kasih|thanks|mantap|keren|bagus|oke|ok|sip|wah|wow|haha|hehe|begitu dong|"
@@ -450,7 +457,7 @@ ACTION_VERB_RE = re.compile(
     r"^(?:tolong |coba |bisa |bisakah |mohon |dong )?(?:buka|bukakan|tutup|nyalakan|hidupkan|matikan|aktifkan|nonaktifkan|"
     r"putar|putarkan|setel|mainkan|jeda|pause|lanjutkan|hentikan|stop|kecilkan|besarkan|naikkan|turunkan|keraskan|"
     r"pelankan|atur|ubah|ganti|rubah|jalankan|pindah|pindahkan|kirim|ketik|ketikkan|tekan|klik|pencet|kunci|minimize|"
-    r"maximize|nonton|tonton|restart|reboot|shutdown|kembali ke|balik ke|"
+    r"maximize|nonton|tonton|restart|reboot|shutdown|kembali ke|balik ke|ingat|ingatkan|ingetin|ingatin|catat|catatkan|"
     r"sembunyikan|tampilkan|perbesar|perkecil|redupkan|terangkan|ingatkan|bangunkan|hapus|simpan|salin|tangkap|ambil)\b")
 # "Saya sudah buat puisi dan masukkan ke editor" / "Saya buka tab YouTube" / "sudah saya scan": a claimed deed
 DONE_CLAIM_RE = re.compile(
@@ -520,6 +527,8 @@ LOCAL_TOOL_GROUPS = [
     (r"catat|catatan|tulis|note|editor|masukkan|simpan ke", ["write_note", "read_last_note"]),
     (r"timer|alarm|ingatkan|ingetin|pengingat|reminder|bangunkan|menit|detik|jam \d|pukul", [
         "set_timer", "set_alarm", "set_reminder_at", "list_timers", "cancel_timers"]),
+    (r"acara|agenda|jadwal|ulang ?tahun|ultah|tanggal|rapat|meeting|kondangan|ujian|wisuda|arisan|janji|deadline", [
+        "add_event", "list_events", "delete_event"]),
     (r"status|baterai|batre|cpu|ram|memori|sistem|laptop|komputer|pc", ["get_system_status"]),
     (r"cuaca|hujan|panas|suhu|dingin|cerah|weather", ["get_weather"]),
     (r"file|berkas|folder|direktori|dokumen|unduhan|download", ["open_folder", "open_file", "find_files"]),
@@ -896,6 +905,13 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
      lambda m: ("search_youtube", {"query": m[1] or m[2]})),
     (r"(?:cari|carikan|search)(?: di)? ([\w ]+?)(?: di| dong)?",
      lambda m: ("open_website", {"site": m[1]}) if m[1] in sc.WEBSITES else None),
+    (r"(?:hubungkan|sambungkan|koneksikan|sinkronkan|sinkron|sync)(?: agenda| jadwal)?(?: (?:ke|dengan))? (?:google calendar|google kalender|kalender google|google)",
+     lambda m: ("connect_google_calendar", {})),
+    (r"(?:status|cek) (?:sinkron )?(?:google calendar|kalender google|google kalender)", lambda m: ("google_calendar_status", {})),
+    (r"(?:putuskan|hentikan|matikan) (?:sinkron )?(?:google calendar|kalender google|google kalender)",
+     lambda m: ("disconnect_google_calendar", {})),
+    (r"(?:alamat|qr|kode qr|link|buka|tampilkan|cara buka) (?:hud|digidaw|panel)(?: digidaw)? (?:di |untuk |lewat |dari )?(?:hp|handphone|ponsel|hape)",
+     lambda m: ("mobile_hud_info", {})),
     (r"(?:nonton|tonton|menonton|lihat video|tampilkan video)(?: video)? (?!apa\b)(.{3,}?)(?: di youtube)?",
      lambda m: _play(m[1])),
     (r"(?:skip|lewati|lewatin|lompati) (?:iklan|ads|ad)(?:nya)?(?: youtube)?", lambda m: ("media_control", {"action": "skip_ad"})),
@@ -1190,6 +1206,15 @@ _pending_alarm: dict = {}
 
 def fast_route(text: str) -> str | None:
     """Run a simple command locally. Returns the reply, or None if Gemini should handle it."""
+    if not alarms.is_ringing():
+        try:
+            reply = agenda.handle(text)          # dated events ("ulang tahun ibu tanggal 20 Oktober") before alarms
+        except Exception as e:
+            console.print(f"[dim red]  [agenda] {escape(str(e)[:100])}[/dim red]")
+            reply = None
+        if reply:
+            _calls_this_turn.append(("agenda", {}, reply))
+            return _combine([reply])
     cmd_alarm = _normalize(text)
     action = _alarm_route(cmd_alarm)
     if action:

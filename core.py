@@ -156,6 +156,33 @@ def detect_wake(text: str) -> tuple[bool, str, bool]:
     return True, re.sub(r"\s+", " ", after or before), loose
 
 
+BRIEFING_STATE = config.LOG_DIR / "startup_state.json"
+
+
+def _briefing_due() -> bool:
+    import datetime
+    import json
+    try:
+        last = json.loads(BRIEFING_STATE.read_text(encoding="utf-8")).get("last_morning")
+    except (OSError, ValueError):
+        last = None
+    return last != datetime.date.today().isoformat() and datetime.datetime.now().hour >= 4
+
+
+def _briefing_done():
+    import datetime
+    import json
+    try:
+        data = json.loads(BRIEFING_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data["last_morning"] = datetime.date.today().isoformat()
+    try:
+        BRIEFING_STATE.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+
 class DigidawCore:
     def __init__(self, voice_enabled: bool):
         self.voice_enabled = voice_enabled
@@ -209,6 +236,9 @@ class DigidawCore:
         elif action == "alarm_snooze":
             import alarms
             alarms.snooze_alarm(config.ALARM_SNOOZE_MINUTES)
+        elif action.startswith("delete_event:"):
+            import agenda
+            agenda.delete_event(action.split(":", 1)[1])
         elif action.startswith("cancel_timer:"):
             import alarms
             with alarms._lock:
@@ -341,6 +371,25 @@ class DigidawCore:
         result = media.media_control(action)
         events.emit("user", text=clean, source="voice")
         events.emit("digidaw", text=result)
+        return True
+
+    def _morning_briefing(self) -> bool:
+        """Once a day, when the user first says just "Digidaw": agenda, weather, battery. Not at boot and not
+        via the hotkey: only when they actually call Digidaw. Returns True when it spoke."""
+        if not config.STARTUP_BRIEFING or not _briefing_due():
+            return False
+        import ai_skills
+        try:
+            text = ai_skills.morning_briefing()
+        except Exception as e:
+            console.print(f"[dim red][briefing] {e}[/dim red]")
+            return False
+        _briefing_done()
+        console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {text}")
+        events.emit("digidaw", text=text, brain="")
+        tts.speak(text)
+        # keep listening once it has finished talking (~14 characters a second)
+        self.open_conversation(config.FOLLOWUP_SECONDS + len(text) / 14)
         return True
 
     def arm(self):
@@ -573,8 +622,8 @@ class DigidawCore:
             return
         self.armed_until = 0.0
         self._awaiting_command = False
-        if source == "hud":
-            console.print(f"\n[bold yellow]You (HUD):[/bold yellow] {text}")
+        if source in ("hud", "hp", "hp-silent"):
+            console.print(f"\n[bold yellow]You ({'HP' if source.startswith('hp') else 'HUD'}):[/bold yellow] {text}")
         events.emit("user", text=text, source=source)
         events.set_status("thinking")
         tts.prewarm()
@@ -596,7 +645,8 @@ class DigidawCore:
         if response:
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {response}")
             events.emit("digidaw", text=response, brain=getattr(brain, "_brain_used", "") or "")
-            tts.speak(response)
+            if source != "hp-silent":          # the phone reads it out itself; the PC stays quiet
+                tts.speak(response)
         events.set_status("idle")
         if should_exit:
             if brain.consume_restart():
@@ -726,6 +776,8 @@ class DigidawCore:
         if not command:            # just "Digidaw" — the command follows in the next phrase
             if loose and len(text.split()) > 3:
                 return                 # an alias inside a longer sentence isn't a call
+            if self._morning_briefing():
+                return                 # the first "Digidaw" of the day: today's summary, then it listens
             self.arm()
             self._armed_loose = loose
             return

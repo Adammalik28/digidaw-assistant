@@ -3,6 +3,7 @@ Control Panel settings: the schema the HUD renders, validation, saving to settin
 applying changes live. The Gemini API key is kept in .env instead (never in settings.json).
 """
 import os
+import re
 import sys
 import json
 import subprocess
@@ -22,7 +23,7 @@ FIELDS = [
     ("Umum", "DEFAULT_CITY", "Kota untuk cuaca", "text", {"help": "Kosongkan untuk mendeteksi otomatis dari internet."}),
     ("Umum", "START_WITH_WINDOWS", "Jalankan otomatis saat " + ("Windows menyala" if os.name == "nt" else "login"), "bool",
      {"help": "Digidaw mulai diam-diam di latar belakang; panggil namanya atau tekan hotkey HUD."}),
-    ("Umum", "STARTUP_BRIEFING", "Ringkasan pagi saat pertama menyala", "bool",
+    ("Umum", "STARTUP_BRIEFING", "Ringkasan harian saat pertama memanggil \"Digidaw\"", "bool",
      {"help": "Saat Digidaw pertama kali menyala hari itu (juga saat ikut menyala bersama Windows): tanggal, cuaca, "
               "pengingat, dan catatan keamanan."}),
     ("Umum", "ALARM_RING_SECONDS", "Lama alarm berbunyi (detik)", "int",
@@ -101,8 +102,8 @@ FIELDS = [
      {"min": 0, "max": 15, "help": "0 = tidak pernah."}),
 
     ("Media", "MEDIA_BROWSER", "Browser pemutar YouTube", "choice",
-     {"options": [("auto", "Otomatis (browser default)"), ("firefox", "Firefox"), ("chrome", "Chrome"), ("edge", "Edge"),
-                 ("brave", "Brave")], "restart": True}),
+     {"options": [("auto", "Otomatis (Chrome/Edge/Brave)"), ("chrome", "Chrome"), ("edge", "Edge"), ("brave", "Brave"),
+                 ("firefox", "Firefox (tidak disarankan: lagu bisa mengulang)")], "restart": True}),
     ("Media", "MEDIA_BRING_TO_FRONT", "Tampilkan jendela video saat memutar", "bool", {}),
     ("Media", "PAUSE_OTHER_MEDIA_ON_PLAY", "Pause musik lain saat memutar lagu baru", "bool", {}),
     ("Media", "YOUTUBE_AUTO_SKIP_ADS", "Tekan \"Skip Ad\" otomatis", "bool", {}),
@@ -121,6 +122,13 @@ FIELDS = [
     ("AI", "MODEL_PREFERENCE", "Prioritas model", "choice",
      {"options": [("fast", "Cepat (Flash-Lite)"), ("smart", "Lebih pintar (Flash, sedikit lebih lambat)")]}),
 
+    ("HUD di HP", "MOBILE_HUD", "Aktifkan HUD untuk HP (Wi-Fi rumah)", "bool",
+     {"restart": True, "help": "Buka dari HP di Wi-Fi yang sama. Ucapkan \"alamat HUD HP\" untuk QR-nya."}),
+    ("HUD di HP", "MOBILE_PIN", "PIN masuk HP", "text",
+     {"help": "4-12 angka. Mengganti PIN mengeluarkan semua HP yang sudah masuk."}),
+    ("HUD di HP", "MOBILE_SCREEN", "Izinkan HP melihat layar & mengendalikan mouse/keyboard", "bool",
+     {"help": "Siapa pun yang tahu PIN di Wi-Fi rumah bisa melihat layar dan mengetik di PC. PC memberi tanda setiap "
+              "kali dipakai. Matikan bila tidak perlu."}),
     ("Keamanan & Sistem", "CONFIRM_DANGEROUS_ACTIONS", "Minta konfirmasi untuk aksi berbahaya", "bool",
      {"help": "Shutdown, kosongkan Recycle Bin, jalankan perintah PowerShell, dll."}),
     ("Keamanan & Sistem", "PROACTIVE_ALERTS", "Peringatan otomatis (baterai, CPU, RAM, disk)", "bool", {}),
@@ -151,6 +159,11 @@ def schema() -> list[dict]:
 
 def _validate(key: str, value):
     _, _, label, kind, extra = FIELD_MAP[key]
+    if key == "MOBILE_PIN":
+        pin = str(value or "").strip()
+        if pin and not re.fullmatch(r"\d{4,12}", pin):
+            raise ValueError("PIN harus 4-12 angka")
+        return pin
     if kind == "bool":
         return bool(value)
     if kind == "int":
@@ -222,6 +235,9 @@ def save(values: dict) -> dict:
         changed.append(key)
         if extra.get("restart"):
             restart.append(label)
+    if "MOBILE_PIN" in changed:
+        import mobile_server
+        mobile_server.logout_all()          # a new PIN: every phone has to log in again
     if "MODEL_PREFERENCE" in changed:
         config.apply_model_preference()
     if "START_WITH_WINDOWS" in changed:

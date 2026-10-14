@@ -31,6 +31,9 @@ PREFS = {
     "browser.tabs.warnOnClose": False,
     "browser.translations.automaticallyPopup": False,
 }
+# NOTE: under remote control Firefox always reports navigator.webdriver = true (no pref turns it off), and YouTube
+# then treats the player as a bot: songs jump back to the start every ~45 s. The Chrome player has no such flag,
+# so MEDIA_BROWSER defaults to Chrome; this Firefox player stays available but isn't recommended for YouTube.
 
 _lock = threading.RLock()
 _conn = {"ws": None, "ids": itertools.count(1)}

@@ -292,7 +292,20 @@ MAX_TAB_CYCLE = 40      # tabs checked per browser window when looking for a tab
 
 def _browser_windows() -> list[dict]:
     import window_manager
-    return [w for w in window_manager._windows() if is_browser(w) and not window_manager._is_digidaw(w)]
+    # never Digidaw's music player window (Chrome or Firefox): cycling its tabs ("tutup tab instagram") would
+    # disturb the song. system_control._closable() recognises the player by its own browser profile.
+    import system_control
+    wins = []
+    for w in window_manager._windows():
+        if not is_browser(w) or window_manager._is_digidaw(w) or w.get("class") == "DigidawPlayer":
+            continue
+        try:
+            if not system_control._closable(psutil.Process(w["pid"])):
+                continue
+        except psutil.Error:
+            continue
+        wins.append(w)
+    return wins
 
 
 def _title_now(w: dict) -> str:

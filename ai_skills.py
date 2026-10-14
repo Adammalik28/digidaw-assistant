@@ -198,10 +198,52 @@ def daily_briefing() -> str:
     import alarms
     if alarms.snapshot():
         parts.append(alarms.list_timers())
+    import agenda
+    if agenda.briefing_line():
+        parts.append(agenda.briefing_line())
     try:
         parts.append(get_news())
     except Exception:
         pass
+    return " ".join(parts)
+
+
+def morning_briefing() -> str:
+    """The summary for the first "Digidaw" of the day: today's agenda, alarms, weather and battery."""
+    import datetime as _dt
+    import psutil
+    import system_control as sc
+    import agenda
+    import alarms
+    parts = [f"{greeting()}, {T}.", sc.get_date().removesuffix(f", {T}.") + "."]
+    today = agenda.upcoming(0)
+    if today:
+        parts.append("Agenda hari ini: " + "; ".join(
+            e["title"] + (f" jam {e['time'].replace(':', '.')}" if e.get("time") else "") for _, e in today[:4]) + ".")
+    else:
+        parts.append("Tidak ada agenda hari ini.")
+    tomorrow = [(d, e) for d, e in agenda.upcoming(1) if (d - _dt.date.today()).days == 1]
+    if tomorrow:
+        parts.append("Besok: " + "; ".join(e["title"] for _, e in tomorrow[:3]) + ".")
+    ringing_today = [i for i in alarms.snapshot() if i["kind"] in ("alarm", "reminder")
+                     and i["due"][:10] == _dt.date.today().isoformat()]
+    if ringing_today:
+        parts.append(alarms.list_timers())
+    weather = None
+    try:
+        import hud_server
+        weather = hud_server._latest.get("weather") or None      # already fetched for the HUD
+    except Exception:
+        pass
+    weather = weather or weather_data()
+    if weather:
+        place = " ".join(weather["place"].split()[:2])         # "Bandar Lampung tanjung" -> "Bandar Lampung"
+        parts.append(f"Cuaca di {place} {weather['condition'].lower()}, {weather['temp']}.")
+    battery = psutil.sensors_battery()
+    if battery:
+        state = "sedang dicas" if battery.power_plugged else (
+            "sebaiknya segera dicas" if battery.percent < 30 else "tanpa charger")
+        parts.append(f"Baterai {battery.percent:.0f} persen, {state}.")
     return " ".join(parts)
 
 

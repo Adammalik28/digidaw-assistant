@@ -154,12 +154,11 @@ _alive_cache = [0.0, False]
 
 
 def _firefox() -> bool:
-    """Play YouTube in the Firefox player? (MEDIA_BROWSER = firefox, or 'auto' with Firefox as the default browser)"""
+    """Play YouTube in the Firefox player? Only when chosen explicitly: remote-controlled Firefox reports
+    navigator.webdriver = true, and YouTube then restarts every song after ~45 s. 'auto' uses a Chromium browser."""
     if IS_WINDOWS or not firefox_player.available():
         return False
-    if config.MEDIA_BROWSER == "firefox":
-        return True
-    return config.MEDIA_BROWSER == "auto" and ld.default_browser() == "firefox"
+    return config.MEDIA_BROWSER == "firefox"
 
 
 def _tab(target: dict):
@@ -295,6 +294,10 @@ def _ensure_playing(tab: _Tab, video_id: str, timeout: float = 15) -> dict | Non
 
 
 def _open_in_player(url: str, video_id: str, wait: bool = True) -> dict | None:
+    if not _firefox() and firefox_player._pids():
+        # a Firefox player from before (MEDIA_BROWSER was firefox) still holds the debug port: Chrome can't use it
+        firefox_player.restart_player()
+        _alive_cache[0] = 0.0
     target = _player_target() if _alive() else None
     if target or _alive():           # (finding the tab may have closed a stuck player: then start a new one)
         target = target or _new_tab(url)
