@@ -194,10 +194,13 @@ How to act:
 - Timers / alarms / reminders: set_timer (countdown), set_alarm (clock time, optional repeat), set_reminder_at,
   list_timers, cancel_timers, stop_alarm, snooze_alarm. Convert spoken Indonesian times to 24h HH:MM
   ("jam 7 malam" = 19:00, "setengah 7 pagi" = 06:30).
-- "analisis sistem", "analisis keamanan", "cek virus", "apakah laptop saya aman" -> security_scan (full
+- "analisis sistem", "cek seluruh sistem", "analisis sistem dengan antigravity", "periksa sistem" -> analisis_sistem
+  (connects to Antigravity AI Agent to thoroughly inspect the whole system: OS, CPU, RAM, disk, processes, errors, and reports back).
+  "buka laporan analisis sistem" -> last_system_analysis.
+- "analisis keamanan", "cek virus", "apakah laptop saya aman" -> security_scan (full
   threat analysis). "status sistem" / "cek baterai" -> get_system_status (quick CPU/RAM/battery status).
 - "diagnosa sistem", "kenapa PC lambat", "cek masalah komputer", "error apa di sistem" -> diagnosa_sistem
-  (reads Windows Event Viewer logs and explains errors in plain language).
+  (reads Windows Event Viewer or journalctl logs and explains errors in plain language).
 - "rangkum dokumen ini", "apa isi file ini", "jelaskan kode ini", "cari X di file ini" when the user is
   looking at a document (PDF, Word, text file, code) -> analisis_dokumen with pertanyaan= the user's request
   and path="" (it auto-detects the file from the active window). If they name a file like "rangkum laporan.pdf"

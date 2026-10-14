@@ -64,7 +64,18 @@ def _stats() -> dict:
         "plugged": battery.power_plugged if battery else None,
         "down": round(down, 1), "up": round(up, 1),
         "uptime": int(now - psutil.boot_time()), "processes": len(psutil.pids()),
+        "local_ai": _local_ai(),
     }
+
+
+def _local_ai() -> dict:
+    """The local brain (Ollama) for the HUD's top bar: off when Digidaw runs on Gemini only."""
+    if config.BRAIN_MODE == "gemini":
+        return {"state": "off", "model": ""}
+    import local_llm
+    ok = local_llm.available()          # cached for 30 s: cheap to call every stats tick
+    return {"state": "ok" if ok else "down", "model": config.LOCAL_MODEL, "mode": config.BRAIN_MODE,
+            "reason": "" if ok else local_llm.status_reason()}
 
 
 def _broadcast_loop():

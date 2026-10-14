@@ -21,6 +21,8 @@ BUILTIN_ALIASES = {
     "wasap": "whatsapp", "watsap": "whatsapp", "whatsap": "whatsapp", "wapsi": "whatsapp",
     "work space": "workspace", "workspes": "workspace", "wokspace": "workspace",
     "aplikasi digital": "aplikasi digidaw", "jendela digital": "jendela digidaw",
+    "buka file mana": "buka file manager", "tutup file mana": "tutup file manager", "file menejer": "file manager",
+    "tutup tuner": "tutup thunar", "buka tuner": "buka thunar",
 }
 TRACKED = {"open_application": ("app", "name"), "open_website": ("web", "site"), "play_youtube": ("music", "query"),
            "open_many": ("app", "names")}

@@ -150,16 +150,24 @@ def get_news(topic: str = "") -> str:
 
 
 def weather_data(city: str = "") -> dict:
-    """Structured weather for the HUD."""
-    city = city or config.DEFAULT_CITY
-    try:
-        text = requests.get(f"https://wttr.in/{urllib.parse.quote(city)}?format=%l|%t|%C|%h|%w&lang=id",
-                            timeout=8).text.strip()
-        place, temp, cond, hum, wind = text.split("|")
-        return {"place": place.split(",")[0], "temp": temp.replace("+", ""), "condition": cond,
-                "humidity": hum, "wind": wind}
-    except Exception:
-        return {}
+    """Structured weather for the HUD. Like get_weather, an unknown long name ("Bandar Lampung tanjung bintang") is
+    shortened word by word, then the connection's own location is used."""
+    import system_control as sc
+    words = (city or config.DEFAULT_CITY or "").split()
+    for place in dict.fromkeys([" ".join(words[:n]) for n in range(len(words), 0, -1)] + [""]):
+        try:
+            text = requests.get(f"https://wttr.in/{urllib.parse.quote(place)}?format=%l|%t|%C|%h|%w&lang=id",
+                                timeout=8).text.strip()
+        except Exception:
+            return {}
+        parts = text.split("|")
+        if len(parts) != 5 or re.search(r"unknown location|not found|sorry", text, re.IGNORECASE):
+            continue
+        name, temp, cond, hum, wind = parts
+        cond = sc.WEATHER_ID.get(cond.strip().lower(), cond.strip())
+        return {"place": name.split(",")[0].strip(), "temp": temp.replace("+", "").strip(), "condition": cond,
+                "humidity": hum.strip(), "wind": re.sub(r"[←↑→↓↖↗↘↙]", "", wind).replace("km/h", " km/j").strip()}
+    return {}
 
 
 # ───────────────────────────── briefing ─────────────────────────────

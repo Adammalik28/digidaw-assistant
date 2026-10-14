@@ -265,11 +265,35 @@ def linux_desktop_entry(arguments: str = "") -> str:
             "X-GNOME-Autostart-enabled=true\n")
 
 
+LINUX_KEEP_APPS = (Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
+                   / "app-digidaw@autostart.service.d" / "keep-apps.conf")
+KEEP_APPS_CONF = """# Written by Digidaw. Apps Digidaw opens (Firefox, WhatsApp, terminals...) start inside Digidaw's own
+# service; without this, stopping or restarting Digidaw would close all of them too. Only Digidaw itself is stopped.
+[Service]
+KillMode=process
+"""
+
+
+def ensure_keep_apps():
+    """Make sure stopping / restarting Digidaw (autostart unit from uwsm) never kills the apps it opened."""
+    if os.name == "nt" or not LINUX_AUTOSTART.exists():
+        return
+    try:
+        if LINUX_KEEP_APPS.exists() and LINUX_KEEP_APPS.read_text(encoding="utf-8") == KEEP_APPS_CONF:
+            return
+        LINUX_KEEP_APPS.parent.mkdir(parents=True, exist_ok=True)
+        LINUX_KEEP_APPS.write_text(KEEP_APPS_CONF, encoding="utf-8")
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def set_autostart(enabled: bool):
     if os.name != "nt":
         if enabled:
             LINUX_AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
             LINUX_AUTOSTART.write_text(linux_desktop_entry("--background"), encoding="utf-8")
+            ensure_keep_apps()
         else:
             LINUX_AUTOSTART.unlink(missing_ok=True)
         return

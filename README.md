@@ -283,9 +283,27 @@ Log agen ada di `<folder project>\.digidaw\build.log`; brief lengkap di `BRIEF.m
 
 ---
 
+## ⚙️ Analisis Sistem dengan Antigravity AI Agent
+
+Ucapkan *"Digidaw, analisis sistem"* (juga: *"analisis seluruh sistem"*, *"analisis sistem dengan antigravity"*, *"cek sistem"*, atau tombol **ANALISIS SISTEM** di HUD).
+
+Digidaw akan langsung menyambungkan ke **Antigravity AI Agent** (`agy`) untuk memeriksa dan mendiagnosis seluruh kondisi sistem komputer Anda secara cerdas dan mendalam:
+- **OS & Kernel & Uptime**: Versi distro, kernel, dan lama waktu berjalan (*uptime*).
+- **Resource Hardware**: Beban CPU (load average), penggunaan memori RAM & Swap, serta ruang kosong partisi root (`/`).
+- **Proses Dominan**: Mendeteksi aplikasi/proses yang paling banyak memakan CPU dan RAM.
+- **Kesehatan Layanan**: Memeriksa kegagalan layanan (*systemd failed units*) dan catatan error log kritis terbaru (*journalctl*).
+- **Jaringan & Keamanan**: Koneksi jaringan, port yang sedang mendengarkan, serta status keamanan dasar.
+
+**Penyampaian Hasil:**
+1. **Ringkasan Suara**: Digidaw membacakan ringkasan kesehatan sistem secara jelas dan padat melalui suara (TTS) serta menampilkannya di konsol.
+2. **Laporan Visual Futuristik (HTML & Markdown)**: Laporan analisis komprehensif otomatis dibuat dan dibuka di peramban (tersimpan di `Documents/Digidaw Reports/`).
+3. Ucapkan *"buka laporan analisis sistem"* untuk membuka kembali laporan analisis sistem terakhir kapan saja.
+
+---
+
 ## 🛡️ Analisis Keamanan Sistem
 
-Ucapkan *"Digidaw, analisis sistem"* (juga: *"analisis keamanan"*, *"cek virus"*, *"apakah laptop saya aman"*,
+Ucapkan *"Digidaw, analisis keamanan"* (juga: *"cek virus"*, *"apakah laptop saya aman"*,
 atau tombol **SCAN KEAMANAN** di HUD). Dalam ±10–60 detik Digidaw memeriksa:
 
 - **Windows Defender**: antivirus & real-time protection, Tamper Protection, umur database, kapan terakhir full scan

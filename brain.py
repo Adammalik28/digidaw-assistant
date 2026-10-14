@@ -22,6 +22,7 @@ import security_scan
 import screen_context
 import generator
 import alarms
+import antigravity_analysis
 import habits
 import persona
 import local_llm
@@ -107,7 +108,7 @@ _calls_this_turn: list[tuple[str, dict, str]] = []     # (tool, kwargs, result) 
 # tools that start work in the background: no open "follow-up" window afterwards, so a stray word
 # ("Star") isn't taken as a second image / file / scan
 BACKGROUND_TOOLS = {"generate_image", "create_file", "security_scan", "defender_scan", "improve_project",
-                    "restore_project_version", "scan_file"}
+                    "restore_project_version", "scan_file", "analisis_sistem"}
 
 
 def started_background_job() -> bool:
@@ -188,7 +189,7 @@ def forget_correction(word: str) -> str:
 
 
 ALL_SKILLS = (sc.AI_TOOLS + media.AI_TOOLS + window_manager.AI_TOOLS + ai_skills.AI_TOOLS
-              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
+              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
 def _usable(fn) -> bool:
     """Gemini must be able to build a schema from the function signature; one bad tool would make every
     AI request fail, so such a tool is left out (and reported) instead."""
@@ -436,6 +437,11 @@ ACTION_CLAIM_RE = re.compile(
     r"(?:saya )?(?:di|ter|me)?\w*(?:buka|tutup|putar|atur|setel|mati|nyala|aktif|pindah|catat|simpan|kunci|ketik)\w*\b",
     re.IGNORECASE)
 # orders that must DO something on the PC (unlike "buatkan cerita" / "tulis puisi", which are answered in words)
+# questions about THIS computer's current state: only a tool knows the answer
+STATE_QUESTION_RE = re.compile(
+    r"\b(?:berapa|apa saja|sisa|status|penggunaan|pemakaian|kondisi)\b.*\b(?:ram|memori|cpu|baterai|batre|disk|"
+    r"penyimpanan|aplikasi|jendela|window|tab|timer|alarm|volume|kecerahan|wifi|jaringan|internet)\b|"
+    r"\b(?:ram|memori|cpu|baterai|aplikasi|jendela|timer|alarm|volume)\b.*\b(?:berapa|apa saja|yang (?:terbuka|aktif|berjalan))\b")
 # small talk that may mention a PC word ("makasih sudah buka musiknya") but asks for nothing
 CHAT_RE = re.compile(r"\b(?:makasih|terima kasih|thanks|mantap|keren|bagus|oke|ok|sip|wah|wow|haha|hehe|begitu dong|"
                      r"ceritakan|jelaskan|terangkan|pantun|puisi|cerita|dongeng|lelucon|joke|lawak|definisi|arti(?:nya)?|"
@@ -650,7 +656,8 @@ def ask_local(text: str, offline: bool = False) -> str | None:
     # an order, or a PC request a tool group matched (but not a question): a reply in words only means nothing happened
     pc_request = any(pattern.search(cmd_n) for pattern, _ in LOCAL_TOOL_GROUPS)
     is_action = bool(ACTION_VERB_RE.search(cmd_n)) or (pc_request and not ASKING_RE.search(cmd_n)
-                                                     and not CHAT_RE.search(cmd_n))
+                                                     and not CHAT_RE.search(cmd_n)) \
+        or bool(STATE_QUESTION_RE.search(cmd_n))     # "berapa ram saya", "aplikasi apa saja yang terbuka"
     try:
         for _ in range(LOCAL_MAX_STEPS):
             msg = local_llm.chat(messages, tools)
@@ -1009,7 +1016,13 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
     (r"(?:ini )?lagu apa(?: ini)?|judul lagu(?: ini|nya)?(?: apa)?|lagu apa yang (?:sedang )?(?:diputar|main)",
      lambda m: ("now_playing", {})),
     (r"(?:putar|putarkan|play|setel|mainkan) (?:playlist|lagu-lagu|mix) (.+)", lambda m: _play(m[1], mix=True)),
-    (r"(?:putar|putarkan|play|setel|mainkan) (?:lagu|musik|video) (.+?)(?: di youtube)?", lambda m: _play(m[1])),
+    # "putar youtube / putar musik / lanjutkan musik": resume (or pick up the last music), not a search for "youtube"
+    (r"(?:putar|putarkan|play|setel|mainkan|lanjutkan|lanjut)(?: lagi)? (?:pemutaran )?(?:youtube|musik(?:nya)?|lagu(?:nya)?|video(?:nya)?)"
+     r"(?: (?:di )?youtube)?(?: lagi)?", lambda m: ("media_control", {"action": "play"})),
+    # "putar musik tradisional": "musik" stays in the search (a genre); "putar lagu X": X is the title
+    (r"(?:putar|putarkan|play|setel|mainkan) (lagu|musik|video) (.+?)(?: di youtube)?",
+     lambda m: _play(re.sub(r"^(?:dari|oleh|by) ", "", m[2]) if re.match(r"(?:dari|oleh|by) ", m[2])
+                     else f"musik {m[2]}" if m[1] == "musik" else m[2])),
     (r"(?:putar|putarkan|setel|mainkan) (?!(?:lagu|musik|video|playlist)$)(.{3,}?)(?: di youtube)?", lambda m: _play(m[1])),
     (r"(?:ambil |tangkap )?(?:screenshot|tangkapan layar|tangkap layar)(?: layar)?", lambda m: ("take_screenshot", {})),
     (r"kunci (?:komputer|laptop|pc|layar)", lambda m: ("lock_workstation", {})),
@@ -1035,14 +1048,26 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
      lambda m: ("say", {"text": m[1]})),
     (r"(?:atur )?(?:kecerahan|brightness)(?: layar)? (?:ke |jadi )?(\d{1,3})(?: ?persen)?",
      lambda m: ("set_brightness", {"level": int(m[1])})),
-    (r"(?:lakukan |jalankan |tolong )?(?:analisis|analisa|analisi|scan|pindai|periksa|cek) (?:keamanan|sistem|security|virus|malware|ancaman)"
+    # ── Antigravity system analysis ──
+    (r"(?:lakukan |jalankan |tolong |minta |suruh )?(?:sambungkan ke )?(?:antigravity |antigrafity )?(?:untuk )?"
+     r"(?:analisis|analisa|analisi|periksa|cek) (?:seluruh |kondisi |kesehatan )?(?:sistem|laptop|komputer|pc)"
+     r"(?: (?:saya|ku))?(?: (?:secara )?(?:menyeluruh|lengkap|total))?(?: (?:dengan|menggunakan|lewat|pake|pakai) (?:antigravity|antigrafity))?|"
+     r"(?:minta |suruh )?(?:antigravity|antigrafity) (?:untuk )?(?:analisis|analisa|periksa|cek)(?: (?:seluruh |kondisi |kesehatan )?(?:sistem|laptop|komputer|pc))?",
+     lambda m: ("analisis_sistem", {})),
+    (r"(?:buka )?laporan (?:analisis sistem|antigravity)(?: terakhir)?",
+     lambda m: ("last_system_analysis", {})),
+    # ── Security scan ──
+    (r"(?:lakukan |jalankan |tolong )?(?:analisis|analisa|analisi|scan|pindai|periksa|cek) (?:keamanan|security|virus|malware|ancaman)"
      r"(?: (?:sistem|laptop|komputer|pc))?(?: saya| ku)?(?: (?:secara )?(?:menyeluruh|lengkap|total))?|cek virus|apakah (?:laptop|komputer|pc|sistem) (?:saya |ku )?aman",
      lambda m: ("security_scan", {})),
-    (r"(?:buka )?laporan (?:keamanan|analisis(?: keamanan| sistem)?)(?: terakhir)?", lambda m: ("last_security_report", {})),
+    (r"(?:buka )?laporan (?:keamanan|analisis keamanan)(?: terakhir)?", lambda m: ("last_security_report", {})),
     (r"(?:status sistem|diagnostik(?: sistem)?|cek baterai)", lambda m: ("get_system_status", {})),
+    (r"(?:cek |berapa )?(?:penggunaan|pemakaian|pakai|sisa|kapasitas)? ?(?:ram|memori|memory|cpu|prosesor|processor)"
+     r"(?: (?:saya|laptop|komputer|ku))?(?: (?:berapa|sekarang|sudah berapa|terpakai))*(?: persen)?",
+     lambda m: ("get_system_status", {})),
     (r"(?:baterai|batre|batrai)(?: (?:saya|laptop|ku))?(?: (?:berapa|tinggal berapa|sisa berapa))?(?: persen)?(?: sekarang)?",
      lambda m: ("get_system_status", {})),
-    (r"(?:ada )?(?:jendela|aplikasi|window) apa saja(?: yang)? (?:terbuka|sedang terbuka|dibuka|berjalan|jalan)(?: sekarang)?|"
+    (r"(?:cek |lihat |tampilkan |sebutkan |coba cek )?(?:ada )?(?:jendela|aplikasi|window) apa saja(?: yang)? (?:terbuka|sedang terbuka|dibuka|berjalan|jalan)(?: sekarang)?|"
      r"(?:daftar|list) (?:jendela|window)(?: yang terbuka)?", lambda m: ("list_windows", {})),
     (r"(?:buka|open) (?:folder )?(?:project|proyek)(?: saya| ku)?", lambda m: ("open_project", {})),
     (r"(?:buat|bikin|buatkan|bikinkan)(?: saya| aku)?(?: sebuah| satu)? (?:project|proyek|aplikasi|app|website|web|situs|game|program)\b.*",
@@ -1055,7 +1080,7 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
     (r"(?:daftar|list) (?:project|proyek)(?: saya)?|project apa saja(?: yang (?:sudah )?(?:dibuat|ada))?",
      lambda m: ("list_projects", {})),
     # ── workspaces (Hyprland) ──
-    (rf"(?:(?:pindah|beralih|switch|balik|kembali|pergi|buka|lompat)(?: ke)? |ke )?{WORKSPACE} ({WS_NUM}|berikutnya|selanjutnya|sebelumnya)",
+    (rf"(?:(?:pindah|beralih|switch|balik|kembali|pergi|buka|lompat)(?: ke)? |ke |\w{{3,8}}(?: ke)? )?{WORKSPACE} ({WS_NUM}|berikutnya|selanjutnya|sebelumnya)",
      lambda m: _ws_route("switch_workspace", {"workspace": _ws(m[1])})),
     (rf"(?:pindahkan|pindahin|kirim|kirimkan|lempar|taruh|move) (.+?) ke {WORKSPACE} ({WS_NUM}|berikutnya|selanjutnya|sebelumnya)"
      r"( (?:dan|lalu|terus) (?:ikut(?: pindah)?|ikuti|ke sana|pindah ke sana))?",
@@ -1068,9 +1093,21 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
 ]]
 
 
+def _bare_name(cmd: str):
+    """Just the name of a site or app the user often opens ("instagram", "youtube"): open it."""
+    if cmd in sc.WEBSITES:
+        return "open_website", {"site": cmd}
+    if cmd in sc.APPS:
+        return "open_application", {"name": cmd}
+    return None
+
+
 def _route(text: str):
     """(tool name, kwargs) for a simple command, or None if Gemini should handle it."""
     cmd = WS_GLUED.sub(r"\1 ps \2", _normalize(text))
+    bare = _bare_name(cmd)
+    if bare:
+        return bare
     for pattern, handler in FAST_ROUTES:
         match = pattern.fullmatch(cmd)
         if match:
@@ -1231,6 +1268,8 @@ def local_route(text: str) -> str:
         return sc.lock_workstation()
 
     # Diagnostics / info
+    if has("analisis sistem", "analisa sistem", "analisis seluruh sistem"):
+        return antigravity_analysis.analisis_sistem()
     if has("status", "diagnostik", "diagnostic", "cek sistem", "baterai", "battery", "cpu", "ram"):
         return sc.get_system_status()
     if has("jam berapa", "pukul berapa", "what time"):

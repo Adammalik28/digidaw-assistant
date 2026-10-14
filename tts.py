@@ -140,6 +140,26 @@ def speakable(text: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip(" ,")
 
 
+_edge_warned = {"at": 0.0}
+EDGE_WARN_EVERY = 600        # seconds between two warnings about the Edge voice
+
+
+def note_edge_failure(error: Exception):
+    """The Edge voice failed and the robotic fallback voice will speak: say why (once in a while), on the console
+    and the HUD. A 403 means Microsoft changed its service and edge-tts must be updated."""
+    if time.time() - _edge_warned["at"] < EDGE_WARN_EVERY:
+        return
+    _edge_warned["at"] = time.time()
+    text = str(error)
+    if "403" in text:
+        hint = ("Suara Edge ditolak server (403): Microsoft mengubah layanannya. Perbarui edge-tts: "
+                "uv pip install --python ~/.local/share/digidaw/venv/bin/python -U edge-tts")
+    else:
+        hint = f"Suara Edge gagal ({type(error).__name__}: {text[:80]}); sementara memakai suara cadangan."
+    print(f"[TTS] {hint}")
+    events.emit("alert", text=hint, level="warning")
+
+
 class EdgeLink:
     """One Edge voice connection kept open and warm.
 
@@ -381,7 +401,8 @@ class NeuralVoice:
             engines = {"edge": ["edge", "gtts"], "gtts": ["gtts", "edge"]}.get(config.TTS_ENGINE, [])
         cacheable = len(text) <= CACHE_MAX_CHARS
         for engine in engines:
-            if cacheable:
+            keep = cacheable and engine == "edge"      # a fallback recording is never kept: Edge gets the next try
+            if keep:
                 path = self._cache_path(text, engine)
                 if path.exists() and path.stat().st_size > 0:
                     return path, True
@@ -395,9 +416,10 @@ class NeuralVoice:
                 if path.exists() and path.stat().st_size > 0:
                     if engine != config.TTS_ENGINE:
                         print(f"[TTS] suara cadangan ({engine}) dipakai untuk: {text[:60]}")
-                    return path, cacheable
-            except Exception:
-                pass
+                    return path, keep
+            except Exception as e:
+                if engine == "edge":
+                    note_edge_failure(e)
             path.unlink(missing_ok=True)
         return None, False
 
@@ -441,7 +463,11 @@ class NeuralVoice:
                 except Exception:
                     if chunks:
                         raise          # broke in the middle of the sentence: can't restart it cleanly
-                    asyncio.run(fetch(on_chunk))       # the kept connection failed: a fresh one (IPv6/IPv4 race)
+                    try:
+                        asyncio.run(fetch(on_chunk))   # the kept connection failed: a fresh one (IPv6/IPv4 race)
+                    except Exception as e:
+                        note_edge_failure(e)
+                        raise
                 if cacheable and chunks and not self._stop.is_set():   # the full, finished audio
                     self._cache_path(text, "edge").write_bytes(b"".join(chunks))
             except Exception as e:

@@ -422,52 +422,80 @@ def _score(findings) -> int:
     return max(0, 100 - sum(penalty.get(f["severity"], 0) for f in findings))
 
 
+COMMAND_RE = re.compile(r"((?:sudo|systemctl|pacman|yay|paru|ufw|flatpak|freshclam|clamscan)\s[^,;]+?)(?=,\s|;|\.$|\)|$)")
+SEVERITY_LABEL = {"tinggi": "Tinggi", "sedang": "Sedang", "rendah": "Rendah", "info": "Info", "ok": "Aman"}
+
+
+def _split_command(advice: str) -> tuple[str, str]:
+    """'Jalankan: sudo pacman -Syu, lalu restart ...' -> ('Jalankan perintah di bawah, lalu restart ....',
+    'sudo pacman -Syu'); the command gets its own copyable block."""
+    m = COMMAND_RE.search(advice or "")
+    if not m:
+        return advice, ""
+    command = m[1].strip().rstrip(".")
+    prefix = advice[:m.start()].strip().rstrip(":( ").strip()
+    suffix = advice[m.end():].strip(" .,;)")
+    if not prefix or prefix.lower() in ("jalankan", "ketik"):
+        lead = "Jalankan perintah di bawah"
+    else:
+        lead = f"{prefix}, jalankan perintah di bawah"
+    return lead + (f", {suffix}" if suffix else "") + ".", command
+
+
+def _finding_html(f: dict, group: str) -> str:
+    import report_theme as rt
+    advice, command = _split_command(f.get("advice", ""))
+    detail = f.get("detail") or ""
+    return (f'<article class="finding" data-sev="{f["severity"]}" data-group="{group}" '
+            f'style="--c:{rt.COLORS[f["severity"]]}"><div class="meta"><span class="sev">'
+            f'{SEVERITY_LABEL[f["severity"]]}</span>{rt.esc(f["category"])}</div>'
+            f'<h3>{rt.esc(f["title"])}</h3>'
+            + (f'<div class="detail">{rt.esc(detail)}</div>' if detail else "")
+            + (f'<div class="advice">{rt.esc(advice)}</div>' if advice else "")
+            + (rt.command_block(command) if command else "") + "</article>")
+
+
 def _write_report(findings, score, started) -> Path:
-    folder = Path(config.NOTES_DIR).parent if config.NOTES_DIR else None
+    import report_theme as rt
     try:
         import system_control
         folder = system_control._known_folder("documents") / "Digidaw Reports"
     except Exception:
         folder = HOME / "Documents" / "Digidaw Reports"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"Analisis_Keamanan_{datetime.datetime.now():%Y-%m-%d_%H%M}.html"
-    colors = {"tinggi": "#ff5d5d", "sedang": "#ffb547", "rendah": "#8ceaff", "info": "#6f9fb3", "ok": "#4dffb5"}
-    labels = {"tinggi": "TINGGI", "sedang": "SEDANG", "rendah": "RENDAH", "info": "INFO", "ok": "AMAN"}
-    rows = []
-    for f in sorted(findings, key=lambda x: SEVERITY_ORDER.get(x["severity"], 4)):
-        rows.append(
-            f"<div class='f {f['severity']}'><div class='tag' style='color:{colors[f['severity']]};border-color:{colors[f['severity']]}'>"
-            f"{labels[f['severity']]}</div><div><div class='cat'>{html.escape(f['category'])}</div>"
-            f"<div class='t'>{html.escape(f['title'])}</div>"
-            + (f"<div class='d'>{html.escape(f['detail'])}</div>" if f["detail"] else "")
-            + (f"<div class='a'>➜ {html.escape(f['advice'])}</div>" if f["advice"] else "") + "</div></div>")
-    counts = {k: sum(1 for f in findings if f["severity"] == k) for k in labels}
-    grade = "#4dffb5" if score >= 80 else "#ffb547" if score >= 55 else "#ff5d5d"
-    page = f"""<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Analisis Keamanan — Digidaw</title><style>
-:root{{color-scheme:dark}} body{{margin:0;background:#02070d;color:#d6f5ff;font-family:'Segoe UI',system-ui,sans-serif;padding:32px 16px}}
-.wrap{{max-width:920px;margin:0 auto}} h1{{letter-spacing:.3em;font-size:18px;color:#8ceaff;margin:0}}
-.sub{{color:#6f9fb3;margin:6px 0 24px}} .top{{display:flex;gap:24px;align-items:center;flex-wrap:wrap;border:1px solid rgba(63,216,255,.3);padding:20px;margin-bottom:20px}}
-.score{{font-size:56px;font-weight:700;color:{grade}}} .score small{{font-size:18px;color:#6f9fb3}}
-.counts span{{display:inline-block;margin-right:14px;font-size:14px}}
-.f{{display:grid;grid-template-columns:86px 1fr;gap:14px;padding:14px 0;border-bottom:1px dashed rgba(63,216,255,.2)}}
-.tag{{border:1px solid;font-size:11px;letter-spacing:.14em;text-align:center;padding:4px 0;height:fit-content}}
-.cat{{font-size:11px;letter-spacing:.2em;color:#6f9fb3;text-transform:uppercase}} .t{{font-weight:600;margin-top:2px}}
-.d{{font-family:Consolas,monospace;font-size:12.5px;color:#9cc7d6;margin-top:4px;word-break:break-all}} .a{{margin-top:6px;color:#d6f5ff;font-size:14px}}
-.note{{color:#6f9fb3;font-size:13px;margin-top:24px;line-height:1.5}}
-@media (max-width:600px){{.f{{grid-template-columns:1fr}} .tag{{width:86px}}}}
-</style></head><body><div class="wrap">
-<h1>ANALISIS KEAMANAN SISTEM</h1><div class="sub">Digidaw · {datetime.datetime.now():%d %B %Y, %H:%M} · selesai dalam {int(time.time() - started)} detik</div>
-<div class="top"><div class="score">{score}<small>/100</small></div><div class="counts">
-<span style="color:#ff5d5d">● {counts['tinggi']} tinggi</span><span style="color:#ffb547">● {counts['sedang']} sedang</span>
-<span style="color:#8ceaff">● {counts['rendah']} rendah</span><span style="color:#4dffb5">● {counts['ok']} aman</span></div></div>
-{''.join(rows)}
-<div class="note">Analisis ini hanya membaca kondisi sistem; tidak ada file yang dihapus atau diubah. Untuk pemeriksaan
-malware yang tuntas, jalankan juga <b>Full scan</b> di Windows Security (Virus &amp; threat protection &gt; Scan options).</div>
-</div></body></html>"""
-    if not IS_WINDOWS:
-        page = page.replace("jalankan juga <b>Full scan</b> di Windows Security (Virus &amp; threat protection &gt; Scan options).",
-                            "ucapkan <b>\"jalankan full scan\"</b> (memakai ClamAV: <code>sudo pacman -S clamav</code>).")
+    now = datetime.datetime.now()
+    path = folder / f"Analisis_Keamanan_{now:%Y-%m-%d_%H%M}.html"
+    ordered = sorted(findings, key=lambda x: SEVERITY_ORDER.get(x["severity"], 4))
+    counts = {k: sum(1 for f in findings if f["severity"] == k) for k in SEVERITY_LABEL}
+    act, tips = counts["tinggi"] + counts["sedang"], counts["rendah"] + counts["info"]
+    verdict = ("Sangat baik" if score >= 90 else "Baik" if score >= 80 else "Cukup, ada yang perlu dibereskan"
+               if score >= 55 else "Perlu perhatian segera")
+    summary = (f"{act} hal sebaiknya segera dibereskan" if act else "Tidak ada yang perlu segera dibereskan") + \
+              (f", {tips} saran untuk diperhatikan" if tips else "") + f", dan {counts['ok']} pemeriksaan sudah aman."
+    groups = [("act", "Perlu tindakan", [f for f in ordered if f["severity"] in ("tinggi", "sedang")]),
+              ("tips", "Saran & informasi", [f for f in ordered if f["severity"] in ("rendah", "info")])]
+    sections = ""
+    for key, title, items in groups:
+        if items:
+            sections += f'<div class="group" data-group="{key}">{title} · {len(items)}</div>'
+            sections += "".join(_finding_html(f, key) for f in items)
+    safe = [f for f in ordered if f["severity"] == "ok"]
+    if safe:
+        sections += (f'<div class="group" data-group="ok">Sudah aman · {len(safe)}</div>'
+                     f'<details class="ok-list"><summary>Tampilkan {len(safe)} pemeriksaan yang aman</summary>'
+                     + "".join(_finding_html(f, "ok") for f in safe) + "</details>")
+    filters = [("all", f"Semua · {len(findings)}", "#5ccfff")] + [
+        (k, f"{SEVERITY_LABEL[k]} · {counts[k]}", rt.COLORS[k]) for k in ("tinggi", "sedang", "rendah", "info", "ok")
+        if counts[k]]
+    note = ("Analisis ini hanya membaca kondisi sistem; tidak ada file yang dihapus atau diubah. Untuk pemeriksaan "
+            "malware yang tuntas, " + ("jalankan juga Full scan di Windows Security." if IS_WINDOWS else
+                                       'ucapkan "jalankan full scan" (memakai ClamAV).'))
+    body = (f'<section class="hero">{rt.score_ring(score, "dari 100")}<div><h2>{verdict}</h2><p>{rt.esc(summary)}</p></div>'
+            f'</section>{rt.chips(filters)}{sections}<footer>{rt.esc(note)}</footer>')
+    import platform
+    page = rt.page("Analisis Keamanan Sistem", "Digidaw · Keamanan",
+                   f"{rt.tanggal(now)} · selesai dalam {int(time.time() - started)} detik",
+                   body, badges=[platform.node() or "komputer ini", platform.system() + " " + platform.release()])
     path.write_text(page, encoding="utf-8")
     return path
 

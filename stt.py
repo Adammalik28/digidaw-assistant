@@ -43,6 +43,41 @@ else:
     _device_scan_quiet = contextlib.nullcontext
 
 
+
+class _SharedPortAudio:
+    """PortAudio started once for the whole run. speech_recognition starts and stops ("terminate") PortAudio every
+    time the microphone is (re)opened; after an audio buffer overrun the microphone is reopened, and stopping
+    PortAudio then hits a failing assertion in its JACK backend (PipeWire) that aborts the WHOLE process
+    ("Fatal Python error: Aborted"). Never stopping it avoids that path; reopening the stream still works."""
+    _instance = None
+
+    def __init__(self, module):
+        self._module = module
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+    def PyAudio(self):
+        if _SharedPortAudio._instance is None:
+            _SharedPortAudio._instance = self._module.PyAudio()
+        return _KeptPyAudio(_SharedPortAudio._instance)
+
+
+class _KeptPyAudio:
+    def __init__(self, audio):
+        self._audio = audio
+
+    def __getattr__(self, name):
+        return getattr(self._audio, name)
+
+    def terminate(self):
+        pass             # see _SharedPortAudio
+
+
+def _keep_portaudio(microphone):
+    microphone.pyaudio_module = _SharedPortAudio(microphone.pyaudio_module)
+    return microphone
+
 class _VadSegmenter:
     """Turns a stream of 30 ms frames into phrases using WebRTC VAD + a relative energy gate."""
 
@@ -242,15 +277,15 @@ class SpeechToText:
         # If a working device was found, initialize SpeechRecognition Microphone
         if working_index is not None:
             try:
-                mic = sr.Microphone(device_index=working_index)
+                mic = _keep_portaudio(sr.Microphone(device_index=working_index))
                 with mic as source:
                     self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 self.microphone = mic
                 self.device_index = working_index
                 self.is_available = True
                 if self.mode == "vad":
-                    self.vad_microphone = sr.Microphone(device_index=working_index, sample_rate=16000,
-                                                        chunk_size=480)
+                    self.vad_microphone = _keep_portaudio(sr.Microphone(device_index=working_index, sample_rate=16000,
+                                                                        chunk_size=480))
             except Exception:
                 self.microphone = None
                 self.is_available = False

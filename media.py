@@ -270,7 +270,9 @@ _SKIP_AD_JS = r"""(() => {
   return false;
 })()"""
 # apps that report "playing" over MPRIS / SMTC without being music (a voice note, a call ringing)
-CHAT_APPS = re.compile(r"whats\s?app|whatsie|telegram|discord|signal|messenger|slack", re.IGNORECASE)
+# not music: chat apps and social video feeds (a TikTok tab "plays" all the time) are never "the music" to resume
+CHAT_APPS = re.compile(r"whats\s?app|whatsie|telegram|discord|signal|messenger|slack|tiktok|instagram|facebook|"
+                       r"reels|shorts", re.IGNORECASE)
 
 _PLAY_JS = "(() => { const v = document.querySelector('video'); if (!v) return false; " \
            "return v.play().then(() => true).catch(() => false); })()"
@@ -682,14 +684,16 @@ def media_control(action: str, seconds: int = 10) -> str:
             if "youtube" in _last_paused and _yt_js(_PLAY_JS, await_promise=True):
                 resumed.append("youtube")
             _last_paused.clear()
-        if not resumed and smtc_ok:
-            result = _smtc("play", only_status=PAUSED, current_only=True)
-            smtc_ok = result is not None
-            resumed = result or []
-        if not resumed:
+        if not resumed:          # Digidaw's own player first: "lanjutkan musik" means the music it was playing
             yt = _yt_status()
             if yt and yt["paused"] and _yt_js(_PLAY_JS, await_promise=True):
                 resumed = ["youtube"]
+        if not resumed and smtc_ok:
+            current = [s for s in (cached_sessions() or []) if s["status"] == PAUSED]
+            if not current or not all(CHAT_APPS.search(f"{s.get('title', '')} {s.get('app', '')}") for s in current):
+                result = _smtc("play", only_status=PAUSED, current_only=True)   # never a paused TikTok / chat
+                smtc_ok = result is not None
+                resumed = result or []
         if not resumed and not smtc_ok:
             _press_media_key(0xB3)   # media service not answering: best effort
             return f"Melanjutkan pemutaran, {T}."

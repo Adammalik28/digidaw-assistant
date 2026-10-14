@@ -595,7 +595,7 @@ class DigidawCore:
         console.print(f"[dim]   ⏱ diproses dalam {time.time() - started:.1f} dtk[/dim]")
         if response:
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {response}")
-            events.emit("digidaw", text=response)
+            events.emit("digidaw", text=response, brain=getattr(brain, "_brain_used", "") or "")
             tts.speak(response)
         events.set_status("idle")
         if should_exit:

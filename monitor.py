@@ -10,7 +10,11 @@ import oscompat
 
 T = config.USER_TITLE
 BATTERY_LEVELS = (5, 10, 20)
-COOLDOWN = 600   # seconds between repeated CPU/RAM warnings
+COOLDOWN = 600   # seconds between repeated CPU warnings
+RAM_REPEAT_AFTER = 3600     # the same memory warning is repeated at most hourly...
+RAM_WORSE_BY = 3            # ...unless memory use climbed this many points since the last warning
+RAM_CALM = 85               # below this the memory warning is reset
+MAX_ESTIMATE_HOURS = 12     # longer battery estimates are noise (right after unplugging): not said
 
 
 def start(announce):
@@ -45,7 +49,8 @@ def _top_process(by: str) -> str:
 
 def _remaining(battery) -> str:
     secs = battery.secsleft
-    if secs in (psutil.POWER_TIME_UNKNOWN, psutil.POWER_TIME_UNLIMITED) or secs <= 0:
+    if secs in (psutil.POWER_TIME_UNKNOWN, psutil.POWER_TIME_UNLIMITED) or secs <= 0 \
+            or secs > MAX_ESTIMATE_HOURS * 3600:
         return ""
     hours, minutes = divmod(secs // 60, 60)
     return f", perkiraan sisa {hours} jam {minutes} menit" if hours else f", perkiraan sisa {minutes} menit"
@@ -59,6 +64,7 @@ def _loop(announce):
     full_announced = bool(start and start.power_plugged and start.percent >= 95)
     cpu_high = ram_high = 0
     last_cpu_alert = last_ram_alert = 0.0
+    last_ram_level = 0.0
     disk_alerted = False
     psutil.cpu_percent(None)
 
@@ -73,8 +79,8 @@ def _loop(announce):
                         announce(f"Pengisi daya terhubung. Baterai {pct:.0f} persen, {T}.", "info")
                         alerted_levels.clear()
                         full_announced = pct >= 95       # plugged in when already full: nothing to announce
-                    else:
-                        announce(f"Pengisi daya dicabut. Baterai {pct:.0f} persen{_remaining(battery)}, {T}.", "info")
+                    else:   # the estimate isn't settled yet at this moment ("968 jam"): only the percentage
+                        announce(f"Pengisi daya dicabut. Baterai {pct:.0f} persen, {T}.", "info")
                         full_announced = False
                 last_plugged = battery.power_plugged
                 if not battery.power_plugged:
@@ -97,8 +103,11 @@ def _loop(announce):
 
             ram = psutil.virtual_memory().percent
             ram_high = ram_high + 1 if ram >= 92 else 0
-            if ram_high * config.MONITOR_INTERVAL >= 40 and time.time() - last_ram_alert > COOLDOWN:
-                last_ram_alert = time.time()
+            if ram < RAM_CALM:
+                last_ram_level = 0.0                 # memory freed up: a new shortage will be announced again
+            repeat_ok = time.time() - last_ram_alert > RAM_REPEAT_AFTER or ram >= last_ram_level + RAM_WORSE_BY
+            if ram_high * config.MONITOR_INTERVAL >= 40 and (not last_ram_level or repeat_ok):
+                last_ram_alert, last_ram_level = time.time(), ram
                 announce(f"{T}, memori hampir penuh ({ram:.0f} persen). "
                          f"Pemakai terbesar: {_top_process('ram')}.", "warning")
 

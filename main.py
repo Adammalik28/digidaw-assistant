@@ -80,6 +80,30 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 
+def _wait_for_audio(limit: float = 25.0):
+    """Right after login PipeWire's PulseAudio service may not be up yet: pygame would then start without sound
+    (or hang). Wait for it a little."""
+    import shutil
+    import subprocess
+    if oscompat.IS_WINDOWS or not shutil.which("pactl"):
+        return
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        try:
+            if subprocess.run(["pactl", "info"], capture_output=True, timeout=2).returncode == 0:
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(0.5)
+    print("[audio] server suara belum siap; Digidaw tetap berjalan")
+
+
+_wait_for_audio()
+try:
+    import settings as _settings
+    _settings.ensure_keep_apps()        # restarting Digidaw must never close the apps it opened
+except Exception:
+    pass
 import tts
 if not oscompat.IS_WINDOWS:
     # `import tts` started pygame/SDL, which swallows SIGTERM. Until main() installs the real handler,
@@ -101,6 +125,7 @@ import security_scan
 import screen_context
 import generator
 import alarms
+import antigravity_analysis
 from core import DigidawCore, FILLERS
 
 console = Console()
@@ -295,6 +320,7 @@ def main(args=ARGS):
     security_scan.ANNOUNCE = core.announce
     generator.ANNOUNCE = core.announce
     alarms.ANNOUNCE = core.announce
+    antigravity_analysis.ANNOUNCE = core.announce
     alarms.start()
     security_scan.start_background()
     screen_context.start()

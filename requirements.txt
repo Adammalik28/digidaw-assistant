@@ -12,7 +12,7 @@ colorama==0.4.6
 comtypes==1.4.17; sys_platform == "win32"
 cryptography==50.0.1
 distro==1.9.0
-edge-tts==7.2.8
+edge-tts>=7.3.1   # older versions are rejected by the service (HTTP 403)
 frozenlist==1.8.0
 google-auth==2.59.0
 google-genai==2.25.0

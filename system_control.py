@@ -1599,6 +1599,25 @@ if not IS_WINDOWS:   # these docstrings are what Gemini reads about the tools
 
 # ─────────────────────────── info & timers ───────────────────────────
 
+# wttr.in leaves some conditions in English even with lang=id
+WEATHER_ID = {"smoky haze": "berkabut asap", "haze": "berkabut", "mist": "berkabut tipis", "fog": "berkabut",
+              "patchy rain nearby": "hujan ringan di sekitar", "patchy rain possible": "kemungkinan hujan ringan",
+              "light rain": "hujan ringan", "light rain shower": "hujan ringan sesaat", "moderate rain": "hujan sedang",
+              "heavy rain": "hujan lebat", "thundery outbreaks possible": "kemungkinan badai petir",
+              "thunderstorm": "badai petir", "partly cloudy": "berawan sebagian", "cloudy": "berawan",
+              "overcast": "mendung", "sunny": "cerah", "clear": "cerah", "light drizzle": "gerimis"}
+
+
+def _weather_words(text: str) -> str:
+    """'…: Smoky haze, suhu +33°C, …, angin ↙8km/h' -> '…: berkabut asap, suhu 33°C, …, angin 8 km per jam'."""
+    m = re.match(r"([^:]+):\s*([^,]+),(.*)", text)
+    if m and m[2].strip().lower() in WEATHER_ID:
+        text = f"{m[1]}: {WEATHER_ID[m[2].strip().lower()]},{m[3]}"
+    text = re.sub(r"[←↑→↓↖↗↘↙]", "", text)
+    text = re.sub(r"(\d+)\s*km/h", r"\1 km per jam", text)
+    return re.sub(r"\+(\d)", r"\1", text)
+
+
 def get_weather(city: str = "") -> str:
     """Current weather for a city (empty = current location based on IP)."""
     city = (city or config.DEFAULT_CITY or "").strip()
@@ -1615,7 +1634,7 @@ def get_weather(city: str = "") -> str:
         except Exception:
             continue
         if text and not re.search(r"unknown location|not found|sorry", text, re.IGNORECASE) and len(text) < 200:
-            return f"Cuaca {text}."
+            return f"Cuaca {_weather_words(text)}."
     if reached:
         return f"Maaf {T}, kota '{city}' tidak ditemukan di layanan cuaca."
     return f"Maaf {T}, data cuaca sedang tidak bisa diakses."

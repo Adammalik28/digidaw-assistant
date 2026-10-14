@@ -83,6 +83,11 @@ def focus_window(name: str) -> str:
     (e.g. 'chrome', 'firefox', 'code', 'discord', 'spotify', 'youtube')."""
     w = _find(name)
     if not w:
+        import screen_context            # "pindah ke YouTube" is often a browser tab, not a window
+        if screen_context._browser_windows():
+            result = screen_context.switch_tab(name)
+            if not result.startswith("Tidak ada"):
+                return result
         return f"Tidak ada jendela '{name}' yang terbuka, {T}."
     _force_foreground(w["hwnd"])
     return f"Beralih ke {w['title'][:60]}, {T}."

@@ -526,6 +526,9 @@ def cancel_timers(keyword: str = "") -> str:
         names = ", ".join((i["label"] or i["kind"]) + (f" ({i['time'].replace(':', '.')})" if i["kind"] == "alarm" else "")
                           for i in targets[:3])
         return f"{len(targets)} dibatalkan: {names}, {T}."
+    if key in ("", "semua", "semuanya", "all", "timer", "alarm", "pengingat", "reminder"):
+        what = {"timer": "timer", "alarm": "alarm", "pengingat": "pengingat", "reminder": "pengingat"}.get(key, "timer atau alarm")
+        return f"Tidak ada {what} yang sedang berjalan, {T}."
     return f"Tidak ada timer atau alarm yang cocok dengan '{keyword}', {T}."
 
 
