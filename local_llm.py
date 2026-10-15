@@ -72,6 +72,7 @@ def chat(messages: list[dict], tools: list[dict] | None = None, max_tokens: int 
 def strip_thinking(text: str) -> str:
     """Drop a <think>...</think> block some models still write into the answer."""
     text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
+    text = re.sub(r"(?<=\d)\s*\*\s*(?=\d)", " × ", text)       # "10 * 30" is a multiplication, not markdown
     return text.replace("*", "").replace("#", "").strip()
 
 

@@ -82,6 +82,7 @@ def is_indonesian(text: str) -> bool:
 
 def clean_for_speech(text: str) -> str:
     """Remove things that sound awful when read aloud (markdown, URLs, full file paths, emoji)."""
+    text = re.sub(r"(?<=\d)\s*[*×]\s*(?=\d)", " kali " if is_indonesian(text) else " times ", text)
     text = text.replace("*", "").replace("#", "").replace("`", "")
     text = re.sub(r"https?://\S+", "tautan", text)
     text = re.sub(r"[A-Za-z]:\\[^\s,;]*", lambda m: Path(m.group(0).rstrip(".")).name or "folder", text)
@@ -130,6 +131,10 @@ def speakable(text: str) -> str:
     text = re.sub(r"\b(\d{1,3}):([0-5]\d)\b", _duration, text)                       # media positions
     text = re.sub(r"\b(\d+)\s?/\s?(10|100)\b", r"\1 dari \2", text)                 # scores: 81/100
     text = re.sub(r"\b(\d+)\s?/\s?(\d+)\b", r"\1 per \2", text)
+    if re.search(r"\d\s*=\s*-?\d", text):                                               # a calculation
+        text = re.sub(r"(?<=\d)\s+-\s+(?=\d)", " kurang ", text)
+        text = re.sub(r"(?<=\d)\s*=\s*(?=-?\d)", " sama dengan ", text)
+    text = re.sub(r"(?<=\d)\s*\+\s*(?=\d)", " tambah ", text)                            # "10 + 300"
     text = re.sub(r"(?<![\w])\+\s?(\d)", r"\1", text)                                  # "+21°C" -> "21"
     text = re.sub(r"(?<![\w])-\s?(\d+(?:[.,]\d+)?)\s?°", r"minus \1°", text)
     text = re.sub(r"\s?°\s?C\b", " derajat", text).replace("°", " derajat")

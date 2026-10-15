@@ -18,6 +18,9 @@ FAILED_RESULT = re.compile(r"tidak ditemukan|tidak ada|gagal|belum terpasang|tid
 # misheard often enough to fix from the start; learned aliases are added to these
 BUILTIN_ALIASES = {
     "white droid": "waydroid", "way droid": "waydroid", "wey droid": "waydroid", "weidroid": "waydroid",
+    "white dro": "waydroid", "why droid": "waydroid", "wai droid": "waydroid", "waidroid": "waydroid",
+    "buka get up": "buka github", "buka git hub": "buka github", "buka get hub": "buka github",
+    "pindah ke wordpress": "pindah ke workspace", "ke work press": "ke workspace", "wordpres": "workspace",
     "wasap": "whatsapp", "watsap": "whatsapp", "whatsap": "whatsapp", "wapsi": "whatsapp",
     "work space": "workspace", "workspes": "workspace", "wokspace": "workspace",
     "aplikasi digital": "aplikasi digidaw", "jendela digital": "jendela digidaw",

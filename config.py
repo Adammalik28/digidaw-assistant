@@ -114,16 +114,19 @@ if ENV_FILE.exists():
 
 # Gemini AI Settings
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-MODEL_PREFERENCE = "fast"      # "fast" (flash-lite first) | "smart" (flash first, slower but sharper)
-PRIMARY_MODEL = "gemini-flash-lite-latest"
+MODEL_PREFERENCE = "fast"      # "fast" (the order listed below: measured fastest first) | "smart" (full Flash first)
+PRIMARY_MODEL = "gemini-3.1-flash-lite"
 # Each model has its own free-tier quota (about 15 requests/minute), so several fast models are
 # rotated: when one hits its limit Digidaw uses the next and comes back once it has cooled down.
+# Order = speed for one tool call (minimal thinking), measured 15 Oct 2026: 3.1-flash-lite 1.4-2.2 s, its preview 2.3 s,
+# 3.5-flash 1-2 s BUT only 20 requests a day on the free tier (so it only takes over when the others are full),
+# flash-lite-latest 4-10 s (the "lite" name no longer means faster), flash-latest 5-10 s.
 FALLBACK_MODELS = [
-    "gemini-flash-lite-latest",       # = gemini-3.5-flash-lite (same quota, so not listed twice)
     "gemini-3.1-flash-lite",
     "gemini-3.1-flash-lite-preview",
-    "gemini-flash-latest",
     "gemini-3.5-flash",
+    "gemini-flash-lite-latest",       # = gemini-3.5-flash-lite (same quota, so not listed twice)
+    "gemini-flash-latest",
 ]
 MODEL_RPM = 14                 # stay just under the free tier's 15 requests/minute per model
 AI_TIMEOUT_SECONDS = 20        # one Gemini request never waits longer than this
@@ -188,7 +191,11 @@ How to act:
   media_control('pause'). Bare "putar/play/lanjutkan/resume" (no title) -> media_control('play').
   "lagu berikutnya/skip" -> media_control('next'). "apa lagu ini?" -> now_playing.
 - Questions about current events, prices, scores, weather elsewhere or anything after your
-  knowledge cutoff -> web_search (or get_news), then answer from the results.
+  knowledge cutoff -> web_search (or get_news), then answer from the results. Search ONCE (one good
+  query) and answer from what came back, giving the best figure with its source; search again only when
+  the first result was empty. Every extra search costs the user several seconds.
+- "Cek pesan masuk" / "ada notifikasi apa" / "ada pesan WhatsApp" -> read_notifications (it reads out who
+  sent what; messages_only=True for messages, app="whatsapp" for one app).
 - "Lihat layar / apa ini / baca ini / error apa ini" -> analyze_screen with the user's question.
 - For "catat"/"tulis catatan" requests, write the note content cleanly and well formatted, exactly
   as the user dictated (fix obvious speech-recognition typos only). If the content is missing, ask.
@@ -305,12 +312,14 @@ if os.name != "nt":
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
 
+_MODEL_ORDER = list(FALLBACK_MODELS)
+
+
 def apply_model_preference():
-    """"smart" moves the (slower, sharper) Flash models to the front of the rotation."""
+    """"smart" moves the full Flash models to the front of the rotation; "fast" is the list's own order."""
     global FALLBACK_MODELS
-    smart = [m for m in FALLBACK_MODELS if "lite" not in m]
-    fast = [m for m in FALLBACK_MODELS if "lite" in m]
-    FALLBACK_MODELS = smart + fast if MODEL_PREFERENCE == "smart" else fast + smart
+    smart = [m for m in _MODEL_ORDER if "lite" not in m]
+    FALLBACK_MODELS = smart + [m for m in _MODEL_ORDER if "lite" in m] if MODEL_PREFERENCE == "smart" else list(_MODEL_ORDER)
 
 
 def _load_user_settings():

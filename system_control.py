@@ -672,6 +672,11 @@ def _closable(p: psutil.Process) -> bool:
         return False
 
 
+# background helpers that outlive their app (Chrome's crash reporter keeps running after Chrome is closed):
+# never "the app" — "tutup Chrome" with only these left means Chrome isn't open
+HELPER_PROCESS_RE = re.compile(r"crashpad|crash_?handler|crash_?reporter", re.IGNORECASE)
+
+
 def _matching_processes(name: str) -> list[psutil.Process]:
     key = _match_key(name, PROCESS_ALIASES)
     target = PROCESS_ALIASES[key] if key else name.lower().replace(" ", "")
@@ -681,7 +686,7 @@ def _matching_processes(name: str) -> list[psutil.Process]:
     procs = []
     for p in psutil.process_iter(["name", "pid"]):
         pname = (p.info["name"] or "").lower()
-        if _protected(pname) or p.info["pid"] == os.getpid():
+        if _protected(pname) or p.info["pid"] == os.getpid() or HELPER_PROCESS_RE.search(pname):
             continue
         base = pname.removesuffix(".exe")
         # exact name, or the name starts with it ("fire" -> firefox); a fragment inside a word ("gra" in

@@ -26,6 +26,23 @@ import config
 import events
 
 PAGE = Path(config.BASE_DIR) / "hud" / "mobile.html"
+SERVICE_WORKER = Path(config.BASE_DIR) / "hud" / "sw.js"
+ICONS = Path(config.BASE_DIR) / "hud" / "icons"
+MANIFEST = {
+    "id": "/", "name": "Digidaw", "short_name": "Digidaw", "description": "Asisten suara Digidaw dari HP",
+    "start_url": "/", "scope": "/", "display": "standalone", "orientation": "portrait",
+    "background_color": "#030a12", "theme_color": "#030a12", "lang": "id",
+    "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+              {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+              {"src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+    # Android's "Bagikan" menu: links, text and files go to Digidaw (the service worker takes the POST)
+    "share_target": {"action": "/share-target", "method": "POST", "enctype": "multipart/form-data",
+                     "params": {"title": "title", "text": "text", "url": "url",
+                                "files": [{"name": "files", "accept": ["image/*", "video/*", "audio/*", "application/*", "text/*"]}]}},
+    "shortcuts": [{"name": "Bicara", "url": "/?tab=talk", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]},
+                  {"name": "Layar PC", "url": "/?tab=screen", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]},
+                  {"name": "Agenda", "url": "/?tab=agenda", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]}],
+}
 TLS_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "digidaw" / "tls"
 MAX_AUDIO = 4 * 1024 * 1024                # a spoken command from the phone (~15 s of opus is far less)
 SESSIONS_FILE = Path(config.LOG_DIR) / "mobile_sessions.json"
@@ -75,6 +92,8 @@ def _certificate() -> tuple[Path, Path]:
                                            serialization.NoEncryption()))
         os.chmod(path, 0o600)
 
+    if ca_key_file.exists() and ca_file.exists() and not _local_only(x509.load_pem_x509_certificate(ca_file.read_bytes())):
+        ca_file.unlink()                   # an older CA without the "local network only" limit: replace it
     if not (ca_key_file.exists() and ca_file.exists()):
         ca_key = ec.generate_private_key(ec.SECP256R1())
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Digidaw Local CA")])
@@ -82,6 +101,9 @@ def _certificate() -> tuple[Path, Path]:
               .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(days=1))
               .not_valid_after(now + dt.timedelta(days=3650))
               .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+              # a phone that installs this CA trusts it only for home-network addresses, never for a real website
+              # (so even a stolen ca.key couldn't impersonate a bank or Google to that phone)
+              .add_extension(x509.NameConstraints(permitted_subtrees=LOCAL_SUBTREES(), excluded_subtrees=None), critical=True)
               .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True, content_commitment=False,
                                            key_encipherment=False, data_encipherment=False, key_agreement=False,
                                            encipher_only=False, decipher_only=False), critical=True)
@@ -103,7 +125,7 @@ def _certificate() -> tuple[Path, Path]:
             return cert_file, key_file
     key = ec.generate_private_key(ec.SECP256R1())
     sans = [x509.IPAddress(ipaddress.ip_address(ip)), x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            x509.DNSName("localhost"), x509.DNSName(socket.gethostname())]
+            x509.DNSName("localhost")]
     cert = (x509.CertificateBuilder()
             .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"Digidaw {ip}")]))
             .issuer_name(ca.subject).public_key(key.public_key()).serial_number(x509.random_serial_number())
@@ -114,6 +136,21 @@ def _certificate() -> tuple[Path, Path]:
     write_key(key_file, key)
     cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     return cert_file, key_file
+
+
+def LOCAL_SUBTREES():
+    from cryptography import x509
+    nets = ("192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "127.0.0.0/8")
+    return [x509.IPAddress(ipaddress.ip_network(n)) for n in nets] + [x509.DNSName("localhost")]
+
+
+def _local_only(ca) -> bool:
+    from cryptography import x509
+    try:
+        ca.extensions.get_extension_for_class(x509.NameConstraints)
+        return True
+    except x509.ExtensionNotFound:
+        return False
 
 
 def enabled() -> bool:
@@ -142,9 +179,11 @@ def _save_sessions():
 
 def logout_all():
     """Forget every phone that logged in (after changing the PIN)."""
+    import mobile_push
     with _lock:
         _sessions.clear()
         _save_sessions()
+    mobile_push.unsubscribe()
 
 
 def _state() -> dict:
@@ -185,15 +224,20 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return ip.is_private or ip.is_loopback
 
-    def _session_ok(self) -> bool:
-        cookie = self.headers.get("Cookie", "")
-        for part in cookie.split(";"):
+    def _session_hash(self) -> str:
+        """The hashed session token of this request ('' without a cookie)."""
+        for part in self.headers.get("Cookie", "").split(";"):
             name, _, value = part.strip().partition("=")
             if name == COOKIE and value:
-                with _lock:
-                    expiry = _sessions.get(_hash(value), 0)
-                return expiry > time.time()
-        return False
+                return _hash(value)
+        return ""
+
+    def _session_ok(self) -> bool:
+        session = self._session_hash()
+        if not session:
+            return False
+        with _lock:
+            return _sessions.get(session, 0) > time.time()
 
     def _send(self, code: int, body: bytes, content_type: str, extra: dict | None = None):
         self.send_response(code)
@@ -206,6 +250,24 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_file(self, path: Path):
+        """Stream a file to the phone as a download (never read whole into memory)."""
+        import mimetypes
+        import mobile_share
+        from urllib.parse import quote
+        size = path.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(path.name)}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        with open(path, "rb") as f:
+            while chunk := f.read(256 * 1024):
+                self.wfile.write(chunk)
+        mobile_share.downloaded(path)
 
     def _json(self, code: int, obj, extra: dict | None = None):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", extra)
@@ -257,15 +319,55 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, (TLS_DIR / "ca.crt").read_bytes(), "application/x-x509-ca-cert",
                               {"Content-Disposition": 'attachment; filename="digidaw-ca.crt"'})
         if path == "/manifest.json":
-            manifest = {"name": "Digidaw", "short_name": "Digidaw", "start_url": "/", "display": "standalone",
-                        "background_color": "#030a12", "theme_color": "#030a12"}
-            return self._json(200, manifest)
+            return self._send(200, json.dumps(MANIFEST).encode(), "application/manifest+json")
+        if path == "/sw.js":                      # the service worker: notifications while the page is closed
+            return self._send(200, SERVICE_WORKER.read_bytes(), "text/javascript; charset=utf-8")
+        if path.startswith("/icons/") and path.endswith(".png"):
+            icon = ICONS / Path(path).name        # only a file name: nothing outside hud/icons
+            return self._send(200, icon.read_bytes(), "image/png") if icon.is_file() else self._send(404, b"", "text/plain")
+        if path in ("/api/share/clipboard", "/api/files", "/api/files/get"):
+            if not self._session_ok():
+                return self._json(401, {"login": True})
+            import mobile_share
+            if path == "/api/share/clipboard":
+                return self._json(200, {"text": mobile_share.get_clipboard()})
+            if path == "/api/files":
+                return self._json(200, {"files": mobile_share.recent_files()})
+            from urllib.parse import parse_qs
+            query = parse_qs(urlparse(self.path).query)
+            file = mobile_share.file_path((query.get("folder") or [""])[0], (query.get("name") or [""])[0])
+            if not file:
+                return self._send(404, b"", "text/plain")
+            return self._send_file(file)
+        if path == "/api/push":
+            if not self._session_ok():
+                return self._json(401, {"login": True})
+            import mobile_push
+            return self._json(200, {"key": mobile_push.public_key(),
+                                    "subscribed": mobile_push.subscribed(self._session_hash())})
         self._send(404, b"", "text/plain")
 
     def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/share-target" and self._client_ok():
+            # Android shared something but the service worker (which normally takes it) isn't running:
+            # ignore the body (no custom header = could be any page) and just open the HUD
+            return self._send(303, b"", "text/plain", {"Location": "/?share=nosw"})
         if not self._client_ok() or self.headers.get("X-Digidaw") != "1":
             return self._send(403, b"", "text/plain")
-        path = urlparse(self.path).path
+        if path == "/api/share/file":
+            if not self._session_ok():
+                self.close_connection = True     # the file body wasn't read
+                return self._json(401, {"login": True})
+            import mobile_share
+            from urllib.parse import unquote
+            try:
+                saved = mobile_share.save_upload(self.rfile, int(self.headers.get("Content-Length", 0) or 0),
+                                                 unquote(self.headers.get("X-Filename", "file")))
+            except (ValueError, OSError) as e:
+                self.close_connection = True
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"saved": saved.name, "folder": saved.parent.name})
         if path in ("/api/voice", "/api/listen"):
             if not self._session_ok():
                 return self._json(401, {"login": True})
@@ -275,8 +377,47 @@ class _Handler(BaseHTTPRequestHandler):
             return self._login(str(data.get("pin", "")))
         if not self._session_ok():
             return self._json(401, {"login": True})
-        if path == "/api/logout":
+        if path == "/api/logout":                # end this session on the server too, not only the cookie
+            import mobile_push
+            session = self._session_hash()
+            with _lock:
+                _sessions.pop(session, None)
+                _save_sessions()
+            mobile_push.unsubscribe(session=session)
             return self._json(200, {"ok": True}, {"Set-Cookie": f"{COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
+        if path.startswith("/api/share/"):
+            import mobile_share
+            action = path.rsplit("/", 1)[1]
+            if action == "link":
+                return self._json(200, {"result": mobile_share.open_link(str(data.get("url", ""))[:2000])})
+            if action == "text":
+                text, mode = str(data.get("text", ""))[:20000], str(data.get("mode", "clipboard"))
+                if mode == "type":
+                    return self._json(200, {"result": mobile_share.type_text(text)})
+                if mode == "ask":
+                    return self._json(200, {"result": _command(text[:500], bool(data.get("pc_voice", True)))})
+                return self._json(200, {"result": mobile_share.set_clipboard(text)})
+            if action == "received":
+                names = [str(n) for n in (data.get("names") or [])][:50]
+                mobile_share.received([mobile_share.inbox() / mobile_share.safe_name(n) for n in names])
+                return self._json(200, {"ok": True})
+            if action == "open-file":
+                return self._json(200, {"result": mobile_share.open_received(str(data.get("name", "")))})
+            return self._json(404, {"error": "tidak dikenal"})
+        if path.startswith("/api/push/"):
+            import mobile_push
+            action = path.rsplit("/", 1)[1]
+            if action == "subscribe":
+                return self._json(200, {"ok": mobile_push.subscribe(data.get("subscription") or {}, self._session_hash())})
+            if action == "unsubscribe":
+                mobile_push.unsubscribe(endpoint=str(data.get("endpoint", "")))
+                return self._json(200, {"ok": True})
+            if action == "test":
+                sent = mobile_push.send({"kind": "alert", "title": "Digidaw", "tag": "test",
+                                         "text": "Notifikasi Digidaw sudah aktif. Ini akan muncul walau HUD ditutup."},
+                                        session=self._session_hash(), urgent=True)
+                return self._json(200, {"sent": sent})
+            return self._json(404, {"error": "tidak dikenal"})
         if path == "/api/media":
             return self._json(200, {"result": _media(str(data.get("action", "")), data.get("value"))})
         if path == "/api/command":
@@ -328,40 +469,47 @@ class _Handler(BaseHTTPRequestHandler):
         if not heard:
             return self._json(200, {"heard": "", "reply": "Maaf, suaranya tidak terdengar jelas. Coba lagi."})
         pc_voice = self.headers.get("X-PC-Voice", "1") != "0"
+        if not pc_voice:
+            note_phone_voice()
         return self._json(200, {"heard": heard, "reply": _command(heard, pc_voice)})
 
     def _listen(self):
         """Hands-free mode: one phrase the phone heard by itself. Only phrases that call "Digidaw" are acted on
         (checked here with the same local Whisper gate as the PC's own microphone); everything else is dropped.
-        X-Armed: 1 = the phone just heard "Digidaw" alone, so this phrase is the command."""
+        X-Armed: 1 = the phone just heard "Digidaw" alone, so this phrase is the command ("loose": it heard an
+        alias like "digital", so the phrase has to look like a command)."""
         length = int(self.headers.get("Content-Length", 0) or 0)
         if not 0 < length <= MAX_AUDIO:
             return self._json(400, {"error": "rekaman kosong atau terlalu panjang"})
         data = _audio_data(self.rfile.read(length))
         if data is None:
             return self._json(200, {"ignored": True})
-        pc_voice = self.headers.get("X-PC-Voice", "1") != "0"
-        if self.headers.get("X-Armed") == "1":
-            heard = _recognize(data)
-            if not heard:
-                return self._json(200, {"ignored": True})
-            return self._json(200, {"heard": heard, "reply": _command(heard, pc_voice, dedupe=True)})
-        try:
-            import local_stt
-            gate = local_stt.transcribe(data, local_stt.GATE_MODEL)
-            if not local_stt.mentions_wake(gate):
-                return self._json(200, {"ignored": True})
-        except Exception:
-            pass                                 # no local Whisper: let Google decide
-        heard = _recognize(data, prefer_wake=True)
         import core
-        addressed, command, loose = core.detect_wake(heard) if heard else (False, "", False)
-        if not addressed:
+        pc_voice = self.headers.get("X-PC-Voice", "1") != "0"
+        armed = {"1": "1", "loose": "loose", "followup": "followup"}.get(self.headers.get("X-Armed", ""), "")
+        if not armed:
+            try:
+                import local_stt
+                gate = local_stt.transcribe(data, local_stt.GATE_MODEL)
+                if not local_stt.mentions_wake(gate):
+                    return self._json(200, {"ignored": True})
+            except Exception:
+                pass                             # no local Whisper: let Google decide
+        heard = _recognize(data, prefer_wake=True)
+        if heard and armed and _echo(heard):
+            print(f"[HUD HP] terdengar suara Digidaw sendiri ({heard!r}), diabaikan")
+            return self._json(200, {"ignored": True, "echo": True})
+        what, command = core.classify_call(heard or "", armed)
+        if what == "ignore":
+            if heard and not armed:
+                print(f"[HUD HP] terdengar {heard!r}, bukan panggilan — diabaikan")
             return self._json(200, {"ignored": True})
-        print(f"[HUD HP] dipanggil dari HP: {heard!r}")
-        if not command:                          # just "Digidaw": the next phrase is the command
-            return self._json(200, {"armed": True, "heard": heard})
-        return self._json(200, {"heard": command, "reply": _command(command, pc_voice, dedupe=True)})
+        print(f"[HUD HP] dari HP: {heard!r}" + ("" if what == "command" else " → menunggu perintah"))
+        if not pc_voice:
+            note_phone_voice()
+        if what == "arm":                        # just "Digidaw": the next phrase is the command
+            return self._json(200, {"armed": True, "loose": command == "loose", "heard": heard})
+        return self._json(200, {"heard": command, "reply": _command(command, pc_voice)})
 
     def _stream_screen(self, width: int, fps: float):
         """The screen as a live MJPEG stream (one connection, a new frame whenever the screen changes, up to
@@ -434,7 +582,10 @@ class _Server(ThreadingHTTPServer):
             request = self.tls.wrap_socket(request, server_side=True)
         except (ssl.SSLError, OSError):
             return                          # plain http, or the phone hasn't accepted the certificate yet
-        self.RequestHandlerClass(request, client_address, self)
+        try:
+            self.RequestHandlerClass(request, client_address, self)
+        except (BrokenPipeError, ConnectionResetError, ssl.SSLError, TimeoutError):
+            pass                            # the phone left mid-answer (switched apps, screen off): nothing to do
 
 
 # ───────────────────────────── actions ─────────────────────────────
@@ -455,38 +606,51 @@ def _media(action: str, value=None) -> str:
     return "aksi tidak dikenal"
 
 
-def _already_done(text: str) -> str:
-    """The PC's own microphone may have heard the same sentence (phone and PC in one room): don't run it twice.
-    Returns the earlier answer when the same command (by similarity) just ran or is running, else ''."""
+_phone_voice: list[float] = []         # when the phone (set to "HP saja") accepted a spoken command
+
+
+def note_phone_voice():
+    now = time.time()
+    with _lock:
+        _phone_voice[:] = [t for t in _phone_voice if now - t < 60] + [now]
+
+
+def phone_covers(queued_at: float) -> bool:
+    """Did the phone, set to answer by itself, take the same spoken command the PC's microphone queued at
+    `queued_at`? (Its phrase arrives a moment before or after: it first has to be cut, sent and recognised.)"""
+    with _lock:
+        return any(-6 <= t - queued_at <= 10 for t in _phone_voice)
+
+
+def _echo(heard: str) -> bool:
+    """While the phone listens on after an answer, it may hear that answer itself (from its own speaker or the
+    PC's): a phrase that matches the latest reply is Digidaw's voice, not the user."""
     import difflib
-    import hud_server
-    core = getattr(hud_server._handlers.get("command"), "__self__", None)
-    if core is None:
-        return ""
-    deadline = time.time() + 3
-    while core.busy.is_set() and time.time() < deadline:     # it may be running right now
-        time.sleep(0.1)
-    last_text, finished = getattr(core, "_last_command", ("", 0.0))
-    if time.time() - finished > 8 or not last_text:
-        return ""
-    if difflib.SequenceMatcher(None, last_text, text.lower().strip()).ratio() < 0.8:
-        return ""
-    replies = [e.get("text", "") for e in list(events.history) if e.get("type") == "digidaw"]
-    return replies[-1] if replies else "Sudah dijalankan."
+    import re
+    words = lambda t: re.sub(r"[^\w\s]", " ", t.lower()).split()
+    said = words(heard)
+    if not said:
+        return False
+    now = time.time()
+    for e in reversed(list(events.history)):
+        if e.get("type") != "digidaw" or now - e.get("ts", 0) > 45:
+            continue
+        reply = words(e.get("text", ""))
+        if difflib.SequenceMatcher(None, said, reply).ratio() >= 0.6:
+            return True
+        if len(said) >= 3 and " ".join(said) in " ".join(reply):
+            return True
+    return False
 
 
-def _command(text: str, pc_voice: bool = True, dedupe: bool = False) -> str:
+def _command(text: str, pc_voice: bool = True) -> str:
     """Run a typed command like the HUD's text box and wait (up to 40 s) for Digidaw's answer.
-    pc_voice=False: the PC stays quiet (the phone reads the answer out itself). dedupe: hands-free mode, where
-    the PC's own microphone may have heard the same sentence."""
+    pc_voice=False: the PC stays quiet (the phone reads the answer out itself). A sentence the PC's own
+    microphone also heard runs only once (core skips the later one and hands back the earlier answer)."""
     import hud_server
     text = text.strip()
     if not text or not hud_server._handlers.get("command"):
         return ""
-    if dedupe:
-        duplicate = _already_done(text)
-        if duplicate:
-            return duplicate
     sent = time.time()                     # history is a capped deque: find the answer by time, not by position
     done = hud_server._handlers["command"](text, "hp" if pc_voice else "hp-silent")
     deadline = sent + config.COMMAND_TIMEOUT_SECONDS
@@ -497,7 +661,7 @@ def _command(text: str, pc_voice: bool = True, dedupe: bool = False) -> str:
         if replies:
             return replies[-1]
         if hasattr(done, "is_set") and done.is_set():
-            break
+            return getattr(done, "reply", "") or "Perintah dikirim."
         time.sleep(0.1)
     return "Perintah dikirim."
 
@@ -729,6 +893,9 @@ def start() -> bool:
     if not enabled():
         return False
     _load_sessions()
+    import mobile_push
+    mobile_push.start()
+    mobile_push.forget_sessions(set(_sessions))
     try:
         cert, key = _certificate()
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

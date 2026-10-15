@@ -24,6 +24,7 @@ import generator
 import alarms
 import agenda
 import mobile_server
+import notifications
 import gcal_sync
 import antigravity_analysis
 import habits
@@ -192,7 +193,7 @@ def forget_correction(word: str) -> str:
 
 
 ALL_SKILLS = (sc.AI_TOOLS + media.AI_TOOLS + window_manager.AI_TOOLS + ai_skills.AI_TOOLS
-              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
+              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + notifications.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
 def _usable(fn) -> bool:
     """Gemini must be able to build a schema from the function signature; one bad tool would make every
     AI request fail, so such a tool is left out (and reported) instead."""
@@ -334,6 +335,27 @@ def _run_turn(model: str, message: str, direct_ok: bool) -> str:
     raise RuntimeError("terlalu banyak langkah tool")
 
 
+def _answer_from_results(question: str) -> str:
+    """The model ran out of quota after the search: one short, tool-free request to the next model that is free
+    turns the results into an answer (a search takes 2-3 requests, and each model only has ~14 a minute)."""
+    from google.genai import types
+    results = "\n\n".join(r for _, _, r in _calls_this_turn[-3:])[:6000]
+    prompt = (f"Pertanyaan user: {question}\n\nHasil pencarian/tool:\n{results}\n\n"
+              f"Jawab pertanyaan itu dalam 1-3 kalimat singkat berbahasa Indonesia, hanya dari hasil di atas "
+              f"(sebut angka/fakta terbaru dan sumbernya bila ada). Jangan memakai markdown. Sapa user dengan \"{T}\" paling banyak sekali.")
+    for model in llm.candidates():
+        try:
+            llm.record_call(model)
+            cfg = types.GenerateContentConfig(max_output_tokens=400, thinking_config=llm.thinking_config(model))
+            reply = llm.clean(llm.get_client().models.generate_content(model=model, contents=prompt, config=cfg).text)
+            if reply:
+                llm.mark_ok(model)
+                return reply
+        except Exception as e:
+            console.print(f"[dim red]  [{model}] {escape(llm.report_error(model, e))}[/dim red]")
+    return f"Maaf {T}, hasil pencarian sudah ada tapi AI sedang penuh, jadi belum bisa saya ringkas. Coba tanya lagi sebentar lagi."
+
+
 def ask_agent(text: str) -> str | None:
     """Let Gemini understand the request and run whatever skills it needs.
     Returns None if the AI is unavailable so the caller can fall back to local rules."""
@@ -366,6 +388,8 @@ def ask_agent(text: str) -> str | None:
             console.print(f"[dim red]  [{model}] {escape(llm.report_error(model, e))}[/dim red]")
             if _tool_results:  # a skill already ran; don't repeat it via fallback
                 llm.mark_ok(model)
+                if any(name in NEEDS_REPLY_TOOLS for name, _, _ in _calls_this_turn):
+                    return _answer_from_results(text)       # raw search results must never be read out
                 return _combine(_tool_results[-1:])
             kind = llm.classify(e)
             if kind in llm.GLOBAL_FAILURES:
@@ -401,6 +425,7 @@ LOCAL_TOOL_NAMES = [
     "add_event", "list_events", "delete_event",
     "get_weather", "get_system_status", "open_folder", "open_file", "find_files", "remember", "recall_memories",
     "learned_habits", "lock_workstation", "shutdown_pc", "restart_pc", "sleep_pc", "google_search",
+    "read_notifications",
 ]
 # words that mean the answer has to come from the internet, the screen, a document or a big Gemini skill
 ONLINE_TOPIC_RE = re.compile(
@@ -531,6 +556,7 @@ LOCAL_TOOL_GROUPS = [
         "add_event", "list_events", "delete_event"]),
     (r"status|baterai|batre|cpu|ram|memori|sistem|laptop|komputer|pc", ["get_system_status"]),
     (r"cuaca|hujan|panas|suhu|dingin|cerah|weather", ["get_weather"]),
+    (r"pesan|chat|notif|notifikasi|whatsapp|telegram|email|surel", ["read_notifications"]),
     (r"file|berkas|folder|direktori|dokumen|unduhan|download", ["open_folder", "open_file", "find_files"]),
     (r"ketik|ketikkan|tekan|shortcut|tombol|enter", ["type_text", "press_keys"]),
     (r"screenshot|tangkap layar|tangkapan layar", ["take_screenshot"]),
@@ -1009,7 +1035,25 @@ FAST_ROUTES = [(re.compile(p), h) for p, h in [
     (r"(?:salin|copy|kopi) (?:link|url|alamat)(?: (?:halaman|web))?(?: ini)?", lambda m: ("copy_current_link", {})),
     (r"(?:saya )?(?:sedang )?(?:buka|lihat) (?:halaman |jendela |aplikasi )?apa(?: sekarang)?|ini (?:halaman|jendela|aplikasi) apa",
      lambda m: ("active_window_info", {})),
+    # notifications that came in (WhatsApp etc.): who sent it and what it says
+    (r"(?:tolong )?(?:cek|lihat|baca|bacakan|bacain|periksa|tampilkan)(?: semua)? (?:pesan|chat)(?: yang)?(?: (?:masuk|baru|terbaru|tadi))?"
+     r"(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: (?:ada )?apa(?: saja)?)?|"
+     r"(?:apakah |apa )?ada (?:pesan|chat)(?: (?:baru|masuk|baru masuk))?(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: tidak| nggak| gak)?|"
+     r"(?:apakah |apa )?ada (?:pesan|chat) (whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram)(?: (?:baru|masuk))?",
+     lambda m: ("read_notifications", {"messages_only": True, "app": next((g for g in m.groups() if g), "")})),
+    (r"(?:tolong )?(?:cek|lihat|baca|bacakan|bacain|periksa|tampilkan)(?: semua)? (?:notifikasi|notif)(?: (?:yang )?(?:masuk|baru|tadi))?"
+     r"(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: (?:ada )?apa(?: saja)?)?|"
+     r"(?:apakah |apa )?ada (?:notifikasi|notif)(?: (?:baru|masuk))?(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: tidak| nggak| gak)?|"
+     r"notifikasi apa(?: saja)?(?: yang masuk)?",
+     lambda m: ("read_notifications", {"app": next((g for g in m.groups() if g), "")})),
+    (r"(?=.*(?:ulang|lagi|tadi|itu))(?:baca|bacakan|bacain|ulangi)(?: ulang| lagi)?(?: (?:pesan|notifikasi|notif))?(?: (?:tadi|itu))?(?: lagi)?"
+     r"(?: (?:dari |di )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?",
+     lambda m: ("read_notifications", {"include_read": True, "app": next((g for g in m.groups() if g), "")})),
     (r"(?:sekarang )?(?:jam|pukul) berapa(?: sekarang)?", lambda m: ("get_time", {})),
+    (r"(?:(?:bagaimana|gimana|apa|cek|lihat)\s+)?cuaca(?: (?:hari ini|sekarang|saat ini|di luar|di sini|hari ini gimana|bagaimana))?",
+     lambda m: ("get_weather", {})),
+    (r"(?:(?:bagaimana|gimana|apa|cek|lihat)\s+)?cuaca (?:di )?(?!hari|sekarang|saat|luar|sini|bagaimana|besok|lusa|nanti|malam|pagi|sore|siang|minggu)([a-z]{3,}(?: [a-z]{3,})?)",
+     lambda m: ("get_weather", {"city": m[1].strip()})),
     (r"(?:hari ini )?(?:tanggal|hari) (?:berapa|apa)(?: (?:hari ini|sekarang))?", lambda m: ("get_date", {})),
     (r"(?:atur |set |ubah |setel |naikkan |turunkan |kecilkan |besarkan |keraskan |pelankan |kurangi |tambah )?"
      r"(?:volume|suara)(?:nya)? (?:ke |jadi |menjadi |sampai |hingga |di |pada )?(\d{1,3})(?: ?(?:persen|%))?",

@@ -522,6 +522,9 @@ def _application_dirs() -> list[Path]:
 
 
 def _is_waydroid_app(entry: dict) -> bool:
+    """An Android app inside Waydroid (not Waydroid itself, which carries the same category)."""
+    if entry["Exec"].split()[:1] == ["waydroid"] and not entry["Exec"].startswith("waydroid app "):
+        return False
     return "X-WayDroid-App" in entry.get("Categories", "") or entry["Exec"].startswith("waydroid app ")
 
 

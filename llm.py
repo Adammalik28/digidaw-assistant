@@ -56,8 +56,12 @@ def thinking_config(model: str):
     return types.ThinkingConfig(thinking_level=level) if level else None
 
 
+MATH_STAR_RE = re.compile(r"(?<=\d)\s*\*\s*(?=\d)")     # "10 * 30" is a multiplication, not markdown
+
+
 def clean(text: str) -> str:
-    return (text or "").replace("*", "").replace("#", "").strip()
+    text = MATH_STAR_RE.sub(" × ", text or "")
+    return text.replace("*", "").replace("#", "").strip()
 
 
 # ───────────────────────────── model router ─────────────────────────────

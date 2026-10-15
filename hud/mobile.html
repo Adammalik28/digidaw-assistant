@@ -29,14 +29,14 @@
   .chips-top span { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
   #wx { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
-  .card h2 { margin: 0 0 10px; font-size: 11.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--cyan); font-weight: 700;
+  .card h2 { margin: 0 0 12px; font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--cyan); font-weight: 700;
     display: flex; justify-content: space-between; align-items: center; }
   .card h2 span { color: var(--muted); letter-spacing: 0.08em; font-weight: 600; text-transform: none; }
   .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
   .tab { display: none; } .tab.on { display: block; }
 
   /* ── talk ── */
-  .talk { text-align: center; padding: 14px 0 6px; }
+  .talk { text-align: center; padding: 22px 16px 16px; }
   .bigmic { width: 136px; height: 136px; border-radius: 50%; border: 0; margin: 6px auto 10px; display: grid; place-items: center;
     background: radial-gradient(circle at 50% 35%, #7fe0ff, var(--cyan) 55%, #1e8fc0); color: #022; touch-action: none; user-select: none;
     -webkit-user-select: none; box-shadow: 0 0 0 10px rgba(92, 207, 255, 0.08), 0 0 40px rgba(92, 207, 255, 0.45); transition: transform 0.12s; }
@@ -45,17 +45,24 @@
     box-shadow: 0 0 0 calc(10px + var(--lvl, 0px)) rgba(255, 107, 107, 0.16), 0 0 46px rgba(255, 107, 107, 0.5); }
   .bigmic.busy { background: radial-gradient(circle at 50% 35%, #ffd38a, var(--warn) 60%, #b07a23); animation: spin 1.2s linear infinite; }
   @keyframes spin { 50% { box-shadow: 0 0 0 16px rgba(255, 181, 71, 0.12), 0 0 46px rgba(255, 181, 71, 0.5); } }
-  .talk-hint { color: var(--muted); font-size: 14px; min-height: 22px; }
+  .talk-hint { color: var(--muted); font-size: 14px; min-height: 22px; max-width: 330px; margin: 0 auto; text-wrap: balance; }
+  .bigmic.follow { background: radial-gradient(circle at 50% 35%, #9dffd6, var(--ok) 60%, #1f9e6c);
+    animation: follow 1.4s ease-in-out infinite; }
+  .mic-sm.follow { background: radial-gradient(circle at 50% 35%, #9dffd6, var(--ok) 60%, #1f9e6c); animation: follow 1.4s ease-in-out infinite; }
+  @keyframes follow { 50% { box-shadow: 0 0 0 14px rgba(77, 255, 181, 0.14), 0 0 40px rgba(77, 255, 181, 0.45); } }
   .exchange { text-align: left; margin-top: 14px; }
   .bubble { border-radius: 14px; padding: 10px 14px; margin-bottom: 8px; font-size: 15px; }
   .bubble.you { background: rgba(255, 181, 71, 0.1); border: 1px solid rgba(255, 181, 71, 0.25); color: #ffe3b8; margin-left: 40px; }
   .bubble.dd { background: rgba(92, 207, 255, 0.09); border: 1px solid var(--line2); margin-right: 40px; }
   .bubble small { display: block; font-size: 10.5px; letter-spacing: 0.16em; color: var(--muted); margin-bottom: 2px; }
-  .cmd { display: flex; gap: 8px; margin-top: 12px; }
+  .cmd { display: flex; gap: 8px; margin-top: 16px; }
   .cmd input, .field { flex: 1; min-width: 0; background: rgba(2, 10, 18, 0.7); border: 1px solid var(--line2); color: var(--text); border-radius: 12px; padding: 12px 14px; font: inherit; outline: none; }
   .cmd input:focus, .field:focus { border-color: var(--cyan); }
   .send { background: var(--cyan); color: #022; border: 0; border-radius: 12px; padding: 0 18px; font-weight: 700; }
-  .quick { display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; scrollbar-width: none; }
+  .quick { display: flex; gap: 8px; overflow-x: auto; margin: 10px -16px 0; padding: 0 16px; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 28px), transparent);
+            mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 28px), transparent); }
+  .quick::-webkit-scrollbar { display: none; }
   .quick button { flex: none; background: transparent; border: 1px solid var(--line2); color: var(--cyan2); border-radius: 999px; padding: 7px 13px; font-size: 13.5px; }
 
   /* ── media ── */
@@ -83,7 +90,10 @@
   .win .ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(92, 207, 255, 0.1); color: var(--cyan2); font-weight: 800; }
   .win.active .ico { background: var(--cyan); color: #022; }
   .win .t { font-weight: 600; } .win .s { font-size: 12.5px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .win select { background: rgba(2, 10, 18, 0.7); border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 6px 4px; font: inherit; font-size: 13px; }
+  .win select { appearance: none; -webkit-appearance: none; width: 58px; text-align: center; text-align-last: center;
+    background: rgba(2, 10, 18, 0.7); border: 1px solid var(--line2); color: var(--cyan2); border-radius: 10px; padding: 7px 0;
+    font-family: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em; }
+  .win .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .x { background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px 6px; }
   .fav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .fav button { border: 1px solid var(--line); background: rgba(2, 10, 18, 0.45); border-radius: 14px; padding: 12px 6px; display: grid; justify-items: center; gap: 6px; }
@@ -101,7 +111,10 @@
   .date b { display: block; font-size: 19px; color: var(--cyan2); } .date small { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
   .row.today .date { border-color: var(--warn); } .row.today .date b, .row.today .when { color: var(--warn); }
   .title { font-weight: 600; } .sub { font-size: 12.5px; color: var(--muted); }
-  .when { font: 12px ui-monospace, monospace; color: var(--cyan2); text-align: right; }
+  .when { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--cyan2); border: 1px solid var(--line2);
+    border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .row.today .when { border-color: var(--warn); }
+  .right { display: flex; align-items: center; gap: 2px; }
   details.add summary { list-style: none; color: var(--cyan2); font-weight: 600; font-size: 14px; margin-top: 10px; cursor: pointer; }
   details.add summary::-webkit-details-marker { display: none; }
   .add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
@@ -112,7 +125,61 @@
   .opt label { flex: 1; min-width: 90px; text-align: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; font-size: 14px; color: var(--muted); }
   .opt input { display: none; } .opt input:checked + span { color: var(--cyan2); }
   .opt label:has(input:checked) { border-color: var(--cyan); background: rgba(92, 207, 255, 0.1); }
+  .checks { display: grid; gap: 11px; }
+  .check { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center; }
+  .check i { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); margin-left: 3px; }
+  .check.ok i { background: var(--ok); box-shadow: 0 0 10px rgba(77, 255, 181, 0.6); }
+  .check.bad i { background: var(--warn); }
+  .check b { display: block; font-weight: 600; font-size: 14.5px; }
+  .check small { color: var(--muted); font-size: 13px; }
+  .linkbtn.primary { background: var(--cyan); color: #02131f; border-color: transparent; font-weight: 700; }
+  .guide { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .guide summary { cursor: pointer; color: var(--cyan2); font-weight: 600; }
+  .guide ol { padding-left: 20px; margin: 10px 0 6px; } .guide li { margin-bottom: 8px; color: var(--text); }
+  .guide a { color: var(--cyan); font-weight: 600; } .guide b { color: var(--cyan2); font-weight: 600; }
   .linkbtn { background: none; border: 1px solid var(--line2); color: var(--cyan2); border-radius: 12px; padding: 10px 14px; margin-top: 12px; width: 100%; }
+
+  /* ── conversation history ── */
+  .hist { display: grid; gap: 8px; }
+  .hist > div:not(.empty) { display: grid; grid-template-columns: 58px 1fr; gap: 8px; font-size: 14px; line-height: 1.4; }
+  .hist b { font-size: 10.5px; letter-spacing: 0.14em; color: var(--muted); padding-top: 3px; }
+  .hist .u b { color: #ffcf8a; } .hist .u span { color: #ffe3b8; } .hist .d b { color: var(--cyan); }
+
+  /* ── sharing with the PC ── */
+  .share-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .share-grid button { display: grid; justify-items: start; gap: 8px; text-align: left; min-width: 0;
+    border: 1px solid var(--line); background: rgba(2, 10, 18, 0.45); border-radius: 14px; padding: 12px; }
+  .share-grid button:active { background: rgba(92, 207, 255, 0.1); }
+  .share-grid svg { width: 36px; height: 36px; padding: 8px; border-radius: 10px; background: rgba(92, 207, 255, 0.12); color: var(--cyan2); }
+  .share-grid div { min-width: 0; width: 100%; }
+  .share-grid b, .share-grid small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .share-grid b { font-size: 14px; font-weight: 600; } .share-grid small { color: var(--muted); font-size: 12px; }
+  .sheet-bg { position: fixed; inset: 0; background: rgba(0, 4, 8, 0.6); z-index: 10; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; max-width: 560px; margin: 0 auto; max-height: 86vh; overflow-y: auto;
+    background: #0a1f30; border: 1px solid var(--line2); border-bottom: 0; border-radius: 22px 22px 0 0;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.5); }
+  .sheet .grab { width: 40px; height: 4px; border-radius: 4px; background: var(--line2); margin: 0 auto 12px; }
+  .sheet h3 { margin: 0 0 12px; font-size: 17px; }
+  .preview { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--text);
+    max-height: 200px; overflow: auto; word-break: break-word; background: rgba(2, 10, 18, 0.45); }
+  .preview img { max-width: 100%; max-height: 104px; border-radius: 8px; display: block; margin-bottom: 8px; }
+  .preview .sub { margin-top: 2px; }
+  .sheet textarea { width: 100%; min-height: 96px; resize: vertical; }
+  .acts-list { display: grid; gap: 8px; margin-top: 12px; }
+  .act { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; width: 100%;
+    border: 1px solid var(--line2); background: rgba(92, 207, 255, 0.06); color: var(--text); border-radius: 14px; padding: 13px 14px; }
+  .act b { font-weight: 600; } .act small { display: block; color: var(--muted); font-size: 12.5px; }
+  .act.primary { background: var(--cyan); color: #02131f; border-color: transparent; } .act.primary small { color: #0b3a52; }
+  .act:disabled { opacity: 0.5; }
+  .bar { height: 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-top: 12px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--cyan); transition: width 0.2s; }
+  .file-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 9px 0;
+    border-bottom: 1px dashed var(--line); color: var(--text); text-decoration: none; }
+  .file-row:last-child { border-bottom: 0; }
+  .file-row .ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+    background: rgba(185, 164, 255, 0.14); color: #cbbcff; text-transform: uppercase; }
+  .file-row .n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; }
+  .file-row .dl { color: var(--cyan2); font-size: 13px; font-weight: 600; }
 
   /* ── nav, notifications ── */
   nav { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--nav) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
@@ -144,8 +211,11 @@
   .pad { height: 210px; border-radius: 16px; border: 1px solid var(--line2); touch-action: none;
     background: radial-gradient(circle at 50% 50%, rgba(92, 207, 255, 0.07), rgba(2, 10, 18, 0.6)); }
   .pad.active { border-color: var(--cyan); }
-  .keys { display: flex; flex-wrap: wrap; gap: 6px; }
-  .keys button { flex: 1 0 auto; min-width: 54px; border: 1px solid var(--line2); background: rgba(92, 207, 255, 0.06); color: var(--cyan2);
+  .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .keys.clicks { grid-template-columns: repeat(6, 1fr); } .keys.clicks button { grid-column: span 2; }
+  .keys.clicks button[data-scroll] { grid-column: span 3; }
+  .keys .wide { grid-column: span 2; }
+  .keys button { border: 1px solid var(--line2); background: rgba(92, 207, 255, 0.06); color: var(--cyan2);
     border-radius: 10px; padding: 9px 8px; font-size: 13.5px; }
   .keys button:active { background: rgba(92, 207, 255, 0.2); }
   nav button { background: none; border: 0; color: var(--muted); display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 11.5px; letter-spacing: 0.04em; }
@@ -202,7 +272,7 @@
       <button class="bigmic" id="micBtn" data-mic aria-label="Tekan untuk bicara ke Digidaw">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
       </button>
-      <div class="talk-hint" id="micHint">Ketuk lalu bicara — berhenti sendiri saat Anda diam. Atau tekan-tahan.</div>
+      <div class="talk-hint" id="micHint">Ketuk lalu bicara, atau tahan seperti walkie&#8209;talkie.</div>
       <button class="listen-toggle" data-listen type="button"><i></i><span>Dengar "Digidaw"</span></button>
       <div class="exchange" id="exchange"></div>
       <form class="cmd" id="cmdForm"><input id="cmd" placeholder="…atau ketik perintah" autocomplete="off" enterkeyhint="send"><button class="send" type="submit">Kirim</button></form>
@@ -218,11 +288,20 @@
           <button class="ctl" data-media="next" aria-label="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button></div></div>
       <div class="progress"><i class="npBar"></i></div>
     </div>
+    <div class="card"><h2>Percakapan terakhir</h2><div class="hist" id="hist"><div class="empty">Belum ada.</div></div></div>
   </section>
 
   <!-- ───── Remote ───── -->
   <section class="tab" id="tab-remote">
     <div class="card"><h2>Workspace <span id="wsInfo"></span></h2><div class="ws" id="ws"></div></div>
+    <div class="card"><h2>Berbagi dengan PC</h2>
+      <div class="share-grid">
+        <button type="button" id="shFile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg><div><b>Kirim file</b><small>foto, video, dokumen</small></div></button>
+        <button type="button" id="shText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><div><b>Kirim teks/link</b><small>buka, salin, ketik</small></div></button>
+        <button type="button" id="shClip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/></svg><div><b>Clipboard PC</b><small>salin ke HP</small></div></button>
+        <button type="button" id="shFiles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg><div><b>File dari PC</b><small>unduhan &amp; screenshot</small></div></button>
+      </div>
+      <input type="file" id="shPick" multiple hidden></div>
     <div class="card"><h2>Jendela terbuka <span id="winCount"></span></h2><div id="wins"><div class="empty">Memuat…</div></div></div>
     <div class="card"><h2>Buka cepat <span>favorit Anda</span></h2><div class="fav" id="fav"></div></div>
     <div class="card big-media">
@@ -257,7 +336,7 @@
         <button class="listen-toggle small" data-listen type="button"><i></i><span>Dengar "Digidaw"</span></button></div>
       <div class="card"><h2>Touchpad <span>2 jari: klik kanan / scroll</span></h2>
         <div class="pad" id="pad"></div>
-        <div class="keys" style="margin-top:10px"><button data-click="left">Klik kiri</button><button data-click="double">Klik 2×</button>
+        <div class="keys clicks" style="margin-top:10px"><button data-click="left">Klik kiri</button><button data-click="double">Klik 2×</button>
           <button data-click="right">Klik kanan</button><button data-scroll="3">Scroll ↑</button><button data-scroll="-3">Scroll ↓</button></div></div>
       <div class="card"><h2>Keyboard</h2>
         <form class="cmd" id="typeForm" style="margin-top:0"><input id="typeText" placeholder="Ketik teks untuk PC…" autocomplete="off" enterkeyhint="send">
@@ -266,8 +345,8 @@
         <div class="keys" style="margin-top:10px">
           <button data-key="esc">Esc</button><button data-key="tab">Tab</button><button data-key="enter">Enter</button><button data-key="backspace">⌫</button>
           <button data-key="left">←</button><button data-key="up">↑</button><button data-key="down">↓</button><button data-key="right">→</button>
-          <button data-key="copy">Salin</button><button data-key="paste">Tempel</button><button data-key="refresh">Refresh</button>
-          <button data-key="fullscreen">Layar penuh</button><button data-key="alt_tab">Alt+Tab</button><button data-key="close_tab">Tutup tab</button></div></div>
+          <button data-key="copy">Salin</button><button data-key="paste">Tempel</button><button data-key="refresh">Refresh</button><button data-key="alt_tab">Alt+Tab</button>
+          <button class="wide" data-key="fullscreen">Layar penuh</button><button class="wide" data-key="close_tab">Tutup tab</button></div></div>
     </div>
   </section>
 
@@ -289,13 +368,45 @@
         <label><input type="radio" name="voice" value="pc"><span>PC saja</span></label>
       </div>
       <p class="sub" style="margin:10px 0 0">Suara di HP memakai suara Digidaw yang sama dengan di PC.</p></div>
-    <div class="card"><h2>Notifikasi</h2>
-      <p class="sub" style="margin:0">Pengingat, agenda, alarm & timer muncul di sini dengan getar dan suara selama halaman Digidaw terbuka
-        (boleh di latar belakang). Ketuk layar sekali setelah membuka agar HP mengizinkan suara.</p>
+    <div class="card"><h2>Mic tetap mendengar setelah menjawab</h2>
+      <div class="opt" id="followOpt">
+        <label><input type="radio" name="follow" value="0"><span>Mati</span></label>
+        <label><input type="radio" name="follow" value="5"><span>5 dtk</span></label>
+        <label><input type="radio" name="follow" value="8"><span>8 dtk</span></label>
+        <label><input type="radio" name="follow" value="12"><span>12 dtk</span></label>
+      </div>
+      <p class="sub" style="margin:10px 0 0">Setelah Digidaw selesai menjawab, perintah berikutnya tidak perlu diawali "Digidaw".
+        Mic berwarna hijau selama masih mendengar.</p></div>
+    <div class="card"><h2>Aplikasi & notifikasi</h2>
+      <div class="checks">
+        <div class="check" id="ckCert"><i></i><div><b>Sertifikat Digidaw</b><small>memeriksa…</small></div></div>
+        <div class="check" id="ckPush"><i></i><div><b>Notifikasi saat HUD tertutup</b><small>…</small></div></div>
+        <div class="check" id="ckApp"><i></i><div><b>Ikon di layar utama</b><small>…</small></div></div>
+      </div>
+      <button class="linkbtn primary" id="pushBtn" type="button" hidden>Aktifkan notifikasi</button>
+      <button class="linkbtn" id="installBtn" type="button" hidden>Pasang ke layar utama</button>
+      <details class="guide" id="certGuide"><summary>Cara memasang sertifikat (sekali saja)</summary>
+        <ol>
+          <li><a href="/ca.crt" download="digidaw-ca.crt">Unduh sertifikat Digidaw</a></li>
+          <li>Buka <b>Setelan</b> HP, cari <b>"sertifikat CA"</b> (biasanya di Keamanan → Enkripsi &amp; kredensial →
+            Instal sertifikat → Sertifikat CA).</li>
+          <li>Pilih <b>Tetap instal</b>, lalu pilih <b>digidaw-ca.crt</b> dari folder Unduhan.</li>
+          <li>Tutup Chrome sepenuhnya (geser dari daftar aplikasi terbaru), lalu buka alamat Digidaw lagi.</li>
+        </ol>
+        <p class="sub" style="margin:0">Aman: sertifikat ini hanya berlaku untuk alamat di jaringan rumah (192.168.x.x),
+          tidak bisa dipakai untuk situs internet mana pun.</p>
+      </details>
+      <p class="sub" style="margin:12px 0 0">Selama halaman terbuka, pemberitahuan juga dibacakan dengan suara Digidaw.</p>
       <button class="linkbtn" id="testNotice" type="button">Coba notifikasi</button></div>
     <div class="card"><h2>Akun</h2><button class="linkbtn" id="logoutBtn" type="button">Keluar dari HP ini</button></div>
   </section>
 </main>
+
+<div class="sheet-bg" id="sheetBg" hidden></div>
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="grab"></div><h3 id="sheetTitle">Kirim ke PC</h3><div id="sheetBody"></div>
+  <button class="linkbtn" id="sheetClose" type="button">Tutup</button>
+</div>
 
 <nav id="nav" hidden>
   <button class="on" data-tab="talk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>Bicara</button>
@@ -343,12 +454,17 @@
     document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
     if (name === "remote") refreshRemote();
     if (name === "screen") startScreen(); else stopScreen();
+    if (name === "set") appStatus();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => openTab(b.dataset.tab)));
 
   // ── where answers are spoken ──
   const voiceMode = () => store.get("ddwVoice", "phone");
+  document.querySelectorAll('input[name="follow"]').forEach((r) => {
+    r.checked = r.value === store.get("ddwFollow", "8");
+    r.addEventListener("change", () => { store.set("ddwFollow", r.value); toast(r.value === "0" ? "Mic langsung mati setelah menjawab" : `Mic mendengar ${r.value} detik setelah menjawab`); });
+  });
   document.querySelectorAll('input[name="voice"]').forEach((r) => {
     r.checked = r.value === voiceMode();
     r.addEventListener("change", () => { store.set("ddwVoice", r.value); toast({ phone: "Jawaban diucapkan di HP", both: "Jawaban di HP & PC", pc: "Jawaban di PC" }[r.value]); });
@@ -364,9 +480,25 @@
   }
   document.addEventListener("pointerdown", unlockAudio, { once: false, passive: true });
   function speakOnPhone(text, force = false) {
-    if (!text || (!force && voiceMode() === "pc")) return;
+    if (!text || (!force && voiceMode() === "pc")) return null;
     player.src = `/api/tts?text=${encodeURIComponent(text.slice(0, 600))}`;
-    player.play().catch(() => {});
+    // resolves when the phone has finished saying it (or couldn't: no sound within 6 s, an error)
+    return new Promise((resolve) => {
+      let started = false;
+      const done = () => { clearTimeout(t); ["playing", "ended", "error", "pause"].forEach((ev) => player.removeEventListener(ev, on)); resolve(); };
+      const on = (e) => { if (e.type === "playing") started = true; else if (e.type === "error") fail(); else if (started) done(); };
+      // no sound from the PC's voice (blocked by the browser, or the voice failed): the phone's own voice reads it
+      const fallback = () => {
+        try {
+          const u = new SpeechSynthesisUtterance(text.slice(0, 400)); u.lang = "id-ID";
+          u.onend = u.onerror = () => resolve(); speechSynthesis.cancel(); speechSynthesis.speak(u);
+        } catch (e) { resolve(); }
+      };
+      const fail = () => { if (!started) { clearTimeout(t); ["playing", "ended", "error", "pause"].forEach((ev) => player.removeEventListener(ev, on)); fallback(); } else done(); };
+      const t = setTimeout(() => { if (!started) fail(); }, 6000);
+      ["playing", "ended", "error", "pause"].forEach((ev) => player.addEventListener(ev, on));
+      player.play().catch(fail);
+    });
   }
 
   // ── conversation ──
@@ -402,6 +534,7 @@
   const SILENCE_MS = 1300, MAX_MS = 15000;
   async function startRec() {
     if (rec) return;
+    followSeq++; if (listen.followUntil) endFollow(true);
     if (!window.isSecureContext || !navigator.mediaDevices) { hint("Mic butuh alamat https:// — buka lewat QR terbaru."); return; }
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
     catch (e) { hint("Izin mikrofon ditolak. Izinkan di pengaturan situs browser."); return; }
@@ -458,7 +591,8 @@
       if (r.status === 401) { showLogin(); return; }
       const d = await r.json();
       $("micHint").textContent = "Ketuk untuk bicara lagi.";
-      showExchange(d.heard || "(tidak jelas)", d.reply); speakOnPhone(d.reply);
+      showExchange(d.heard || "(tidak jelas)", d.reply);
+      if (d.reply && d.heard) followUp(d.reply, speakOnPhone(d.reply)); else speakOnPhone(d.reply);
     } catch (e) { hint("Gagal mengirim suara."); }
     finally { micClass("busy", false); refresh(); }
   }
@@ -483,19 +617,25 @@
   // the next phrase within ARM_MS is the command.
   const listenBtns = [...document.querySelectorAll("[data-listen]")];
   const ARM_MS = 8000, PREROLL_S = 0.35, END_SILENCE_MS = 700, MAX_PHRASE_S = 9, MIN_PHRASE_S = 0.45;
-  let listen = { on: false, stream: null, ctx: null, node: null, wake: null, armedUntil: 0, busy: false };
+  // temp = the microphone is on only for a follow-up window (hands-free mode itself is off)
+  let listen = { on: false, temp: false, stream: null, ctx: null, node: null, wake: null, armedUntil: 0, followUntil: 0,
+                 loose: false, busy: false, inPhrase: false };
+  const following = () => Date.now() < listen.followUntil;
   function listenUi() {
-    const armed = listen.on && Date.now() < listen.armedUntil;
+    const armed = listen.on && Date.now() < listen.armedUntil, follow = listen.on && following();
+    const handsFree = listen.on && !listen.temp;        // a follow-up alone doesn't switch this button on
     listenBtns.forEach((b) => {
-      b.classList.toggle("on", listen.on); b.classList.toggle("armed", armed);
-      b.querySelector("span").textContent = !listen.on ? 'Dengar "Digidaw"' : armed ? "Ya? silakan bicara…" : 'Mendengar "Digidaw"…';
+      b.classList.toggle("on", handsFree); b.classList.toggle("armed", handsFree && armed && !follow);
+      b.querySelector("span").textContent = !handsFree ? 'Dengar "Digidaw"' : follow ? "Silakan lanjut…"
+        : armed ? "Ya? silakan bicara…" : 'Mendengar "Digidaw"…';
     });
+    micClass("follow", follow);
   }
-  function chime() {
+  function chime(up = true) {
     try {
       const c = new (window.AudioContext || window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain();
-      o.frequency.value = 880; o.frequency.setValueAtTime(1320, c.currentTime + 0.09);
-      g.gain.setValueAtTime(0.18, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.25);
+      o.frequency.value = up ? 880 : 1320; o.frequency.setValueAtTime(up ? 1320 : 880, c.currentTime + 0.09);
+      g.gain.setValueAtTime(up ? 0.18 : 0.1, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.25);
       o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + 0.26); setTimeout(() => c.close(), 400);
     } catch (e) {}
   }
@@ -508,74 +648,114 @@
     for (let i = 0; i < samples.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i])) * 0x7fff, true);
     return new Blob([buf], { type: "audio/wav" });
   }
-  async function sendPhrase(blob) {
+  // what a phrase is, decided when it starts: one begun inside a window counts even if it ends after it
+  const phraseMode = () => following() ? "followup" : Date.now() < listen.armedUntil ? (listen.loose ? "loose" : "1") : "0";
+  async function sendPhrase(blob, mode) {
     listen.busy = true;
-    const armed = Date.now() < listen.armedUntil;
     try {
       const r = await fetch("/api/listen", { method: "POST", credentials: "same-origin", body: blob,
-        headers: { "X-Digidaw": "1", "Content-Type": "audio/wav", "X-Armed": armed ? "1" : "0", "X-PC-Voice": voiceMode() === "phone" ? "0" : "1" } });
+        headers: { "X-Digidaw": "1", "Content-Type": "audio/wav", "X-Armed": mode, "X-PC-Voice": voiceMode() === "phone" ? "0" : "1" } });
       if (r.status === 401) { stopListening(); showLogin(); return; }
       const d = await r.json();
       if (d.armed) {                                  // "Digidaw" alone: answer like the PC does, then listen
-        listen.armedUntil = Date.now() + ARM_MS; buzz([30, 40, 30]); chime(); hint("Ya? Silakan bicara…"); listenUi();
+        endFollow(true);
+        listen.armedUntil = Date.now() + ARM_MS; listen.loose = !!d.loose; buzz([30, 40, 30]); chime(); hint("Ya? Silakan bicara…"); listenUi();
         setTimeout(listenUi, ARM_MS + 50);
       } else if (d.reply) {
-        listen.armedUntil = 0; listenUi(); buzz(25);
-        showExchange(d.heard, d.reply); speakOnPhone(d.reply);
+        listen.armedUntil = 0; endFollow(true); buzz(25);
+        showExchange(d.heard, d.reply); followUp(d.reply, speakOnPhone(d.reply));
       }
     } catch (e) {}
     listen.busy = false;
   }
-  async function startListening() {
-    if (listen.on) return;
-    if (!window.isSecureContext || !navigator.mediaDevices) { hint("Mode dengar butuh alamat https://."); return; }
-    try { listen.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
-    catch (e) { hint("Izin mikrofon ditolak."); return; }
+  async function startListening(opts = {}) {
+    if (listen.on) { if (!opts.temp && listen.temp) { listen.temp = false; store.set("ddwListen", "1"); listenUi(); } return true; }
+    if (!window.isSecureContext || !navigator.mediaDevices) { hint("Mode dengar butuh alamat https://."); return false; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+    catch (e) { hint("Izin mikrofon ditolak."); return false; }
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    try { listen.ctx = new Ctx({ sampleRate: 16000 }); } catch (e) { listen.ctx = new Ctx(); }
-    const rate = listen.ctx.sampleRate, src = listen.ctx.createMediaStreamSource(listen.stream);
-    const node = listen.ctx.createScriptProcessor(2048, 1, 1);
-    let pre = [], phrase = null, quietMs = 0, noise = 0.004, voiced = 0;
+    let ctx; try { ctx = new Ctx({ sampleRate: 16000 }); } catch (e) { ctx = new Ctx(); }
+    try { await ctx.resume(); } catch (e) {}
+    const rate = ctx.sampleRate, src = ctx.createMediaStreamSource(stream);
+    const node = ctx.createScriptProcessor(2048, 1, 1);
+    let pre = [], phrase = null, mode = "0", quietMs = 0, noise = 0.004, voiced = 0;
     const preMax = Math.ceil(PREROLL_S * rate / 2048), frameMs = 2048 / rate * 1000;
     node.onaudioprocess = (e) => {
       const x = new Float32Array(e.inputBuffer.getChannelData(0));
       // not while Digidaw talks on the phone, while a push-to-talk recording runs, or while a phrase is on its way
-      if (!player.paused || rec || listen.busy || document.hidden) { pre = []; phrase = null; return; }
+      if (!player.paused || rec || listen.busy || document.hidden) { pre = []; phrase = null; listen.inPhrase = false; return; }
       let sum = 0; for (const s of x) sum += s * s;
       const rms = Math.sqrt(sum / x.length);
       if (!phrase) noise = noise * 0.97 + rms * 0.03;
       const loud = rms > Math.max(0.012, noise * 2.8);
       if (!phrase) {
         pre.push(x); if (pre.length > preMax) pre.shift();
-        if (loud && ++voiced >= 2) { phrase = [...pre]; quietMs = 0; } else if (!loud) voiced = 0;
+        if (loud && ++voiced >= 2) { phrase = [...pre]; mode = phraseMode(); quietMs = 0; listen.inPhrase = true; }
+        else if (!loud) voiced = 0;
         return;
       }
       phrase.push(x);
       quietMs = loud ? 0 : quietMs + frameMs;
       const seconds = phrase.length * 2048 / rate;
       if (quietMs >= END_SILENCE_MS || seconds >= MAX_PHRASE_S) {
-        const done = phrase; phrase = null; pre = []; voiced = 0;
+        const done = phrase; phrase = null; pre = []; voiced = 0; listen.inPhrase = false;
         if (seconds >= MIN_PHRASE_S) {
           const all = new Float32Array(done.reduce((n, a) => n + a.length, 0)); let o = 0;
           for (const a of done) { all.set(a, o); o += a.length; }
-          sendPhrase(wav(all, rate));
+          sendPhrase(wav(all, rate), mode);
         }
       }
     };
-    src.connect(node); node.connect(listen.ctx.destination);
-    listen.node = node; listen.on = true; listenUi();
-    try { listen.wake = await navigator.wakeLock.request("screen"); } catch (e) {}   // keep the screen on while listening
-    store.set("ddwListen", "1");
-    hint('Mendengar… ucapkan "Digidaw, …"');
+    src.connect(node); node.connect(ctx.destination);
+    Object.assign(listen, { on: true, temp: !!opts.temp, stream, ctx, node });
+    listenUi();
+    if (!opts.temp) {
+      try { listen.wake = await navigator.wakeLock.request("screen"); } catch (e) {}   // keep the screen on while listening
+      store.set("ddwListen", "1");
+      hint('Mendengar… ucapkan "Digidaw, …"');
+    }
+    return true;
   }
   function stopListening(remember = true) {
     try { listen.node && listen.node.disconnect(); } catch (e) {}
     try { listen.ctx && listen.ctx.close(); } catch (e) {}
     listen.stream && listen.stream.getTracks().forEach((t) => t.stop());
     try { listen.wake && listen.wake.release(); } catch (e) {}
-    listen = { ...listen, on: false, stream: null, ctx: null, node: null, wake: null, armedUntil: 0 };
-    if (remember) store.set("ddwListen", "0");
+    const wasTemp = listen.temp;
+    listen = { ...listen, on: false, temp: false, stream: null, ctx: null, node: null, wake: null, armedUntil: 0, followUntil: 0, inPhrase: false };
+    if (remember && !wasTemp) store.set("ddwListen", "0");
     listenUi();
+  }
+
+  // ── follow-up: after an answer the microphone stays open for a few seconds, so the next command needs no
+  // "Digidaw" (like the PC's conversation mode). It starts once the answer has been spoken, not when it arrives.
+  const followMs = () => (+store.get("ddwFollow", "8") || 0) * 1000;
+  let followSeq = 0, followTimer = null;
+  function untilQuiet(spoken) {
+    if (spoken) return spoken;                                      // the phone reads it out: wait for the end
+    const reply = String(untilQuiet.text || "");                    // the PC reads it out: estimate how long
+    return new Promise((r) => setTimeout(r, Math.min(20000, 1200 + reply.length * 70)));
+  }
+  async function followUp(reply, spoken) {
+    if (!followMs()) return;
+    const id = ++followSeq;
+    untilQuiet.text = reply;
+    await untilQuiet(spoken);
+    if (id !== followSeq || rec || !listen.on && document.hidden) return;
+    if (!listen.on && !(await startListening({ temp: true }))) return;
+    listen.followUntil = Date.now() + followMs(); listen.armedUntil = 0;
+    buzz(15); hint("Silakan lanjut — tidak perlu bilang “Digidaw”."); listenUi();
+    clearTimeout(followTimer); followTimer = setTimeout(() => endFollow(), followMs() + 60);
+  }
+  function endFollow(now = false) {
+    clearTimeout(followTimer);
+    if (!now && (listen.inPhrase || listen.busy)) { followTimer = setTimeout(() => endFollow(), 400); return; }  // still talking
+    const was = listen.followUntil > 0;
+    listen.followUntil = 0;
+    if (listen.temp && !listen.busy) stopListening(false);
+    listenUi();
+    if (was && !now) { chime(false); hint(listen.on ? 'Mendengar… ucapkan "Digidaw, …"' : "Ketuk untuk bicara lagi."); }
   }
   listenBtns.forEach((b) => b.addEventListener("click", () => { unlockAudio(); listen.on ? stopListening() : startListening(); }));
   if (store.get("ddwListen", "0") === "1") {     // it was on last time: resume at the first tap (phones need one)
@@ -585,6 +765,203 @@
   document.addEventListener("visibilitychange", async () => {   // the screen wake lock ends when the page hides
     if (!document.hidden && listen.on && !listen.wake) { try { listen.wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
     if (document.hidden) listen.wake = null;
+  });
+
+  // ── installed app + notifications while the page is closed (Web Push) ──
+  // A service worker only runs on a trusted https page, so this all starts with the phone trusting Digidaw's CA.
+  let swReg = null, installEvt = null;
+  const pushSupported = () => !!swReg && "PushManager" in window && "Notification" in window;
+  function check(id, ok, text) {
+    const el = $(id); el.classList.toggle("ok", ok === true); el.classList.toggle("bad", ok === false);
+    el.querySelector("small").textContent = text;
+  }
+  function keyBytes(b64) {
+    const raw = atob((b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  }
+  const sameKey = (buf, bytes) => !!buf && new Uint8Array(buf).every((v, i) => v === bytes[i]) && buf.byteLength === bytes.length;
+  async function appStatus() {
+    const standalone = matchMedia("(display-mode: standalone)").matches;
+    check("ckApp", standalone ? true : null, standalone ? "terpasang" : installEvt ? "siap dipasang" : "menu ⋮ Chrome → Tambahkan ke layar utama");
+    $("installBtn").hidden = standalone || !installEvt;
+    if (!swReg) {
+      check("ckCert", false, "belum dipasang (lihat cara di bawah)"); $("certGuide").open = true;
+      check("ckPush", false, "butuh sertifikat dulu"); $("pushBtn").hidden = true; return;
+    }
+    check("ckCert", true, "terpercaya"); $("certGuide").open = false;
+    if (!pushSupported()) { check("ckPush", false, "browser ini tidak mendukung"); $("pushBtn").hidden = true; return; }
+    if (Notification.permission === "denied") {
+      check("ckPush", false, "diblokir: izinkan lewat ikon gembok → Izin → Notifikasi"); $("pushBtn").hidden = true; return;
+    }
+    let server = {}; try { server = await api("/api/push"); } catch (e) { return; }
+    const sub = await swReg.pushManager.getSubscription();
+    const on = !!sub && !!server.subscribed && sameKey(sub.options.applicationServerKey, keyBytes(server.key));
+    check("ckPush", on, on ? "aktif" : "mati");
+    $("pushBtn").hidden = false; $("pushBtn").textContent = on ? "Matikan notifikasi" : "Aktifkan notifikasi";
+    $("pushBtn").classList.toggle("primary", !on); $("pushBtn").dataset.on = on ? "1" : "";
+  }
+  async function pushOn() {
+    if (await Notification.requestPermission() !== "granted") { toast("Izin notifikasi ditolak"); return; }
+    const { key } = await api("/api/push");
+    let sub = await swReg.pushManager.getSubscription();
+    if (sub && !sameKey(sub.options.applicationServerKey, keyBytes(key))) { await sub.unsubscribe(); sub = null; }
+    sub = sub || await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+    await api("/api/push/subscribe", { subscription: sub.toJSON() });
+    const r = await api("/api/push/test", {});
+    toast(r.sent ? "Notifikasi aktif. Cek bilah notifikasi." : "Tersimpan, tapi tes belum terkirim (PC offline?)");
+  }
+  async function pushOff() {
+    const sub = await swReg.pushManager.getSubscription();
+    if (sub) { await api("/api/push/unsubscribe", { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+    toast("Notifikasi dimatikan");
+  }
+  $("pushBtn").addEventListener("click", async () => {
+    $("pushBtn").disabled = true;
+    try { $("pushBtn").dataset.on ? await pushOff() : await pushOn(); }
+    catch (e) { if (e.message !== "login") toast(`Gagal: ${e.message}`); }
+    $("pushBtn").disabled = false; appStatus();
+  });
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; appStatus(); });
+  window.addEventListener("appinstalled", () => { installEvt = null; toast("Digidaw terpasang di layar utama"); appStatus(); });
+  $("installBtn").addEventListener("click", async () => {
+    if (!installEvt) return;
+    installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; appStatus();
+  });
+  (async () => {
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      try { swReg = await navigator.serviceWorker.register("/sw.js"); } catch (e) { swReg = null; }   // untrusted certificate
+    }
+    appStatus();
+  })();
+
+
+  // ── sharing with the PC: Android's "Bagikan" menu, files, text / links, both clipboards ──
+  const fmtSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  const isYouTube = (u) => /(?:youtube\.com\/(?:watch|shorts|live)|youtu\.be\/)/i.test(u);
+  const firstUrl = (t) => ((t || "").match(/https?:\/\/[^\s<>"']+/) || [""])[0].replace(/[.,);\]]+$/, "");
+  function openSheet(title) {
+    $("sheetTitle").textContent = title; $("sheetBody").textContent = "";
+    $("sheet").hidden = false; $("sheetBg").hidden = false; return $("sheetBody");
+  }
+  function closeSheet() {
+    $("sheet").hidden = true; $("sheetBg").hidden = true; $("sheetBody").textContent = "";
+    if (location.search.includes("share=")) history.replaceState(null, "", "/");
+  }
+  $("sheetClose").addEventListener("click", closeSheet); $("sheetBg").addEventListener("click", closeSheet);
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function action(box, label, sub, run, primary = false) {
+    const b = el("button", `act${primary ? " primary" : ""}`); b.type = "button";
+    const t = el("div"); t.append(el("b", "", label)); if (sub) t.append(el("small", "", sub));
+    b.append(t, el("span", "", "›"));
+    b.addEventListener("click", async () => {
+      box.querySelectorAll(".act").forEach((x) => x.disabled = true); buzz(15);
+      try { const msg = await run(); if (msg) toast(msg); closeSheet(); }
+      catch (e) { if (e.message !== "login") toast(`Gagal: ${e.message}`); box.querySelectorAll(".act").forEach((x) => x.disabled = false); }
+    });
+    box.append(b);
+  }
+  // text or a link: what can be done with it on the PC
+  function textActions(list, getText) {
+    list.textContent = "";
+    const text = getText().trim(), url = firstUrl(text);
+    if (url && isYouTube(url)) action(list, "Putar di PC", "di pemutar Digidaw", async () => (await api("/api/share/link", { url })).result, true);
+    if (url) action(list, "Buka di PC", url.replace(/^https?:\/\//, "").slice(0, 48), async () => (await api("/api/share/link", { url })).result, !isYouTube(url));
+    action(list, "Salin ke clipboard PC", "lalu tinggal Ctrl+V", async () => (await api("/api/share/text", { text: getText(), mode: "clipboard" })).result, !url);
+    action(list, "Ketik di PC", "di jendela yang sedang aktif", async () => (await api("/api/share/text", { text: getText(), mode: "type" })).result);
+    if (!url && text.length < 400) action(list, "Tanya Digidaw", "jadikan perintah", async () => {
+      const r = await api("/api/share/text", { text: getText(), mode: "ask", pc_voice: voiceMode() !== "phone" });
+      showExchange(getText(), r.result); speakOnPhone(r.result); openTab("talk"); return "";
+    });
+  }
+  function upload(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open("POST", "/api/share/file");
+      x.setRequestHeader("X-Digidaw", "1"); x.setRequestHeader("X-Filename", encodeURIComponent(file.name || "file"));
+      x.setRequestHeader("Content-Type", "application/octet-stream");
+      x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded);
+      x.onload = () => { if (x.status === 401) { showLogin(); reject(new Error("login")); return; }
+        try { const d = JSON.parse(x.responseText); x.status === 200 ? resolve(d) : reject(new Error(d.error || x.status)); } catch (e) { reject(e); } };
+      x.onerror = () => reject(new Error("koneksi terputus"));
+      x.send(file);
+    });
+  }
+  function fileSheet(files, title = "Kirim ke PC") {
+    const body = openSheet(title), pv = el("div", "preview");
+    const total = files.reduce((n, f) => n + f.size, 0);
+    if (files.length === 1 && files[0].type.startsWith("image/")) { const img = el("img"); img.src = URL.createObjectURL(files[0]); pv.append(img); }
+    files.slice(0, 6).forEach((f) => pv.append(el("div", "", `${f.name || "file"} · ${fmtSize(f.size)}`)));
+    if (files.length > 6) pv.append(el("div", "sub", `+${files.length - 6} file lagi`));
+    const bar = el("div", "bar"), fill = el("i"); bar.append(fill); bar.hidden = true;
+    const list = el("div", "acts-list"); body.append(pv, bar, list);
+    const send = async (openAfter) => {
+      bar.hidden = false; let done = 0; const names = [];
+      for (const f of files) {
+        const r = await upload(f, (n) => fill.style.width = `${((done + n) / total) * 100}%`);
+        done += f.size; names.push(r.saved);
+      }
+      await api("/api/share/received", { names });
+      if (openAfter && names.length === 1) await api("/api/share/open-file", { name: names[0] });
+      clearInbox();
+      return names.length === 1 ? `${names[0]} tersimpan di Unduhan/Digidaw HP` : `${names.length} file tersimpan di Unduhan/Digidaw HP`;
+    };
+    action(list, files.length === 1 ? "Simpan di PC" : `Simpan ${files.length} file di PC`, `${fmtSize(total)} · ke Unduhan/Digidaw HP`, () => send(false), true);
+    if (files.length === 1) action(list, "Simpan & buka di PC", "dengan aplikasi bawaannya", () => send(true));
+  }
+  function textSheet(initial = "", title = "Kirim teks / link ke PC") {
+    const body = openSheet(title), area = el("textarea", "field"); area.value = initial; area.placeholder = "Tempel teks atau link di sini…";
+    const list = el("div", "acts-list");
+    const paste = el("button", "tiny", "Tempel dari clipboard HP"); paste.type = "button"; paste.style.marginTop = "8px";
+    paste.addEventListener("click", async () => { try { area.value = await navigator.clipboard.readText(); textActions(list, () => area.value); } catch (e) { toast("Clipboard HP tidak bisa dibaca"); } });
+    area.addEventListener("input", () => textActions(list, () => area.value));
+    body.append(area, paste, list); textActions(list, () => area.value);
+    if (!initial) setTimeout(() => area.focus(), 50);
+  }
+  // Android's "Bagikan → Digidaw": the service worker kept it on the phone; ask what to do with it
+  async function clearInbox() { try { await caches.delete("digidaw-share"); } catch (e) {} }
+  async function openShared() {
+    let meta = null, box = null;
+    try { box = await caches.open("digidaw-share"); const m = await box.match("/share-inbox/meta"); meta = m && await m.json(); } catch (e) {}
+    if (!meta) { if (location.search.includes("share=nosw")) toast("Buka Digidaw sekali dulu, lalu bagikan lagi."); history.replaceState(null, "", "/"); return; }
+    if (meta.files.length) {
+      const files = [];
+      for (const f of meta.files) { const r = await box.match(f.key); if (r) files.push(new File([await r.blob()], f.name, { type: f.type })); }
+      return fileSheet(files, "Dibagikan ke Digidaw");
+    }
+    const text = [meta.title, meta.text, meta.url].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join("\n");
+    const link = firstUrl(meta.url || meta.text);
+    textSheet(link && !meta.text.replace(link, "").trim() ? link : text, "Dibagikan ke Digidaw");
+  }
+  $("shFile").addEventListener("click", () => $("shPick").click());
+  $("shPick").addEventListener("change", () => { const files = [...$("shPick").files]; $("shPick").value = ""; if (files.length) fileSheet(files); });
+  $("shText").addEventListener("click", () => textSheet());
+  $("shClip").addEventListener("click", async () => {
+    let text = ""; try { text = (await api("/api/share/clipboard")).text; } catch (e) { return; }
+    const body = openSheet("Clipboard PC");
+    if (!text) { body.append(el("div", "empty", "Clipboard PC kosong (atau bukan teks).")); return; }
+    let copied = false; try { await navigator.clipboard.writeText(text); copied = true; } catch (e) {}
+    body.append(el("div", "preview", text.length > 1500 ? text.slice(0, 1500) + "…" : text));
+    const list = el("div", "acts-list"); body.append(list);
+    if (copied) toast("Disalin ke clipboard HP");
+    action(list, copied ? "Salin lagi ke HP" : "Salin ke clipboard HP", `${text.length} karakter`, async () => { await navigator.clipboard.writeText(text); return "Disalin ke clipboard HP"; }, !copied);
+    const url = firstUrl(text);
+    if (url) action(list, "Buka link di HP", url.replace(/^https?:\/\//, "").slice(0, 48), async () => { window.open(url, "_blank", "noopener"); return ""; });
+    if (navigator.share) action(list, "Bagikan ke aplikasi lain", "WhatsApp, catatan, …", async () => { await navigator.share({ text }); return ""; });
+  });
+  $("shFiles").addEventListener("click", async () => {
+    let files = []; try { files = (await api("/api/files")).files; } catch (e) { return; }
+    const body = openSheet("File terbaru di PC");
+    if (!files.length) { body.append(el("div", "empty", "Tidak ada file di Unduhan atau Screenshots.")); return; }
+    const folders = { "unduhan": "Unduhan", "dari-hp": "Dari HP", "screenshot": "Screenshot" };
+    files.forEach((f) => {
+      const a = el("a", "file-row"); a.href = `/api/files/get?folder=${encodeURIComponent(f.folder)}&name=${encodeURIComponent(f.name)}`;
+      a.setAttribute("download", f.name);
+      const ext = (f.name.split(".").pop() || "").slice(0, 4);
+      const mid = el("div"); mid.style.minWidth = "0";
+      mid.append(el("div", "n", f.name), el("div", "sub", `${folders[f.folder] || f.folder} · ${fmtSize(f.size)} · ${new Date(f.mtime * 1000).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`));
+      a.append(el("div", "ico", ext), mid, el("span", "dl", "Unduh"));
+      body.append(a);
+    });
   });
 
   // ── notifications (alerts + a ringing alarm) ──
@@ -598,7 +975,10 @@
   $("notice").addEventListener("click", (e) => { if (!e.target.closest("button")) $("notice").classList.remove("show"); });
   $("alarmStop").addEventListener("click", async () => { await api("/api/alarm", { action: "stop" }); $("notice").classList.remove("show"); });
   $("alarmSnooze").addEventListener("click", async () => { const r = await api("/api/alarm", { action: "snooze" }); toast(r.result); $("notice").classList.remove("show"); });
-  $("testNotice").addEventListener("click", () => { unlockAudio(); notice("PENGINGAT", "Ini contoh notifikasi Digidaw."); buzz([200, 100, 200]); speakOnPhone("Ini contoh notifikasi Digidaw.", true); });
+  $("testNotice").addEventListener("click", async () => {
+    unlockAudio(); notice("PENGINGAT", "Ini contoh notifikasi Digidaw."); buzz([200, 100, 200]); speakOnPhone("Ini contoh notifikasi Digidaw.", true);
+    if ($("pushBtn").dataset.on) { try { await api("/api/push/test", {}); } catch (e) {} }   // and the real one, via the PC
+  });
   let alarmBuzz = null;
   function handleAlerts(s) {
     const alerts = s.alerts || [];
@@ -640,14 +1020,14 @@
     s.agenda.forEach((a) => {
       const d = new Date(a.date + "T00:00:00"), row = document.createElement("div");
       row.className = `row${a.days === 0 ? " today" : ""}`;
-      row.innerHTML = '<div class="date"><b></b><small></small></div><div><div class="title"></div><div class="sub"></div></div><div style="text-align:right"><div class="when"></div></div>';
+      row.innerHTML = '<div class="date"><b></b><small></small></div><div style="min-width:0"><div class="title"></div><div class="sub"></div></div><div class="right"><span class="when"></span></div>';
       row.querySelector(".date b").textContent = d.getDate(); row.querySelector(".date small").textContent = BULAN[d.getMonth()];
       row.querySelector(".title").textContent = a.title;
       row.querySelector(".sub").textContent = [HARI[d.getDay()], a.time ? a.time.replace(":", ".") : null, a.yearly ? "setiap tahun" : null].filter(Boolean).join(" · ");
       row.querySelector(".when").textContent = a.days === 0 ? "HARI INI" : a.days === 1 ? "BESOK" : `${a.days} hari`;
       const x = document.createElement("button"); x.className = "x"; x.textContent = "✕"; x.setAttribute("aria-label", "Hapus");
       x.addEventListener("click", async () => { if (confirm(`Hapus "${a.title}"?`)) { toast((await api("/api/agenda", { delete: a.id })).result); refresh(); } });
-      row.lastElementChild.appendChild(x); box.appendChild(row);
+      row.querySelector(".right").appendChild(x); box.appendChild(row);
     });
     const timers = (s.timers || []).filter((t) => t.kind !== "action");
     $("timers").textContent = "";
@@ -663,7 +1043,22 @@
       x.addEventListener("click", async () => { await api("/api/timer", { cancel: t.id }); refresh(); });
       row.appendChild(x); $("timers").appendChild(row);
     });
+    renderHistory(s.log || []);
     handleAlerts(s);
+  }
+  function renderHistory(log) {
+    const items = log.filter((e) => e.type === "user" || e.type === "digidaw").slice(-6);
+    const key = items.map((e) => e.ts).join(",");
+    if (key === renderHistory.key) return;
+    renderHistory.key = key;
+    const box = $("hist"); box.textContent = "";
+    if (!items.length) { box.innerHTML = '<div class="empty">Belum ada.</div>'; return; }
+    items.forEach((e) => {
+      const row = document.createElement("div"); row.className = e.type === "user" ? "u" : "d";
+      row.innerHTML = "<b></b><span></span>";
+      row.querySelector("b").textContent = e.type === "user" ? "ANDA" : "DIGIDAW"; row.querySelector("span").textContent = e.text;
+      box.appendChild(row);
+    });
   }
   async function refresh() {
     if (document.hidden && !alarmBuzz) { try { handleAlerts(await api("/api/state")); } catch (e) {} return; }
@@ -672,6 +1067,14 @@
   }
 
   // ── remote ──
+  const APP_NAMES = { "google-chrome": "Chrome", "chromium": "Chromium", "org.gnome.nautilus": "Files", "thunar": "File manager",
+                      "whatsie": "WhatsApp", "code": "VS Code", "code-oss": "VS Code", "kitty": "Terminal" };
+  function appName(app) {
+    const raw = String(app || "?"), key = raw.toLowerCase();
+    if (APP_NAMES[key]) return APP_NAMES[key];
+    const last = raw.includes(".") ? raw.split(".").pop() : raw;          // org.gnome.Nautilus -> Nautilus
+    return last.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
   async function refreshRemote() {
     let r; try { r = await api("/api/remote"); } catch (e) { return; }
     renderWorkspaces($("ws"), r, refreshRemote);
@@ -682,17 +1085,19 @@
     r.windows.forEach((w) => {
       const row = document.createElement("div"); row.className = `win${w.active ? " active" : ""}`;
       row.innerHTML = '<div class="ico"></div><div style="min-width:0"><div class="t"></div><div class="s"></div></div><select aria-label="Pindah ke workspace"></select><button class="x" aria-label="Tutup">✕</button>';
-      row.querySelector(".ico").textContent = (w.app || "?").slice(0, 1).toUpperCase();
-      row.querySelector(".t").textContent = w.app; row.querySelector(".s").textContent = `${w.title} · ws ${w.workspace}`;
+      const name = appName(w.app);
+      row.querySelector(".ico").textContent = name.slice(0, 1).toUpperCase();
+      row.querySelector(".t").textContent = name; row.querySelector(".s").textContent = w.title || "—";
       const sel = row.querySelector("select");
-      sel.innerHTML = '<option value="">ws…</option>' + [1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}">ke ${n}</option>`).join("");
-      sel.addEventListener("change", async () => { if (sel.value) { toast((await api("/api/window", { action: "move", id: w.id, workspace: sel.value })).result); refreshRemote(); } });
+      sel.innerHTML = [1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}"${n === +w.workspace ? " selected" : ""}>WS ${n}</option>`).join("");
+      sel.addEventListener("change", async () => { toast((await api("/api/window", { action: "move", id: w.id, workspace: sel.value })).result); refreshRemote(); });
       row.querySelector(".x").addEventListener("click", async () => { if (confirm(`Tutup ${w.app}?`)) { toast((await api("/api/window", { action: "close", id: w.id })).result); setTimeout(refreshRemote, 700); } });
       row.querySelector(".t").parentElement.addEventListener("click", async () => { buzz(15); toast((await api("/api/window", { action: "focus", id: w.id })).result); refreshRemote(); });
       wins.appendChild(row);
     });
     const fav = $("fav"); fav.textContent = "";
-    r.favourites.forEach((f) => {
+    const seen = new Set();
+    r.favourites.filter((f) => { const k = appName(f.label).toLowerCase(); return !seen.has(k) && seen.add(k); }).forEach((f) => {
       const b = document.createElement("button"); b.className = f.kind;
       b.innerHTML = '<div class="ico"></div><span></span>';
       b.querySelector(".ico").textContent = f.label.slice(0, 1).toUpperCase(); b.querySelector("span").textContent = f.label;
@@ -839,9 +1244,15 @@
     const r = await api("/api/agenda", { title: $("agTitle").value, date: $("agDate").value, time: $("agTime").value });
     toast(r.result); $("agTitle").value = ""; $("agTime").value = ""; e.target.closest("details").open = false; refresh();
   });
-  $("logoutBtn").addEventListener("click", async () => { await api("/api/logout", {}); showLogin(); });
+  $("logoutBtn").addEventListener("click", async () => {
+    try { const sub = swReg && await swReg.pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } catch (e) {}
+    await api("/api/logout", {}); showLogin();
+  });
 
   document.addEventListener("visibilitychange", refresh);
+  const startTab = new URLSearchParams(location.search).get("tab");   // shortcuts on the home-screen icon
+  if (startTab && $(`tab-${startTab}`)) openTab(startTab);
+  if (/[?&]share=/.test(location.search)) openShared();
   refresh();
 </script>
 </body>

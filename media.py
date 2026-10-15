@@ -569,7 +569,13 @@ def _search_youtube(query: str, limit: int = 5) -> list[dict]:
             title = json.loads(f'"{t.group(1)}"') if t else ""
         except ValueError:
             title = ""
-        results.append({"id": m.group(1), "title": title})
+        length = re.search(r'"lengthText":\{.*?"simpleText":"([\d:.]+)"', chunk[:3000])
+        owner = re.search(r'"(?:ownerText|longBylineText)":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"', chunk)
+        seconds = 0
+        for part in re.split(r"[:.]", length.group(1)) if length else []:
+            seconds = seconds * 60 + int(part or 0)
+        results.append({"id": m.group(1), "title": title, "seconds": seconds,
+                        "channel": owner.group(1) if owner else ""})
         if len(results) >= limit:
             break
     if not results:  # page layout changed: fall back to any video id
@@ -580,6 +586,63 @@ def _search_youtube(query: str, limit: int = 5) -> list[dict]:
         if len(_search_cache) > 200:
             _search_cache.pop(next(iter(_search_cache)))
     return results
+
+
+# "putar <x>" is nearly always a song: among the top results prefer what looks like one, unless the user asked
+# for a video ("putar video cara masak", "putar podcast …")
+VIDEO_WORDS = re.compile(r"\b(?:video|tutorial|cara|podcast|berita|news|film|movie|trailer|vlog|review|kuliah|materi|"
+                         r"episode|eps|siaran|live|dokumenter|documentary|ceramah|kajian|resep|gameplay|walkthrough)\b",
+                         re.IGNORECASE)
+# in a title, "video"/"live" are often part of a song ("Official Video", "Live Lounge"): only these say "not music"
+NOT_MUSIC_RE = re.compile(r"\b(?:tutorial|cara|podcast|berita|news|trailer|vlog|review|reaction|kuliah|materi|episode|"
+                          r"eps|dokumenter|documentary|ceramah|kajian|resep|gameplay|walkthrough|penjelasan|teori|"
+                          r"parodi|kata-kata|motivasi)\b", re.IGNORECASE)
+MUSIC_CHANNEL_RE = re.compile(r" - Topic$|vevo|records|music|musik|official", re.IGNORECASE)
+SONG_HINT_RE = re.compile(r"official|audio|lyric|lirik|music|musik|\bmv\b|\bft\.?|feat|remix|cover|acoustic|akustik|"
+                          r"\blagu\b|\bsong\b|karaoke|sped up|slowed|playlist|lofi|kompilasi|full album", re.IGNORECASE)
+
+
+def _song_score(r: dict) -> float:
+    score = 0.0
+    seconds, title = r.get("seconds", 0), r.get("title", "")
+    if 90 <= seconds <= 480:
+        score += 2
+    elif seconds > 900:
+        score -= 2                      # a lecture … or a long music compilation (the title tells which)
+    elif seconds > 480 or not seconds:
+        score -= 1                      # rather long for a song / a live stream
+    if SONG_HINT_RE.search(title):
+        score += 2
+    elif " - " in title:
+        score += 1                      # "Artist - Title" (but also "Speaker - Topic")
+    if MUSIC_CHANNEL_RE.search(r.get("channel", "")):
+        score += 2
+    if NOT_MUSIC_RE.search(title):
+        score -= 3
+    return score
+
+
+def _looks_musical(r: dict) -> bool:
+    return bool((SONG_HINT_RE.search(r.get("title", "")) or MUSIC_CHANNEL_RE.search(r.get("channel", "")))
+                and not NOT_MUSIC_RE.search(r.get("title", "")))
+
+
+def _pick_song(query: str, results: list[dict]) -> dict:
+    """The most song-like of the first results (an earlier one wins a near tie: YouTube's order matters).
+    When none looks like a song ("konsumen" -> lectures), search once more as "<query> song"."""
+    if VIDEO_WORDS.search(query):
+        return results[0]
+    ranked = lambda rs: max(enumerate(rs), key=lambda ir: _song_score(ir[1]) - ir[0] * 0.5)[1]
+    best = ranked(results[:5])
+    if any(_looks_musical(r) for r in results[:5]):
+        return best
+    try:
+        more = _search_youtube(f"{query} song")
+    except requests.RequestException:
+        more = []
+    if more and _song_score(ranked(more[:5])) > _song_score(best):
+        return ranked(more[:5])
+    return best
 
 
 # ─────────────────────────────── public skills ───────────────────────────────
@@ -614,7 +677,7 @@ def play_youtube(query: str, mix: bool = False) -> str:
         webbrowser.open("https://www.youtube.com/results?search_query=" + urllib.parse.quote(query))
         return f"Saya tidak bisa mengambil hasil YouTube, jadi saya buka pencariannya, {T}."
 
-    video = results[0]
+    video = _pick_song(query, results)
     _remember_query(query)
     url = f"https://www.youtube.com/watch?v={video['id']}" + (f"&list=RD{video['id']}" if mix else "")
     if config.PAUSE_OTHER_MEDIA_ON_PLAY:
@@ -633,6 +696,29 @@ def play_youtube(query: str, mix: bool = False) -> str:
         webbrowser.open(url)
         return f"Membuka {title} di browser biasa, {T} (pemutar otomatis gagal: {e})."
     return f"Memutar {(info or {}).get('title') or title}{' dalam mode mix' if mix else ''}, {T}."
+
+
+YOUTUBE_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
+
+
+def youtube_id(url: str) -> str:
+    """The video id in a YouTube link (watch, youtu.be, shorts, music.youtube.com), or ''."""
+    m = YOUTUBE_ID_RE.search(url or "")
+    return m.group(1) if m else ""
+
+
+def play_url(url: str) -> str:
+    """Play a YouTube link (e.g. shared from the phone) in Digidaw's player, like 'putar …' does."""
+    video_id = youtube_id(url)
+    if not video_id:
+        return f"Itu bukan link YouTube, {T}."
+    playlist = re.search(r"[?&]list=([\w-]+)", url)
+    url = f"https://www.youtube.com/watch?v={video_id}" + (f"&list={playlist.group(1)}" if playlist else "")
+    if config.PAUSE_OTHER_MEDIA_ON_PLAY:
+        threading.Thread(target=_smtc, args=("pause",), kwargs={"only_status": PLAYING}, daemon=True).start()
+    _last_paused.clear()
+    threading.Thread(target=_play_in_background, args=(url, video_id, "video dari HP"), daemon=True).start()
+    return f"Memutar video dari HP, {T}."
 
 
 def _play_in_background(url: str, video_id: str, title: str):

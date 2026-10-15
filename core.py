@@ -14,6 +14,8 @@ Voice flow:
 """
 import re
 import sys
+import difflib
+import collections
 import time
 import queue
 import threading
@@ -156,6 +158,63 @@ def detect_wake(text: str) -> tuple[bool, str, bool]:
     return True, re.sub(r"\s+", " ", after or before), loose
 
 
+def sounds_like_call(text: str) -> bool:
+    """A short phrase that is most likely "Digidaw" misheard ("Dido", "gigi", "dingin dong") while Digidaw is
+    already waiting for a command: the user is calling again, it isn't the command. Real short commands
+    ("diam", "lanjut", "stop") start like a command and are never caught by this."""
+    text = text.strip(" .,!?")
+    if not 1 <= len(text.split()) <= 2 or COMMAND_START_RE.match(text):
+        return False
+    key = re.sub(r"[^a-z]", "", text.lower())
+    return len(key) >= 4 and difflib.SequenceMatcher(None, key, "digidaw").ratio() >= 0.5
+
+
+def wake_echo(text: str) -> bool:
+    """"Digidaw, digidaw, digidaw, …" and nothing else: the recogniser hearing the name in music or noise
+    (it is told to expect it), not someone calling."""
+    return len(WAKE_RE.findall(text)) >= 3 and not WAKE_RE.sub(" ", text).strip(" ,.!?")
+
+
+def stray_before_call(text: str, command: str) -> bool:
+    """"book Digidaw", "Jungan. Digidaw": nothing after the name and a word or two before it that isn't a
+    command — the tail of other talk (or noise) before the call, not "putar musik, Digidaw"."""
+    matches = list(WAKE_RE.finditer(text))
+    return bool(matches) and not text[matches[-1].end():].strip(" ,.!?") \
+        and len(command.split()) <= 2 and not COMMAND_START_RE.match(command)
+
+
+def classify_call(text: str, armed: str = "") -> tuple[str, str]:
+    """For a device that listens by itself (the phone's hands-free mode): what to do with one phrase.
+    armed: "" = waiting for "Digidaw", "1" = it was just called, "loose" = called by an alias ("digital"),
+    so the phrase has to look like a command, "followup" = right after an answer (no "Digidaw" needed, but a
+    lone word that isn't a command is a scrap of other talk). Returns ("ignore" | "arm" | "command", command)."""
+    text = text.strip()
+    if not text or wake_echo(text):
+        return "ignore", ""
+    addressed, command, loose = detect_wake(text)
+    if addressed and loose and command and not COMMAND_START_RE.match(command):
+        addressed = False              # "…lagi dong" at the end of someone's sentence
+    if addressed and not loose and command and stray_before_call(text, command):
+        command = ""
+    if addressed and not command:
+        return ("ignore", "") if loose and len(text.split()) > 3 else ("arm", "loose" if loose else "")
+    if addressed:
+        return "command", command
+    if armed:
+        if sounds_like_call(text):
+            return "arm", ""
+        if armed == "loose" and not COMMAND_START_RE.match(text):
+            return "ignore", ""
+        if armed == "followup" and len(text.strip(" ,.!?").split()) < 2 and not COMMAND_START_RE.match(text.strip()):
+            return "ignore", ""
+        return "command", text.strip(" ,.!?")
+    return "ignore", ""
+
+
+def _device(source: str) -> str:
+    return "hp" if source.startswith("hp") else "pc"
+
+
 BRIEFING_STATE = config.LOG_DIR / "startup_state.json"
 
 
@@ -198,6 +257,9 @@ class DigidawCore:
         self.paused_until = 0.0       # Digidaw told to stop listening (inf = until woken up)
         self._ducked = False
         self._last_command = ("", 0.0)   # (text, finished_at) — drops impatient repeats
+        # spoken commands lately: one sentence may be heard by both the PC's microphone and the phone
+        self._recent = collections.deque(maxlen=6)
+        self._queued_at = 0.0            # when the command now being processed was queued
         self.restart_requested = False
         self.brief = None                # {"parts": [...], "last": t} while the user describes a project
         self._worker = threading.Thread(target=self._work, daemon=True, name="digidaw-worker")
@@ -209,6 +271,8 @@ class DigidawCore:
 
     def submit(self, text: str, source: str = "text") -> threading.Event:
         done = threading.Event()
+        done.queued_at = time.time()
+        done.reply = ""                  # Digidaw's answer, once done is set
         self.queue.put((text, source, done))
         return done
 
@@ -581,15 +645,60 @@ class DigidawCore:
                 text, source, done = self.queue.get(timeout=0.5)
             except queue.Empty:
                 continue
+            queued_at = getattr(done, "queued_at", time.time())
+            earlier = self._heard_twice(text, source, queued_at)
+            if earlier:
+                where = "HP" if earlier["device"] == "hp" else "mikrofon PC"
+                console.print(f"[dim]· \"{text}\" sudah dijalankan lewat {where}, diabaikan[/dim]")
+                self.armed_until = 0.0
+                self._awaiting_command = False
+                done.reply = earlier["reply"]
+                done.set()
+                continue
             self.busy.set()
+            started = time.time()
+            self._queued_at = queued_at
             try:
                 self._process(text, source)
             except Exception as e:
                 console.print(f"[dim red]Error: {e}[/dim red]")
             finally:
                 self._last_command = (text.lower(), time.time())
+                replies = [e.get("text", "") for e in list(events.history)
+                           if e.get("type") == "digidaw" and e.get("ts", 0) >= started]
+                done.reply = replies[-1] if replies else ""
+                if source in ("voice", "hp", "hp-silent"):
+                    self._recent.append({"text": text.lower().strip(" .,!?"), "device": _device(source),
+                                         "at": queued_at, "reply": done.reply})
                 self.busy.clear()
                 done.set()
+
+    def _pc_speaks(self, source: str) -> bool:
+        """Should the PC say the answer out loud? Not when it came from the phone set to "HP saja", and not when
+        the PC's microphone caught the same sentence the phone (set to "HP saja") also heard: the user is holding
+        the phone, so the answer belongs there (the phone gets the reply through the duplicate check)."""
+        if source == "hp-silent":
+            return False
+        if source == "voice":
+            try:
+                import mobile_server
+                return not mobile_server.phone_covers(self._queued_at)
+            except Exception:
+                return True
+        return True
+
+    def _heard_twice(self, text: str, source: str, queued_at: float):
+        """The same spoken command that just came from the other device (the phone and the PC's microphone
+        both heard the user): the earlier one ran, this one is skipped. The queue runs one at a time, so
+        whichever arrived first wins however long it took."""
+        if source not in ("voice", "hp", "hp-silent"):
+            return None
+        key = text.lower().strip(" .,!?")
+        for r in reversed(self._recent):
+            if r["device"] != _device(source) and abs(queued_at - r["at"]) <= 10 \
+                    and difflib.SequenceMatcher(None, r["text"], key).ratio() >= 0.8:
+                return r
+        return None
 
     def _process(self, text: str, source: str):
         if source in ("brief", "brief-final"):
@@ -604,7 +713,8 @@ class DigidawCore:
             events.emit("user", text=text, source=source)
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {reply}")
             events.emit("digidaw", text=reply)
-            tts.speak(reply)
+            if self._pc_speaks(source):
+                tts.speak(reply)
             self.open_conversation(config.FOLLOWUP_SECONDS + 5)
             return
         if self._pending_verb:
@@ -618,7 +728,8 @@ class DigidawCore:
             events.emit("user", text=text, source=source)
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {reply}")
             events.emit("digidaw", text=reply)
-            tts.speak(reply)
+            if self._pc_speaks(source):
+                tts.speak(reply)
             return
         self.armed_until = 0.0
         self._awaiting_command = False
@@ -645,7 +756,7 @@ class DigidawCore:
         if response:
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {response}")
             events.emit("digidaw", text=response, brain=getattr(brain, "_brain_used", "") or "")
-            if source != "hp-silent":          # the phone reads it out itself; the PC stays quiet
+            if self._pc_speaks(source):        # (the phone reads it out itself when it is the one to answer)
                 tts.speak(response)
         events.set_status("idle")
         if should_exit:
@@ -750,7 +861,15 @@ class DigidawCore:
             self._brief_input(text)
             return
 
+        if wake_echo(text):
+            return                     # "Digidaw, digidaw, digidaw…" heard in music or noise
         addressed, command, loose = detect_wake(text)
+        if not addressed and (time.time() < self.armed_until or self.in_followup()) and sounds_like_call(text) \
+                and not safety.has_pending():
+            console.print(f"[dim]· \"{text}\" dianggap panggilan \"Digidaw\" (salah dengar)[/dim]")
+            addressed, command, loose = True, "", False
+        if addressed and not loose and command and stray_before_call(text, command):
+            command = ""               # "book Digidaw": a stray word, then the call
         if addressed and command.lower().strip(" .,!?") in ("restart", "mulai ulang", "muat ulang", "reboot") and \
                 re.search(r"\b(?:restart|mulai ulang|muat ulang|reboot)\W+digidaw\b", text, re.IGNORECASE):
             command = "restart digidaw"      # "restart Digidaw": the name is the object here, not only the call

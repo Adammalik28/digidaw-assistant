@@ -117,6 +117,7 @@ import brain
 import memory
 import media
 import monitor
+import notifications
 import hotkeys
 import ai_skills
 import system_control
@@ -361,6 +362,7 @@ def main(args=ARGS):
         hotkeys.start(hud_server.open_window, config.SHOW_HUD_HOTKEY)
     # Esc-to-talk is handled by the HUD page itself (only while the HUD window is focused)
     monitor.start(core.announce)
+    notifications.start()
 
     print_dashboard(voice_enabled, hud_ok, hotkey_ok, missing := missing_dependencies())
     if missing:

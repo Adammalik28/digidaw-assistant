@@ -120,7 +120,7 @@ FIELDS = [
     ("AI", "LOCAL_MODEL", "Model lokal (Ollama)", "text",
      {"help": "Nama model di `ollama list`, mis. qwen3:4b-instruct. Hindari model thinking (lambat)."}),
     ("AI", "MODEL_PREFERENCE", "Prioritas model", "choice",
-     {"options": [("fast", "Cepat (Flash-Lite)"), ("smart", "Lebih pintar (Flash, sedikit lebih lambat)")]}),
+     {"options": [("fast", "Cepat (urutan model tercepat)"), ("smart", "Lebih pintar (Flash penuh dulu)")]}),
 
     ("HUD di HP", "MOBILE_HUD", "Aktifkan HUD untuk HP (Wi-Fi rumah)", "bool",
      {"restart": True, "help": "Buka dari HP di Wi-Fi yang sama. Ucapkan \"alamat HUD HP\" untuk QR-nya."}),
