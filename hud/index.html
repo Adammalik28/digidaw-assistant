@@ -86,7 +86,7 @@
   .main > * { min-width: 0; }
   .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; scrollbar-width: none; }
 
-  .panel { position: relative; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px 14px; backdrop-filter: blur(6px); }
+  .panel { position: relative; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px 14px; }
   .panel::before, .panel::after { content: ""; position: absolute; width: 14px; height: 14px; border: 0 solid var(--cyan); }
   .panel::before { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
   .panel::after { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
@@ -95,6 +95,9 @@
 
   /* ── gauges ── */
   .gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
+  .perf { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(90, 215, 255, 0.18); font-family: var(--font-mono);
+    font-size: 11.5px; letter-spacing: 0.08em; color: var(--muted); text-align: center; }
+  .perf b { color: var(--accent); font-weight: 600; }
   .gauge { position: relative; text-align: center; }
   .gauge svg { width: 100%; max-width: 112px; transform: rotate(-90deg); display: block; margin: 0 auto; }
   .gauge .track { fill: none; stroke: rgba(63, 216, 255, 0.12); stroke-width: 7; }
@@ -170,6 +173,18 @@
   .sec-lines span { color: var(--text); }
   .mini-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .mini-actions .btn { padding: 5px 9px; font-size: 9.5px; letter-spacing: 0.12em; }
+  /* lamp (smarthome.py) */
+  .lamp-row { display: flex; align-items: center; gap: 10px; }
+  .lamp-power { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); color: var(--muted); cursor: pointer; transition: background 0.2s, box-shadow 0.2s, color 0.2s; }
+  .lamp-power svg { width: 18px; height: 18px; }
+  .lamp-power[aria-pressed="true"] { color: #fff; background: var(--lamp, rgba(255, 214, 140, 0.35)); box-shadow: 0 0 16px var(--lamp, rgba(255, 214, 140, 0.6)); border-color: transparent; }
+  .lamp-power:focus-visible, .lamp-dot:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+  .lamp-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--cyan); }
+  .lamp-pct { flex: none; width: 38px; text-align: right; font-family: var(--font-mono); font-size: 12px; color: var(--cyan-soft); }
+  .lamp-dots { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
+  .lamp-dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); background: var(--c); cursor: pointer; box-shadow: 0 0 6px var(--c); padding: 0; }
+  .lamp-dot:hover { transform: scale(1.12); }
+  #lampPanel.offline .lamp-row, #lampPanel.offline .lamp-dots, #lampPanel.offline .mini-actions { opacity: 0.45; }
   .proj-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; padding: 7px 0; border-top: 1px dashed var(--line); }
   .proj-row:first-child { border-top: 0; }
   .proj-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -225,9 +240,14 @@
   .np-controls { display: flex; justify-content: center; gap: 12px; margin-top: 8px; }
   .np-controls .icon-btn { width: 40px; height: 40px; }
   .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; margin-right: 6px; vertical-align: -1px; }
-  .eq i { width: 3px; background: var(--green); animation: eq 0.9s infinite ease-in-out; }
-  .eq i:nth-child(2) { animation-delay: -0.3s; } .eq i:nth-child(3) { animation-delay: -0.6s; }
-  .eq.off i { animation: none; height: 3px; background: var(--muted); }
+  .eq i { width: 3px; height: 12px; background: var(--green); transform-origin: bottom; animation: eqAnim 0.85s infinite ease-in-out; }
+  .eq i:nth-child(2) { animation-delay: -0.28s; }
+  .eq i:nth-child(3) { animation-delay: -0.56s; }
+  .eq.off i { animation: none; height: 3px; background: var(--muted); transform: none; }
+  @keyframes eqAnim {
+    0%, 100% { transform: scaleY(0.2); }
+    50% { transform: scaleY(1); }
+  }
 
   .timer-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 22px; gap: 0 10px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
   .timer-row:last-child { border-bottom: 0; }
@@ -263,7 +283,7 @@
   /* ── toasts ── */
   #toasts { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; width: min(560px, 92vw); pointer-events: none; }
   .toast { background: rgba(40, 12, 12, 0.92); border: 1px solid var(--red); color: #ffe0e0; padding: 10px 14px; font-size: 15px; font-weight: 600; box-shadow: 0 0 24px rgba(255, 93, 93, 0.35); animation: fadein 0.3s ease; }
-  .toast.info, .toast.reminder { background: rgba(8, 36, 58, 0.95); border-color: var(--cyan); color: var(--text); box-shadow: 0 0 24px rgba(63, 216, 255, 0.35); }
+  .toast.info, .toast.reminder, .toast.message { background: rgba(8, 36, 58, 0.95); border-color: var(--cyan); color: var(--text); box-shadow: 0 0 24px rgba(63, 216, 255, 0.35); }
 
   @keyframes blink { 50% { opacity: 0; } }
   @keyframes pulse { 50% { box-shadow: 0 0 4px var(--cyan); } }
@@ -293,6 +313,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
+    .panel { transform: none; }
   }
 
   /* ── top actions ── */
@@ -392,6 +413,69 @@
     .top-right { gap: 8px; }
     .top-btn { width: 34px; height: 34px; }
   }
+
+  /* ═══════════════ Tema Cyber 2D (Smooth, Lightweight & Responsive) ═══════════════ */
+  .app { position: relative; z-index: 1; }
+  body::after { opacity: 0.25; z-index: 3; }
+
+  /* top bar: a glass strip with a light along its edge */
+  .topbar { position: relative; border-bottom: 0; padding: 8px 14px 10px;
+    background: linear-gradient(90deg, transparent, rgba(8, 30, 50, 0.55) 15%, rgba(8, 30, 50, 0.55) 85%, transparent); }
+  .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent); opacity: 0.8;
+    box-shadow: 0 0 12px var(--accent); }
+
+  /* panels: clean high-performance dark glass, cyber accent rim */
+  .panel { border: 1px solid rgba(90, 215, 255, 0.22); padding: 13px 15px 15px; border-radius: 6px;
+    background: linear-gradient(180deg, rgba(10, 36, 58, 0.86), rgba(4, 16, 28, 0.82));
+    box-shadow: inset 0 1px 0 rgba(170, 238, 255, 0.16), 0 4px 20px rgba(0, 0, 0, 0.45), inset 0 0 34px rgba(63, 216, 255, 0.05); }
+  .panel::before, .panel::after { border-color: var(--cyan); filter: drop-shadow(0 0 4px var(--cyan)); width: 14px; height: 14px; }
+  .panel-title { justify-content: flex-start; gap: 9px; font-size: 10.5px; letter-spacing: 0.2em; color: var(--cyan-soft);
+    white-space: nowrap;
+    text-shadow: 0 0 10px rgba(63, 216, 255, 0.55); padding-bottom: 8px; border-bottom: 1px solid transparent;
+    border-image: linear-gradient(90deg, rgba(63, 216, 255, 0.65), transparent 80%) 1; }
+  .panel-title::before { content: ""; flex: none; width: 6px; height: 6px; transform: rotate(45deg); background: var(--accent);
+    box-shadow: 0 0 8px var(--accent); }
+  .panel-title .tag { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  .gauge .bar { filter: drop-shadow(0 0 6px rgba(63, 216, 255, 0.9)); }
+  .gauge-val { text-shadow: 0 0 12px rgba(63, 216, 255, 0.6); }
+
+  /* the reactor's stage: rotating instrument rings and a ring of text around the 2D reactor */
+  .reactor-stage { position: relative; width: min(100%, 54vh, 480px); aspect-ratio: 1; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
+  .reactor-stage #reactor { width: 100%; height: 100%; display: block; }
+  .hud-ring { position: absolute; inset: -7%; width: 114%; height: 114%; pointer-events: none; overflow: visible; color: var(--accent);
+    will-change: transform; }
+  .hud-ring text { font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.42em; fill: currentColor; opacity: 0.55; }
+  .hud-ring .thin { fill: none; stroke: currentColor; stroke-width: 0.6; opacity: 0.35; }
+  .hud-ring .dash { fill: none; stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 9; opacity: 0.5; }
+  /* (no drop-shadow on a spinning layer: Chrome re-rendered the shadow every frame — about a CPU core with the rest) */
+  .hud-ring .arcs { fill: none; stroke: currentColor; stroke-width: 3; opacity: 0.9; stroke-linecap: round; }
+
+  @keyframes spinCW { to { transform: rotate(360deg); } }
+  @keyframes spinCCW { to { transform: rotate(-360deg); } }
+  .hud-ring[data-spin="40"] { animation: spinCW 40s linear infinite; transform-origin: center; }
+  .hud-ring[data-spin="-26"] { animation: spinCCW 26s linear infinite; transform-origin: center; }
+  .hud-ring[data-spin="9"] { animation: spinCW 9s linear infinite; transform-origin: center; }
+  body.state-thinking .hud-ring[data-spin="9"] { animation-duration: 2.2s; }
+  /* energy: the HUD unseen, or idle without focus for a while — the rings stand still (html.calm, set by updateCalm) */
+  html.calm .hud-ring, html.calm .eq i, html.calm .dot.check { animation-play-state: paused !important; }
+  @media (prefers-reduced-motion: reduce) { .hud-ring { animation: none !important; } }
+  body.state-listening .hud-ring[data-spin="9"] { animation-duration: 4s; }
+
+  .reactor-stage { margin-bottom: calc(min(54vh, 480px) * 0.08); }   /* the rings reach 7% beyond the stage */
+  .state-label { font-size: 18px; letter-spacing: 0.6em; margin-top: 12px; }
+  .state-hint { margin-top: 8px; }
+  .digidaw-line { font-size: 22px; text-shadow: 0 0 14px rgba(63, 216, 255, 0.35); }
+
+  /* command bar and quick buttons: clean glass */
+  .command-bar input { background: rgba(6, 22, 38, 0.88); border-color: rgba(90, 215, 255, 0.35);
+    border-radius: 8px; padding-left: 18px; }
+  .icon-btn { border-radius: 8px; }
+  .chip { border-radius: 6px; background: rgba(10, 40, 64, 0.5);
+    border-color: rgba(90, 215, 255, 0.35); transition: background 0.15s, color 0.15s, transform 0.15s; }
+  .chip:hover, .chip:focus-visible { background: rgba(63, 216, 255, 0.28); color: #fff; transform: translateY(-2px); }
+  #toasts .toast { border-radius: 6px; }
 </style>
 </head>
 <body class="state-idle">
@@ -457,6 +541,7 @@
             <div class="gauge-label">DISK C</div><div class="gauge-sub" id="diskSub">—</div>
           </div>
         </div>
+        <div class="perf" id="perf" title="Hari ini: panggilan yang langsung berlanjut ke perintah, dan berapa cepat suara Digidaw mulai. Tanyakan &quot;Digidaw, laporan kinerja&quot; untuk lengkapnya.">KINERJA HARI INI —</div>
       </div>
 
       <div class="panel">
@@ -472,6 +557,37 @@
         <div style="display:flex; gap:10px; align-items:baseline; margin-top:6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);">
           <span class="weather-cond" id="wCond" style="font-size:12.5px; color: var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">memuat…</span>
           <span>LEMBAP <b id="wHum" style="color:var(--text); font-weight:500">—</b></span><span>ANGIN <b id="wWind" style="color:var(--text); font-weight:500">—</b></span>
+        </div>
+      </div>
+
+      <div class="panel" id="lampPanel" hidden>
+        <div class="panel-title">Lampu <span class="tag" id="lampTag">—</span></div>
+        <div class="lamp-row">
+          <button class="lamp-power" id="lampPower" type="button" title="Nyalakan / matikan lampu" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>
+          </button>
+          <input type="range" id="lampBright" min="1" max="100" value="100" aria-label="Kecerahan lampu">
+          <span class="lamp-pct" id="lampPct">—</span>
+        </div>
+        <div class="lamp-dots" id="lampDots">
+          <button class="lamp-dot" type="button" data-lamp-color="putih hangat" style="--c:#ffcf8a" title="Putih hangat"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="putih" style="--c:#fff1d6" title="Putih"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="putih dingin" style="--c:#e3efff" title="Putih dingin"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="merah" style="--c:#ff3b3b" title="Merah"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="oranye" style="--c:#ff8a1e" title="Oranye"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="kuning" style="--c:#ffd21e" title="Kuning"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="hijau" style="--c:#2ee36a" title="Hijau"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="toska" style="--c:#1ee8c8" title="Toska"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="biru" style="--c:#3c6bff" title="Biru"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="ungu" style="--c:#a04bff" title="Ungu"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="pink" style="--c:#ff4fa0" title="Pink"></button>
+        </div>
+        <div class="mini-actions">
+          <button class="btn" type="button" data-lamp-scene="baca">BACA</button>
+          <button class="btn" type="button" data-lamp-scene="santai">SANTAI</button>
+          <button class="btn" type="button" data-lamp-scene="film">FILM</button>
+          <button class="btn" type="button" data-lamp-scene="tidur">TIDUR</button>
+          <button class="btn" type="button" data-lamp-scene="pesta">PESTA</button>
         </div>
       </div>
 
@@ -502,7 +618,17 @@
     <!-- CENTER -->
     <section class="center">
       <div class="reactor-wrap">
-        <canvas id="reactor" aria-label="Status DIGIDAW"></canvas>
+        <div class="reactor-stage">
+          <canvas id="reactor" aria-label="Status DIGIDAW"></canvas>
+          <svg class="hud-ring" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="thin" cx="200" cy="200" r="196"/><circle class="thin" cx="200" cy="200" r="162"/></svg>
+          <svg class="hud-ring" data-spin="40" viewBox="0 0 400 400" aria-hidden="true">
+            <defs><path id="ringPath" d="M200,200 m-176,0 a176,176 0 1,1 352,0 a176,176 0 1,1 -352,0"/></defs>
+            <text><textPath href="#ringPath">DIGIDAW · NEURAL CORE · VOICE LINK ACTIVE · ALL SYSTEMS NOMINAL · DIGIDAW · NEURAL CORE · VOICE LINK ACTIVE · </textPath></text></svg>
+          <svg class="hud-ring" data-spin="-26" viewBox="0 0 400 400" aria-hidden="true"><circle class="dash" cx="200" cy="200" r="188"/></svg>
+          <svg class="hud-ring" data-spin="9" data-spin-thinking="2.2" data-spin-listening="4" viewBox="0 0 400 400" aria-hidden="true">
+            <path class="arcs" d="M200,8 A192,192 0 0,1 336,64 M392,200 A192,192 0 0,1 336,336 M200,392 A192,192 0 0,1 64,336 M8,200 A192,192 0 0,1 64,64"/></svg>
+        </div>
         <div class="state-label" id="stateLabel">SIAGA</div>
         <div class="listen-bar" id="listenBar"><div></div></div>
         <div class="state-hint" id="stateHint">Ucapkan "Digidaw" atau ketik perintah di bawah</div>
@@ -690,6 +816,28 @@
   $("stopBtn").addEventListener("click", () => sendAction("stop_speaking"));
   document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => sendCommand(b.dataset.cmd)));
   document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => sendAction(b.dataset.action)));
+
+  // ── lamp (smarthome.py): state from "lamp" events, buttons send lamp:<what>:<value> actions ──
+  let lampBusy = 0;
+  function renderLamp(l) {
+    const panel = $("lampPanel");
+    if (!l || !l.name) { panel.hidden = true; return; }
+    panel.hidden = false;
+    panel.classList.toggle("offline", !l.online);
+    const on = !!l.on && !!l.online;
+    $("lampPower").setAttribute("aria-pressed", on ? "true" : "false");
+    const glow = l.mode === "colour" && l.rgb ? l.rgb : (l.warmth != null && l.warmth > 65 ? "#dfeeff" : "#ffd590");
+    $("lampPower").style.setProperty("--lamp", glow + "99");
+    $("lampTag").textContent = !l.online ? "OFFLINE" : !l.on ? "MATI" :
+      `${l.mode === "scene" ? "SUASANA" : l.mode === "colour" ? "WARNA" : "PUTIH"} · ${l.brightness ?? "—"}%`;
+    if (Date.now() - lampBusy > 2500 && l.brightness != null) { $("lampBright").value = l.brightness; }
+    $("lampPct").textContent = l.online && l.on && l.brightness != null ? `${l.brightness}%` : "—";
+  }
+  $("lampPower").addEventListener("click", () => sendAction("lamp:toggle"));
+  $("lampBright").addEventListener("input", () => { lampBusy = Date.now(); $("lampPct").textContent = `${$("lampBright").value}%`; });
+  $("lampBright").addEventListener("change", () => { lampBusy = Date.now(); sendAction(`lamp:brightness:${$("lampBright").value}`); });
+  document.querySelectorAll("[data-lamp-color]").forEach((b) => b.addEventListener("click", () => sendAction(`lamp:color:${b.dataset.lampColor}`)));
+  document.querySelectorAll("[data-lamp-scene]").forEach((b) => b.addEventListener("click", () => sendAction(`lamp:scene:${b.dataset.lampScene}`)));
   document.addEventListener("keydown", (e) => {
     if (e.key === "/" && document.activeElement !== $("cmdInput")) { e.preventDefault(); $("cmdInput").focus(); }
     if (e.key === "Escape") {
@@ -713,6 +861,8 @@
     const s = STATES[status] ? status : "idle";
     document.body.className = `state-${s}`;
     reactor.state = s;
+    motion.idleSince = performance.now();         // any change of state: lively again, calm 30 s after it goes idle
+    updateCalm();
     $("stateLabel").textContent = STATES[s].label;
     $("stateHint").textContent = s === "idle" && !voiceEnabled ? "Mode teks: ketik perintah di bawah"
       : s === "listening" && listenKind === "conversation" ? "Silakan lanjut bicara — tanpa perlu memanggil Digidaw"
@@ -723,8 +873,31 @@
     if (s === "listening") reactor.ripple();
   }
 
+  // ── how well Digidaw did today (metrics.py) ──
+  function renderPerf(m) {
+    if (!m) return;
+    const el = $("perf");
+    const sec = (v) => (v == null ? "—" : `${String(v.toFixed(1)).replace(".", ",")} dtk`);
+    const rate = m.call_rate == null ? "—" : `${m.call_rate}%`;
+    el.innerHTML = `PANGGILAN <b>${rate}</b> · SUARA MULAI <b>${sec(m.voice)}</b> · PERINTAH <b>${m.commands || 0}</b>`;
+  }
+
   // ── comms log ──
   let logCount = 0;
+  function soundsLikeName(word) {          // letters in common with "digidaw", in order (like Python's difflib ratio)
+    const a = word.toLowerCase().replace(/[^a-z]/g, ""), b = "digidaw";
+    if (a.length < 3) return false;
+    const row = new Array(b.length + 1).fill(0);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = 0;
+      for (let j = 1; j <= b.length; j++) {
+        const keep = row[j];
+        row[j] = a[i - 1] === b[j - 1] ? prev + 1 : Math.max(row[j], row[j - 1]);
+        prev = keep;
+      }
+    }
+    return 2 * row[b.length] / (a.length + b.length) >= 0.5;
+  }
   function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString("id-ID", { hour12: false }).replace(/\./g, ":"); }
   function addLog(ev, animate = true) {
     const log = $("log");
@@ -737,10 +910,12 @@
       said.className = "said";
       said.textContent = `terdengar: "${ev.text}" — diabaikan`;
       el.appendChild(said);
-      // one click teaches Digidaw that this is how Google hears its name
+      // one click teaches Digidaw that this is how Google hears its name — offered only for words that sound like
+      // "Digidaw" ("digital", "di bidang"), never for ordinary words ("gak", "saya", "volume") that would wake it up
       const words = ev.text.trim().split(/\s+/);
       const options = [...new Set([words.length <= 2 ? words.join(" ") : null, words[0], words[words.length - 1]]
-        .filter((w) => w && w.length >= 3 && w.length <= 20).map((w) => w.toLowerCase()))];
+        .filter((w) => w && w.length >= 3 && w.length <= 20).map((w) => w.toLowerCase().replace(/[.,!?]+$/, "")))]
+        .filter(soundsLikeName);
       options.forEach((alias) => {
         const b = document.createElement("button");
         b.className = "alias-btn";
@@ -1010,6 +1185,8 @@
         renderPaused(!!ev.state.paused);
         renderAi(ev.ai);
         renderAlarm(ev.state.alarm || { ringing: false });
+        renderLamp(ev.state.lamp);
+        renderPerf(ev.state.metrics);
         renderWorkspace(ev.workspace);
         break;
       case "status": setStatus(ev.status); break;
@@ -1020,6 +1197,8 @@
       case "alert": addLog(ev); toast(ev.text, ev.level); typeDigidaw(ev.text); break;
       case "stats": updateStats(ev); break;
       case "media": updateMedia(ev); break;
+      case "lamp": renderLamp(ev); break;
+      case "metrics": renderPerf(ev); break;
       case "weather": updateWeather(ev); break;
       case "timers": timers = ev.timers || []; renderTimers(); break;
       case "agenda": agendaItems = ev.items || []; renderAgenda(); break;
@@ -1078,6 +1257,35 @@
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   let col = [...COLORS.idle];
 
+  // how lively the reactor is: it "talks" while Digidaw speaks
+  function reactorLevel(now = performance.now()) {
+    const st = reactor.state;
+    if (st === "speaking") return 0.45 + 0.4 * Math.abs(Math.sin(now / 95) * Math.sin(now / 247)) + Math.random() * 0.2;
+    if (st === "listening") return 0.3 + 0.12 * Math.sin(now / 260);
+    if (st === "thinking") return 0.25;
+    return 0.05;
+  }
+
+  // ── energy: most of the time the HUD is just there. Unseen (another workspace, minimized, screen off) or idle
+  //    without focus for 30 s: the rings stop and the reactor draws 8 frames a second instead of 60; listening,
+  //    thinking or speaking it is fully alive again at once ──
+  const motion = { calm: false, idleSince: performance.now(), reduced: matchMedia("(prefers-reduced-motion: reduce)").matches };
+  function updateCalm() {
+    const idle = reactor.state === "idle" || reactor.state === "paused";
+    const calm = document.hidden || motion.reduced || (idle && !document.hasFocus() && performance.now() - motion.idleSince > 30000);
+    if (calm !== motion.calm) { motion.calm = calm; document.documentElement.classList.toggle("calm", calm); }
+  }
+  document.addEventListener("visibilitychange", updateCalm);
+  window.addEventListener("focus", updateCalm);
+  window.addEventListener("blur", updateCalm);
+  setInterval(updateCalm, 5000);
+  function nextReactorFrame() {
+    if (document.hidden) return setTimeout(() => requestAnimationFrame(drawReactor), 1000);   // not drawn while unseen
+    const busy = reactor.state !== "idle" && reactor.state !== "paused";
+    if (busy) return requestAnimationFrame(drawReactor);
+    setTimeout(() => requestAnimationFrame(drawReactor), motion.calm ? 125 : 33);
+  }
+
   function drawReactor(now) {
     const c = reactor.canvas, dpr = window.devicePixelRatio || 1;
     const size = c.clientWidth;
@@ -1092,11 +1300,7 @@
     const target = COLORS[st];
     col = col.map((v, i) => v + (target[i] - v) * 0.08);
 
-    let lvl = 0.05;
-    if (st === "speaking") lvl = 0.45 + 0.4 * Math.abs(Math.sin(now / 95) * Math.sin(now / 247)) + Math.random() * 0.2;
-    else if (st === "listening") lvl = 0.3 + 0.12 * Math.sin(now / 260);
-    else if (st === "thinking") lvl = 0.25;
-    reactor.level += (lvl - reactor.level) * 0.18;
+    reactor.level += (reactorLevel(now) - reactor.level) * 0.18;
     const L = reactor.level;
 
     const cx = size / 2, cy = size / 2, R = size / 2 * 0.94;
@@ -1212,7 +1416,7 @@
     if (st === "listening" && Math.random() < 0.02) reactor.ripple();
 
     ctx.restore();
-    requestAnimationFrame(drawReactor);
+    nextReactorFrame();
   }
   // ── project builder ──
   const BUILD_LABELS = { queued: "ANTRE", building: "SEDANG DIKERJAKAN", starting: "MENJALANKAN & MENGECEK",

@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 import config
+import storage
 import events
 
 T = config.USER_TITLE
@@ -44,16 +45,15 @@ _lock = threading.RLock()
 def _save():
     data = {"events": _events, "notified": sorted(_notified)[-400:]}
     try:
-        STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        storage.save_json(STATE_FILE, data, backup=True, mode=storage.PRIVATE, indent=1)
     except OSError:
         pass
     events.emit("agenda", items=snapshot())
 
 
 def _load():
-    try:
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    data = storage.load_json(STATE_FILE)
+    if not isinstance(data, dict):
         return
     with _lock:
         _events[:] = data.get("events", [])
@@ -409,9 +409,23 @@ def list_events(days: int = 30, keyword: str = "", start: int = 0) -> str:
         d, e = items[0]
         return f"{_title(e)} {when_text(d)}" + (f" jam {e['time'].replace(':', '.')}" if e.get("time") else "") + f", {T}."
     parts = [f"{e['title']} {when_text(d)}" + (f" jam {e['time'].replace(':', '.')}" if e.get("time") else "")
-             for d, e in items[:6]]
+             + (" (sudah lewat)" if _past(d, e) else "") for d, e in items[:6]]
     more = f", dan {len(items) - 6} lainnya" if len(items) > 6 else ""
+    if items and all(_past(d, e) for d, e in items):        # 18.43: "Olahraga hari ini jam 15.00" is over already
+        return f"Acara hari ini sudah lewat semua, {T}: " + "; ".join(p.replace(" (sudah lewat)", "") for p in parts) \
+            + more + ". Sisa hari ini kosong."
     return f"Ada {len(items)} acara, {T}: " + "; ".join(parts) + more + "."
+
+
+def _past(day: datetime.date, event: dict) -> bool:
+    """An event of today whose time has already gone by."""
+    if day != _today() or not event.get("time"):
+        return False
+    try:
+        hour, minute = (int(x) for x in event["time"].split(":")[:2])
+    except ValueError:
+        return False
+    return datetime.datetime.now().time() > datetime.time(hour, minute)
 
 
 def _match_title(phrase: str) -> str:

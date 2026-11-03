@@ -21,11 +21,15 @@ import config
 
 MODELS_DIR = Path(config.BASE_DIR) / "models"
 GATE_MODEL, OFFLINE_MODEL = "tiny", "base"
+# on the GPU the gate uses the bigger "base" model: ~90 ms instead of ~60 ms per phrase, and it misses the name less
+# often (the gate decides alone whether a phrase is a call: a miss = the user is simply not heard)
+GATE_GPU_MODEL = "base"
 PROMPT = "Digidaw. Digidaw, buka Firefox. Digidaw, putar lagu. Digidaw, jam berapa sekarang? Naikkan volume."
 # what Whisper writes for "Digidaw" (plus the configured aliases, checked separately)
 FUZZY_WAKE = re.compile(r"\b(?:d[iey]g[iey]|did[iy]|dik[iy]|dig)[\s-]?(?:daw|dau|dao|dow|do|da|dawn)\b", re.IGNORECASE)
 
 _models: dict = {}
+_gate_on_gpu: dict = {}          # {"size": "base"} when the gate model runs on the GPU
 _load_lock = threading.Lock()
 _run_lock = threading.Lock()
 
@@ -43,12 +47,70 @@ def available(size: str = GATE_MODEL) -> bool:
 
 
 def _model(size: str):
+    """The gate model runs on the GPU when CUDA works (almost no CPU: every phrase heard, music lyrics included, goes
+    through it — ~2 s of CPU each on the processor); otherwise, or for the bigger offline model, on the CPU."""
     with _load_lock:
         if size not in _models:
             from faster_whisper import WhisperModel
-            _models[size] = WhisperModel(str(model_path(size)), device="cpu", compute_type="int8",
-                                         cpu_threads=config.LOCAL_STT_THREADS)
+            model = None
+            if size == OFFLINE_MODEL and _models.get(GATE_MODEL) is not None and _gate_on_gpu.get("size") == size:
+                _models[size] = _models[GATE_MODEL]          # the gate already runs this model on the GPU: share it
+                return _models[size]
+            if size == GATE_MODEL and _cuda_ok():
+                gpu_size = GATE_GPU_MODEL if available(GATE_GPU_MODEL) else size
+                try:
+                    model = WhisperModel(str(model_path(gpu_size)), device="cuda", compute_type="int8_float16")
+                    model.transcribe(np.zeros(16000, np.float32), language="id", beam_size=1)   # really runs?
+                    _gate_on_gpu["size"] = gpu_size
+                    print(f"[STT lokal] Whisper {gpu_size} berjalan di GPU")
+                except Exception as e:
+                    print(f"[STT lokal] GPU tidak bisa dipakai ({str(e)[:80]}); Whisper di CPU")
+                    model = None
+            _models[size] = model or WhisperModel(str(model_path(size)), device="cpu", compute_type="int8",
+                                                  cpu_threads=config.LOCAL_STT_THREADS)
         return _models[size]
+
+
+def _cuda_ok() -> bool:
+    """CUDA usable by CTranslate2 (it needs the CUDA 12 cuBLAS/cuDNN libraries)."""
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() < 1:
+            return False
+        import ctypes
+        _load_pip_cuda_libs()
+        ctypes.CDLL("libcublas.so.12")
+        return True
+    except Exception:
+        return False
+
+
+def _load_pip_cuda_libs():
+    """CUDA 12 libraries installed as pip packages (nvidia-cublas-cu12, nvidia-cudnn-cu12) live inside the venv, not
+    on the system library path: load them by full path so CTranslate2 finds them."""
+    import ctypes
+    import glob
+    import site
+    for base in site.getsitepackages():
+        for lib in sorted(glob.glob(f"{base}/nvidia/*/lib/lib*.so*")):
+            try:
+                ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+
+
+def unload(size: str):
+    """Free a model's memory (the offline one, once the internet is back; loaded again if needed)."""
+    with _load_lock:
+        if size != GATE_MODEL and _models.get(size) is not None and _models.get(size) is _models.get(GATE_MODEL):
+            _models.pop(size, None)          # shared with the gate (GPU): the gate keeps it
+            return
+        model = _models.pop(size, None)
+    if model is not None:
+        with _run_lock:                  # not while it is still transcribing a phrase
+            del model
+        import gc
+        gc.collect()
 
 
 def preload():
@@ -81,7 +143,16 @@ def mentions_wake(text: str) -> bool:
     if core.WAKE_RE.search(text) or FUZZY_WAKE.search(text):
         return True
     addressed, _, _ = core.detect_wake(text)
-    return addressed
+    return addressed or _name_like(text)
+
+
+def _name_like(text: str) -> bool:
+    """The first or last word or two sound like "Digidaw" ("gigi dau" 0.71, "tiki dao" 0.57 is not enough): a miss
+    here means the user is simply not heard, so such a phrase goes to Google, which decides."""
+    import difflib
+    words = re.findall(r"[a-z]+", text.lower())
+    keys = {"".join(words[:1]), "".join(words[:2]), "".join(words[-1:]), "".join(words[-2:])} if words else set()
+    return any(len(k) >= 5 and difflib.SequenceMatcher(None, k, "digidaw").ratio() >= 0.62 for k in keys)
 
 
 def internet_ok(timeout: float = 2.0) -> bool:

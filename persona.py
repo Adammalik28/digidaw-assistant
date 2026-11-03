@@ -19,8 +19,8 @@ OPENERS = ["Oke, ", "Siap, ", "Baik, ", "", ""]
 BRANDS = {"firefox": "Firefox", "chrome": "Chrome", "google chrome": "Google Chrome", "tiktok": "TikTok",
           "youtube": "YouTube", "instagram": "Instagram", "whatsapp": "WhatsApp", "whatsapp web": "WhatsApp Web",
           "facebook": "Facebook", "twitter": "Twitter", "x": "X", "github": "GitHub", "gmail": "Gmail",
-          "spotify": "Spotify", "mousepad": "Mousepad", "terminal": "Terminal", "kitty": "Kitty",
-          "thunar": "Thunar", "discord": "Discord", "telegram": "Telegram", "vscode": "VS Code", "code": "VS Code",
+          "spotify": "Spotify", "mousepad": "Mousepad", "terminal": "Terminal", "kitty": "Terminal",
+          "thunar": "File manager", "whatsie": "WhatsApp", "file manager": "File manager", "discord": "Discord", "telegram": "Telegram", "vscode": "VS Code", "code": "VS Code",
           "netflix": "Netflix", "shopee": "Shopee", "tokopedia": "Tokopedia", "chatgpt": "ChatGPT",
           "gemini": "Gemini", "claude": "Claude", "brave": "Brave", "edge": "Edge", "waydroid": "Waydroid",
           "steam": "Steam", "obs": "OBS", "vlc": "VLC", "gimp": "GIMP", "libreoffice": "LibreOffice"}
@@ -120,7 +120,8 @@ TITLE_ANY = re.compile(rf"(?:,\s*|\s+)\b{re.escape(T)}\b(?=\s*[,.!?;:—–-]|\s
 TO_FORMAL = [(r"\bkamu\b", "Anda"), (r"\bkau\b", "Anda"), (r"\bengkau\b", "Anda"), (r"\baku\b", "saya"),
              (r"\bAku\b", "Saya"), (r"\bKamu\b", "Anda")]
 TO_CASUAL = [(r"\bAnda\b", "kamu"), (r"\banda\b", "kamu"), (r"\bsaya\b", "aku"), (r"\bSaya\b", "Aku")]
-ROBOTIC_LEADS = re.compile(r"^(?:Tentu(?: saja)?[,!.]\s*|Baiklah[,!.]\s*|Berikut (?:adalah |ini )?)", re.IGNORECASE)
+ROBOTIC_LEADS = re.compile(r"^(?:Tentu(?: saja)?[,!.]\s*|Baiklah[,!.]\s*|Berikut (?:adalah |ini )?|(?:Wa)?duh[,!.]\s*|"
+                           r"Aduh[,!.]\s*)", re.IGNORECASE)
 
 
 INTERJECTION = re.compile(r"^(?:siap|oke|baik|beres|hmm|ini dia|sudah|sekarang)\b|\bsiap\b", re.IGNORECASE)
@@ -241,10 +242,28 @@ def variants(reply: str, tries: int = CANDIDATES) -> list[str]:
     return seen
 
 
+def live_sentence(sentence: str, first: bool) -> str:
+    """One sentence of an answer that is spoken while the AI is still writing it (tts.LiveSpeech): the same clean-up
+    as speak() does for a whole reply, a sentence at a time. The title stays only where the first sentence has it."""
+    text = MATH_STAR_RE.sub(" × ", sentence).replace("*", "").replace("#", "").strip()
+    text = re.sub(r"^(?:[-•–]|\d{1,2}[.)])\s+", "", text)          # a list item: its bullet / number isn't said
+    if not first:
+        text = TITLE_ANY.sub("", text).strip()
+    else:
+        text = ROBOTIC_LEADS.sub("", text)
+    if SELF_PRAISE_RE.match(text):
+        return ""
+    text = _pronouns(text)
+    return text[:1].upper() + text[1:]
+
+
+MATH_STAR_RE = re.compile(r"(?<=\d)\s*\*\s*(?=\d)")
+
+
 def speak(reply: str) -> str:
     """The final wording of a reply: natural skill sentences, the title only now and then. Among the possible
     wordings one whose voice is already cached is preferred, so frequent replies are spoken without delay."""
-    if not reply or reply.startswith("Apakah Anda yakin"):     # confirmations stay exactly as they are
+    if not reply or reply.startswith(("Apakah Anda yakin", "Yakin ")):     # confirmations stay exactly as they are
         return reply
     options = variants(reply)
     want_title = _wants_title(options[0])
@@ -274,6 +293,15 @@ def warm_phrases() -> list[str]:
     replies += [f"Pindah ke workspace {n}, {T}." for n in range(1, 7)]
     replies += [f"Volume diatur ke {n} persen, {T}." for n in (10, 20, 30, 40, 50, 60, 70, 80, 100)]
     replies += [f"Melanjutkan pemutaran, {T}.", f"Media di-pause, {T}.", f"Teks sudah saya ketik, {T}."]
+    try:                                 # the lamp: the colours and moods said most (half of them weren't cached)
+        import smarthome
+        if smarthome.has_lamps():
+            label = smarthome._label(smarthome._pick()).capitalize()
+            replies += [f"{label} menyala, {T}.", f"{label} dimatikan, {T}."]
+            replies += [f"{label} sekarang {c}, {T}." for c in ("merah", "putih", "biru", "hijau", "kuning", "ungu",
+                                                                  "pink", "putih hangat")]
+    except Exception:
+        pass
     # the same wordings every start (a fixed seed): restarts reuse the recordings instead of ordering new ones
     state = random.getstate()
     random.seed(20261014)

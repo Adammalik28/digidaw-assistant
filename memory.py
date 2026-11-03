@@ -11,6 +11,7 @@ import datetime
 from pathlib import Path
 
 import config
+import storage
 import llm
 
 log = logging.getLogger("digidaw.memory")
@@ -27,16 +28,14 @@ SEMANTIC_FILE = config.BASE_DIR / "memory_semantic.json"
 def _load() -> list[dict]:
     """Load from semantic file first, fall back to legacy file."""
     for path in (SEMANTIC_FILE, MEMORY_FILE):
-        if path.exists():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
+        data = storage.load_json(path)
+        if data is not None:
+            return data
     return []
 
 
 def _save(items: list[dict]):
-    SEMANTIC_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(SEMANTIC_FILE, items, backup=True, mode=storage.PRIVATE, indent=2)
 
 
 # ───────────────────────────── embeddings ─────────────────────────────

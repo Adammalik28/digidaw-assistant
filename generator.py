@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import config
+import storage
 import events
 import oscompat
 
@@ -29,6 +30,12 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 KIND_FOLDER = {"image": "Gambar", "file": "File"}
 MAX_PARALLEL = 2
 BRAIN_DIR = Path.home() / ".gemini" / "antigravity-cli" / "brain"
+# Backup images when Antigravity's image service fails (it returned "500 Internal Server Error" for hours, 31 Oct 2026):
+# Pollinations, free and without a key: ~10 s, at most one image per 45 s per IP, a small "pollinations.ai" mark.
+# Only the English prompt is sent there.
+BACKUP_IMAGE_URL = "https://image.pollinations.ai/prompt/{prompt}"
+AGENT_IMAGE_BROKEN = 30 * 60      # Antigravity failed an image this recently: straight to the backup, no 1-minute wait
+_image_agent_failed_at = [0.0]
 
 IMAGE_PROMPT = """Generate an image for the user with your generate_image tool.
 
@@ -39,6 +46,9 @@ Request (transcribed from speech, in Indonesian): {request}
 - After it is generated, copy the image file into the CURRENT working directory (keep its file name).
 - {count}
 - Do not create any other files. Do not ask questions; choose sensible defaults.
+- If generate_image fails (an error from the image service), try it at most twice more, then STOP and finish with
+  one sentence in Indonesian saying the image service is failing right now. Never work around it: no scripts, no
+  API calls of your own, no searching this computer for keys or tools.
 - Finish with ONE short sentence in Indonesian describing what you made."""
 
 FILE_PROMPT = """Create the file the user asked for, in the CURRENT working directory.
@@ -91,7 +101,7 @@ def results(limit: int = 30) -> list[dict]:
 def _remember(entries: list[dict]):
     items = entries + results(200)
     try:
-        _index_path().write_text(json.dumps(items[:200], ensure_ascii=False, indent=1), encoding="utf-8")
+        storage.save_json(_index_path(), items[:200], indent=1)
     except OSError:
         pass
 
@@ -130,10 +140,8 @@ def _submit(kind: str, request: str, prompt: str) -> str:
     import project_builder
     agent = "antigravity"
     if not project_builder.agent_exe(agent):
-        if kind == "image":
-            return f"Antigravity CLI tidak ditemukan, {T}. Pembuatan gambar membutuhkan Antigravity."
-        agent = "claude" if project_builder.agent_exe("claude") else ""
-        if not agent:
+        agent = "" if kind == "image" else "claude" if project_builder.agent_exe("claude") else ""
+        if not agent and kind != "image":         # (an image is then made by the backup service)
             return f"Antigravity CLI tidak ditemukan di komputer ini, {T}."
     with _lock:
         active = [j for j in _jobs.values() if j["status"] == "working"]
@@ -154,16 +162,101 @@ def _submit(kind: str, request: str, prompt: str) -> str:
     return ""
 
 
+def _english_prompt(request: str) -> str:
+    """The spoken (Indonesian) request as a short English image prompt: the local model, else Gemini, else as is."""
+    ask = ("Write ONE English prompt (at most 40 words) for an AI image generator for this request. Reply with the "
+           f"prompt only.\nRequest: {request}")
+    try:
+        import local_llm
+        if local_llm.available():
+            text = local_llm.chat([{"role": "user", "content": ask}], None, max_tokens=90).get("content", "").strip()
+            if text:
+                return text.strip('"')
+    except Exception:
+        pass
+    try:
+        import llm
+        return llm.generate(ask, max_tokens=90).strip().strip('"') or request
+    except Exception:
+        return request
+
+
+def _backup_image(job: dict) -> bool:
+    """Make the image with the backup service into the job's folder. True when one was saved."""
+    import random
+    import urllib.parse
+    import requests
+    prompt = _english_prompt(job["request"])
+    job["step"] = "Membuat gambar dengan layanan cadangan…"
+    _emit(job)
+    for _ in range(3):
+        try:
+            r = requests.get(BACKUP_IMAGE_URL.format(prompt=urllib.parse.quote(prompt[:400])), timeout=120,
+                             params={"width": 1024, "height": 1024, "nologo": "true", "seed": random.randint(1, 10**6)})
+        except requests.RequestException as e:
+            job["error"] = f"layanan gambar cadangan tidak bisa dihubungi ({type(e).__name__})"
+            return False
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image/"):
+            slug = re.sub(r"[^a-z0-9]+", "_", prompt.lower())[:40].strip("_") or "gambar"
+            (Path(job["work"]) / f"{slug}.jpg").write_bytes(r.content)
+            return True
+        wait = re.search(r"[Rr]etry after (\d+)\s*s", r.text)
+        if r.status_code not in (402, 429, 503) or not wait:
+            break
+        job["step"] = f"Layanan cadangan sibuk, mencoba lagi dalam {wait.group(1)} detik…"
+        _emit(job)
+        time.sleep(min(int(wait.group(1)) + 1, 50))
+    job["error"] = f"layanan gambar cadangan juga gagal (kode {r.status_code})"
+    return False
+
+
 def _run(job: dict):
-    import project_builder
     work = Path(job["work"])
+    backup = job["kind"] == "image" and (not job["agent"] or time.time() - _image_agent_failed_at[0] < AGENT_IMAGE_BROKEN)
+    if backup:
+        _backup_image(job)                   # the main service failed minutes ago: don't wait for it again
+    elif not _run_agent(job, work):
+        return
+    if job["status"] == "cancelled":
+        shutil.rmtree(work, ignore_errors=True)
+        return
+    moved = _collect(job)
+    if not moved and job["kind"] == "image" and not backup:
+        _image_agent_failed_at[0] = time.time()
+        backup = _backup_image(job)          # Antigravity's image service failed: the backup makes it now
+        moved = _collect(job) if backup else []
+    shutil.rmtree(work, ignore_errors=True)
+    if not moved:
+        job.update(status="failed", error=job["error"] or (job.get("agent_summary") or "tidak ada file yang dihasilkan")[:200])
+        _emit(job)
+        _say(f"Maaf {T}, {_label(job)} tidak berhasil dibuat. {job['error']}", "warning")
+        return
+    job.update(status="done", results=moved, summary=(job.get("agent_summary") or "").strip()[:300],
+               step=f"Selesai: {', '.join(r['name'] for r in moved[:3])}")
+    _emit(job)
+    if config.GENERATE_OPEN_RESULT:
+        try:
+            oscompat.open_path(moved[0]["path"])
+        except OSError:
+            pass
+    took = int(time.time() - job["started"])
+    names = ", ".join(r["name"] for r in moved[:3]) + (f" dan {len(moved) - 3} lainnya" if len(moved) > 3 else "")
+    what = "Gambar" if job["kind"] == "image" else ("File" if len(moved) == 1 else f"{len(moved)} file")
+    note = " Layanan gambar utama sedang gangguan, jadi saya pakai layanan cadangan." if backup else ""
+    _say(f"{what} sudah jadi dalam {took} detik, {T}: {names}. Tersimpan di folder {KIND_FOLDER[job['kind']]}.{note}",
+         "info")
+
+
+def _run_agent(job: dict, work: Path) -> bool:
+    """Let Antigravity (or Claude) do the job in `work`. False when it couldn't even start (already said)."""
+    import project_builder
     deadline = time.time() + config.GENERATE_TIMEOUT_MINUTES * 60
     try:
         cmd = project_builder.agent_command(job["agent"], job["prompt"])
         with open(work.parent / f"{job['id']}.log", "w", encoding="utf-8") as log:
             proc = subprocess.Popen(cmd, cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    creationflags=oscompat.NO_WINDOW)
+                                    creationflags=oscompat.NO_WINDOW, env=oscompat.user_env())
             job["proc"] = proc
             last = 0.0
             for line in proc.stdout:
@@ -187,29 +280,30 @@ def _run(job: dict):
         job.update(status="failed", error=str(e))
         _emit(job)
         _say(f"Maaf {T}, pembuatan {_label(job)} gagal dimulai: {e}", "warning")
+        return False
+    return True
+
+
+def recover():
+    """A job whose Digidaw was restarted half-way leaves its scratch folder (.work/<id>) behind, and its agent may
+    still be working there with nobody waiting for it: stop that agent, clean up, and tell the user once (they
+    used to wait for an image that would never be announced)."""
+    root = output_root() / ".work"
+    left = [d for d in root.iterdir() if d.is_dir() and d.name not in _jobs] if root.is_dir() else []
+    if not left:
         return
-    if job["status"] == "cancelled":
-        shutil.rmtree(work, ignore_errors=True)
-        return
-    moved = _collect(job)
-    shutil.rmtree(work, ignore_errors=True)
-    if not moved:
-        job.update(status="failed", error=job["error"] or (job.get("agent_summary") or "tidak ada file yang dihasilkan")[:200])
-        _emit(job)
-        _say(f"Maaf {T}, {_label(job)} tidak berhasil dibuat. {job['error']}", "warning")
-        return
-    job.update(status="done", results=moved, summary=(job.get("agent_summary") or "").strip()[:300],
-               step=f"Selesai: {', '.join(r['name'] for r in moved[:3])}")
-    _emit(job)
-    if config.GENERATE_OPEN_RESULT:
-        try:
-            oscompat.open_path(moved[0]["path"])
-        except OSError:
-            pass
-    took = int(time.time() - job["started"])
-    names = ", ".join(r["name"] for r in moved[:3]) + (f" dan {len(moved) - 3} lainnya" if len(moved) > 3 else "")
-    what = "Gambar" if job["kind"] == "image" else ("File" if len(moved) == 1 else f"{len(moved)} file")
-    _say(f"{what} sudah jadi dalam {took} detik, {T}: {names}. Tersimpan di folder {KIND_FOLDER[job['kind']]}.", "info")
+    import psutil
+    for p in psutil.process_iter(["cwd"]):
+        cwd = p.info.get("cwd") or ""
+        if any(cwd == str(d) or cwd.startswith(str(d) + os.sep) for d in left):
+            try:
+                p.terminate()
+            except psutil.Error:
+                pass
+    for d in left:
+        shutil.rmtree(d, ignore_errors=True)
+    _say(f"{T}, pembuatan gambar atau file yang tadi terputus karena Digidaw dimulai ulang. Minta lagi kalau masih "
+         f"perlu.", "info")
 
 
 def _label(job: dict) -> str:

@@ -30,9 +30,14 @@ import subprocess
 from pathlib import Path
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+# Digidaw's voice under its own name in PipeWire / PulseAudio, not "python3.12": the volume the sound server remembers
+# per name was shared with every other Python program, so one that ended while ducked left Digidaw at 9 % (no voice).
+os.environ.setdefault("SDL_AUDIO_DEVICE_APP_NAME", "Digidaw")
 import pygame
 
 import config
+import metrics
+import storage
 import events
 
 AUDIO_DIR = config.AUDIO_DIR
@@ -43,8 +48,9 @@ CACHE_MAX_CHARS = 90
 CACHE_MAX_FILES = 1500        # ~10 KB each; frequent replies then always play instantly
 EDGE_MAX_ATTEMPTS = 5       # instant connection resets are retried this many times (IPv6 path)
 EDGE_FIRST_AUDIO_DEADLINE = 4.0   # no Edge audio after this long -> use the fallback voice
-EDGE_BREAK_SECONDS = 90           # after an Edge failure, sentences skip Edge for this long...
-EDGE_PROBE_EVERY = 30             # ...while a background check retries it every 30 s
+EDGE_BREAK_SECONDS = 30           # after an Edge failure, sentences skip Edge for this long (one slow answer
+                                  # used to mean 90 s of the robotic voice)...
+EDGE_PROBE_EVERY = 10             # ...while a background check retries it every 10 s
 PIPER_MODEL = config.BASE_DIR / "models" / "piper" / "id_ID-news_tts-medium.onnx"   # local fallback voice
 
 ID_WORDS = {
@@ -328,6 +334,8 @@ class NeuralVoice:
 
     # ── synthesis ──
     def _voice_for(self, text: str) -> str:
+        if "Multilingual" in config.EDGE_VOICE_ID:      # one voice for both languages: Digidaw sounds like one person
+            return config.EDGE_VOICE_ID
         return config.EDGE_VOICE_ID if is_indonesian(text) else config.EDGE_VOICE_EN
 
     def _cache_path(self, text: str, engine: str) -> Path:
@@ -431,6 +439,7 @@ class NeuralVoice:
                 if path.exists() and path.stat().st_size > 0:
                     if engine != config.TTS_ENGINE:
                         print(f"[TTS] suara cadangan ({engine}) dipakai untuk: {text[:60]}")
+                        metrics.count("suara_cadangan")
                     return path, keep
             except Exception as e:
                 if engine == "edge":
@@ -523,29 +532,39 @@ class NeuralVoice:
                 chunks.append(data)
                 incoming.put(data)
             try:
-                try:
-                    self.link.stream(text, self._voice_for(text), on_chunk, should_stop=self._stop.is_set,
-                                     first_timeout=2.5 if self.link.is_warm() else 3.5)
-                    incoming.put(None)
-                except InterruptedError:
-                    incoming.put(None)
-                    return
-                except Exception:
-                    if chunks:
-                        raise          # broke in the middle of the sentence: can't restart it cleanly
-                    try:
-                        asyncio.run(fetch(on_chunk))   # the kept connection failed: a fresh one (IPv6/IPv4 race)
-                    except Exception as e:
-                        note_edge_failure(e)
-                        raise
+                self._stream_edge_link(text, on_chunk, chunks, fetch)
+                incoming.put(None)
                 if cacheable and chunks and not self._stop.is_set():   # the full, finished audio
                     self._cache_path(text, "edge").write_bytes(b"".join(chunks))
+            except InterruptedError:
+                incoming.put(None)
+                return
             except Exception as e:
                 incoming.put(e)
             incoming.put(None)
 
         threading.Thread(target=producer, daemon=True, name="tts-stream").start()
+        return self._play_stream(incoming)
 
+    def _stream_edge_link(self, text, on_chunk, chunks, fetch):
+        """The Edge part of _stream_edge: the kept connection, or a fresh one when that fails before any sound.
+        Raises InterruptedError when the speech was stopped."""
+        try:
+            self.link.stream(text, self._voice_for(text), on_chunk, should_stop=self._stop.is_set,
+                             first_timeout=2.5 if self.link.is_warm() else 3.5)
+        except InterruptedError:
+            raise
+        except Exception:
+            if chunks:
+                raise          # broke in the middle of the sentence: can't restart it cleanly
+            try:
+                asyncio.run(fetch(on_chunk))   # the kept connection failed: a fresh one (IPv6/IPv4 race)
+            except Exception as e:
+                note_edge_failure(e)
+                raise
+
+    def _play_stream(self, incoming: queue.Queue) -> bool:
+        """Play mp3 data from `incoming` as it arrives (None = the end, an exception = failed)."""
         freq, _, channels = pygame.mixer.get_init()
         bytes_per_sec = freq * channels * 2
         hold_back = int(0.12 * freq) * channels * 2   # last ~2 mp3 frames change as more data arrives
@@ -597,6 +616,7 @@ class NeuralVoice:
                 if self._channel is None:
                     self.first_audio_delay = time.time() - started
                     if self._spoken_at:
+                        metrics.timing("suara_mulai", time.time() - self._spoken_at)
                         print(f"   🔊 suara mulai {time.time() - self._spoken_at:.1f} dtk"
                               f"{' (koneksi hangat)' if warm_at_start else ''}")
                         self._spoken_at = 0.0
@@ -677,13 +697,20 @@ class NeuralVoice:
                 chunks.append(sentence)
         return chunks
 
+    @staticmethod
+    def _cache_engines() -> list[str]:
+        """The recordings that may be replayed for the voice in use."""
+        return ["edge" if config.TTS_ENGINE == "edge" else "gtts"]
+
     def _speak_one(self, chunk: str, prefetched=None):
         """Speak one sentence: cached file, prefetched file, streamed Edge, then fallbacks."""
         path, cached = prefetched or (None, False)
         if path is None and len(chunk) <= CACHE_MAX_CHARS:
-            cache = self._cache_path(chunk, "edge" if config.TTS_ENGINE == "edge" else "gtts")
-            if cache.exists() and cache.stat().st_size > 0:
-                path, cached = cache, True
+            for name in self._cache_engines():
+                cache = self._cache_path(chunk, name)
+                if cache.exists() and cache.stat().st_size > 0:
+                    path, cached = cache, True
+                    break
         edge = config.TTS_ENGINE == "edge"
         if path is None and edge and self.edge_ok():
             if self._stream_edge(chunk):
@@ -697,6 +724,7 @@ class NeuralVoice:
                 return
             if path:
                 if self._spoken_at:
+                    metrics.timing("suara_mulai", time.time() - self._spoken_at)
                     print(f"   🔊 suara mulai {time.time() - self._spoken_at:.1f} dtk ({'cache' if cached else 'unduhan'})")
                     self._spoken_at = 0.0
                 self._play(path)
@@ -733,6 +761,76 @@ class NeuralVoice:
         for item in prefetched:   # files prefetched but never played (speech was interrupted)
             if item and item[0] and not item[1]:
                 item[0].unlink(missing_ok=True)
+
+    def speak_live(self, live: "LiveSpeech"):
+        """Speak the sentences of an answer while the AI is still writing it: the first one is streamed as soon as it
+        is complete, the next ones are fetched in the background while the one before plays."""
+        if not self._lock.acquire(timeout=20):
+            self.stop()
+            if not self._lock.acquire(timeout=5):
+                return
+        fetched: dict[int, tuple] = {}
+        ready = threading.Condition()
+
+        def prefetch():
+            i = 1
+            while not self._stop.is_set():
+                text = live.sentence(i, wait=True)
+                if text is None:
+                    break
+                result = self._synthesize(text, use_link=False) if not self._stop.is_set() else (None, False)
+                with ready:
+                    fetched[i] = result
+                    ready.notify_all()
+                i += 1
+            with ready:
+                fetched[-1] = None               # nothing more is coming
+                ready.notify_all()
+
+        try:
+            self._stop.clear()
+            self._spoken_at = live.started
+            self.speaking = True
+            self.last_activity = time.time()
+            events.set_status("speaking")
+            if self.before_speak:
+                try:
+                    self.before_speak()
+                except Exception:
+                    pass
+            threading.Thread(target=prefetch, daemon=True, name="tts-live-prefetch").start()
+            i = 0
+            while not self._stop.is_set():
+                text = live.sentence(i, wait=True)
+                if text is None:
+                    break
+                events.emit("speaking", text=text)
+                if i == 0:
+                    self._speak_one(text)
+                else:
+                    with ready:
+                        while i not in fetched and -1 not in fetched and not self._stop.is_set():
+                            ready.wait(0.2)
+                    self._speak_one(text, fetched.pop(i, None))
+                live.spoken.append(text)
+                i += 1
+        except Exception as e:
+            print(f"[TTS Error] {e}")
+        finally:
+            for item in fetched.values():         # fetched but never played (speech was interrupted)
+                if item and item[0] and not item[1]:
+                    item[0].unlink(missing_ok=True)
+            if self.after_speak:
+                try:
+                    self.after_speak()
+                except Exception:
+                    pass
+            self.speaking = False
+            self.last_activity = time.time()
+            events.set_status("idle")
+            self._prune_cache()
+            self._lock.release()
+            live.finished.set()
 
     def speak(self, text: str):
         text = clean_for_speech(text or "")
@@ -777,6 +875,96 @@ class NeuralVoice:
             self._lock.release()
 
 
+class LiveSpeech:
+    """An answer that arrives piece by piece (the brain passes on the AI's text while it is being written): it is cut
+    into sentences, and each one is spoken as soon as it is complete (NeuralVoice.speak_live), instead of after the
+    whole answer. close() = no more text is coming. covered = the brain's final reply is exactly what was spoken here,
+    so it must not be said a second time."""
+
+    MIN_CHARS = 25          # a shorter piece waits for the next one: no choppy "Ya." on its own
+    BREAK_RE = re.compile(r"(?<=[.!?])\s+(?=\S)|\s*\n+\s*")
+
+    def __init__(self, shape=None):
+        self.started = time.time()
+        self.shape = shape                  # fn(sentence, first) -> the wording to say (persona.live_sentence)
+        self.raw = ""                       # all the text received
+        self.spoken: list[str] = []
+        self.covered = False
+        self.finished = threading.Event()
+        self._buffer = ""
+        self._sentences: list[str] = []
+        self._closed = False
+        self._cond = threading.Condition()
+        self._speaker = None
+
+    def feed(self, text: str):
+        if not text:
+            return
+        with self._cond:
+            if self._closed:
+                return
+            self.raw += text
+            self._buffer += text
+            self._cut(final=False)
+
+    def flush(self):
+        """The text so far is a whole thought (the AI paused to use a tool): say what is left of it too."""
+        with self._cond:
+            self._cut(final=True)
+
+    def close(self):
+        with self._cond:
+            if not self._closed:
+                self._cut(final=True)
+                self._closed = True
+            self._cond.notify_all()
+        if self._speaker is None:
+            self.finished.set()
+
+    def _cut(self, final: bool):
+        pieces = self.BREAK_RE.split(self._buffer)
+        done, rest = (pieces, "") if final else (pieces[:-1], pieces[-1])
+        ready, carry = [], ""
+        for piece in done:
+            piece = f"{carry} {piece}".strip() if carry else piece.strip()
+            if len(piece) < self.MIN_CHARS and not final:
+                carry = piece
+                continue
+            carry = ""
+            if piece:
+                ready.append(piece)
+        if carry:
+            ready.append(carry) if final else None
+        self._buffer = (f"{carry} {rest}" if carry and not final else rest).lstrip()
+        for piece in ready:
+            text = self.shape(piece, not self._sentences) if self.shape else piece
+            text = clean_for_speech(text or "")
+            if text:
+                self._sentences.append(text)
+        if ready:
+            self._cond.notify_all()
+            if self._speaker is None and self._sentences:
+                self._speaker = threading.Thread(target=tts_engine.speak_live, args=(self,), daemon=True,
+                                                 name="tts-live")
+                self._speaker.start()
+
+    def sentence(self, i: int, wait: bool = True) -> str | None:
+        """The i-th sentence (waiting for it while more may come); None when there is none and none will come."""
+        with self._cond:
+            while i >= len(self._sentences):
+                if self._closed or not wait or tts_engine._stop.is_set():
+                    return None
+                self._cond.wait(0.2)
+            return self._sentences[i]
+
+    def speaking(self) -> bool:
+        """Something was (or is being) said this way."""
+        return self._speaker is not None
+
+    def wait(self, timeout: float | None = None):
+        self.finished.wait(timeout)
+
+
 # Global instance
 tts_engine = NeuralVoice()
 
@@ -794,8 +982,8 @@ def is_cached(text: str) -> bool:
     try:
         engine = tts_engine
         chunks = engine._chunks(clean_for_speech(text or ""))
-        engine_name = "edge" if config.TTS_ENGINE == "edge" else "gtts"
-        return bool(chunks) and all(len(c) <= CACHE_MAX_CHARS and engine._cache_path(c, engine_name).exists()
+        names = engine._cache_engines()
+        return bool(chunks) and all(len(c) <= CACHE_MAX_CHARS and any(engine._cache_path(c, n).exists() for n in names)
                                     for c in chunks)
     except Exception:
         return False
@@ -811,6 +999,8 @@ def warm_cache(phrases: list[str], pause: float = 2.5):
     def run():
         import datetime
         import json
+        if config.TTS_ENGINE != "edge":
+            return
         today = datetime.date.today().isoformat()
         try:
             state = json.loads(WARM_STATE.read_text(encoding="utf-8"))
@@ -835,10 +1025,45 @@ def warm_cache(phrases: list[str], pause: float = 2.5):
                     tts_engine.edge_failed()
                 time.sleep(pause)
         try:
-            WARM_STATE.write_text(json.dumps({"day": today, "count": done_today + made}), encoding="utf-8")
+            storage.save_json(WARM_STATE, {"day": today, "count": done_today + made})
         except OSError:
             pass
     threading.Thread(target=run, daemon=True, name="tts-warm-cache").start()
+
+
+PREPARE_MAX = 4                          # recordings per prepare(): a likely answer, not a whole speech
+
+
+def prepare(text: str, first_chunks: int = 2):
+    """A reply Digidaw will very likely say next ("ya" after "Mau saya bacakan?", "Terkirim ke Rina" while the
+    message is being sent): its voice is made now, in the background, so it starts at once instead of ~1.3 s later.
+    The wordings persona.speak() would pick from (with and without the title), only the first pieces of each (the
+    rest is made while the first plays)."""
+    if config.TTS_ENGINE != "edge" or not text:
+        return
+
+    def run():
+        try:
+            import persona
+            options = persona.variants(text, tries=4)[:2]
+            wanted: list[str] = []
+            for option in options + [persona._add_title(o) for o in options[:1]]:
+                for chunk in tts_engine._chunks(clean_for_speech(option))[:first_chunks]:
+                    if len(chunk) <= CACHE_MAX_CHARS and chunk not in wanted:
+                        wanted.append(chunk)
+            for chunk in wanted[:PREPARE_MAX]:
+                path = tts_engine._cache_path(chunk, "edge")
+                if path.exists():
+                    continue
+                if not tts_engine.edge_ok():
+                    return
+                try:
+                    tts_engine._synth_edge(chunk, path, timeout=10, use_link=False)   # (the live link stays free)
+                except Exception:
+                    path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True, name="tts-prepare").start()
 
 
 def prewarm():
@@ -860,6 +1085,11 @@ def spoke_since(t: float) -> bool:
 
 def is_audible() -> bool:
     return tts_engine.is_audible()
+
+
+def voice_ended_at() -> float:
+    """When Digidaw's voice last came out of the speakers (now, while it talks)."""
+    return time.time() if tts_engine.speaking else tts_engine.last_activity
 
 
 def preload_fallback():

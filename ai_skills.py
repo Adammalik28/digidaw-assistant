@@ -150,7 +150,7 @@ def get_news(topic: str = "") -> str:
 
 
 def weather_data(city: str = "") -> dict:
-    """Structured weather for the HUD. Like get_weather, an unknown long name ("Bandar Lampung tanjung bintang") is
+    """Structured weather for the HUD. Like get_weather, an unknown long name ("Kota Bekasi bantar gebang") is
     shortened word by word, then the connection's own location is used."""
     import system_control as sc
     words = (city or config.DEFAULT_CITY or "").split()
@@ -237,7 +237,7 @@ def morning_briefing() -> str:
         pass
     weather = weather or weather_data()
     if weather:
-        place = " ".join(weather["place"].split()[:2])         # "Bandar Lampung tanjung" -> "Bandar Lampung"
+        place = " ".join(weather["place"].split()[:2])         # "Kota Bekasi bantar" -> "Kota Bekasi"
         parts.append(f"Cuaca di {place} {weather['condition'].lower()}, {weather['temp']}.")
     battery = psutil.sensors_battery()
     if battery:

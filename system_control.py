@@ -83,7 +83,7 @@ def _shell(command: str, timeout: int = 30) -> subprocess.CompletedProcess:
     if IS_WINDOWS:
         return _ps(command, timeout)
     return subprocess.run(["bash", "-c", command], capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+                          errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=oscompat.user_env())
 
 
 SHELL_NAME = "PowerShell" if IS_WINDOWS else "bash"
@@ -674,7 +674,25 @@ def _closable(p: psutil.Process) -> bool:
 
 # background helpers that outlive their app (Chrome's crash reporter keeps running after Chrome is closed):
 # never "the app" — "tutup Chrome" with only these left means Chrome isn't open
-HELPER_PROCESS_RE = re.compile(r"crashpad|crash_?handler|crash_?reporter", re.IGNORECASE)
+# (Firefox names its tab processes "Web Content", "file:// Content", "Isolated Web Co"...: closing one crashes tabs)
+HELPER_PROCESS_RE = re.compile(r"crashpad|crash_?handler|crash_?reporter|web ?content|file:// content|isolated web|"
+                               r"privileged cont|webextensions|rdd process|socket process|utility process|"
+                               r"forkserver|gpu-process|zygote", re.IGNORECASE)
+
+
+def _program_of(name: str) -> str:
+    """The program behind an app menu name ("Kamera" -> "guvcview"), "" when there is no such app."""
+    try:
+        import resolver
+        apps, _ = resolver._static_candidates()
+    except Exception:
+        return ""
+    want = name.lower().strip()
+    for entry in apps:
+        key, label, target = entry[0], entry[2], entry[3] if len(entry) > 3 else ""
+        if target and want in (str(key).lower(), str(label).lower()):
+            return str(target).lower()
+    return ""
 
 
 def _matching_processes(name: str) -> list[psutil.Process]:
@@ -750,6 +768,10 @@ def close_application(name: str, force: bool = False) -> str:
     questions: the app gets no chance to ask "save changes?" or "close all tabs?"; if it doesn't quit within
     a few seconds it is stopped forcibly. force=True kills it immediately (frozen apps, 'paksa tutup')."""
     procs = _matching_processes(name)
+    if not procs:
+        program = _program_of(name)      # "kamera" is the app menu's "Kamera", which runs guvcview
+        if program and program != name.lower().replace(" ", ""):
+            procs = _matching_processes(program)
     if not procs:
         import window_manager
         w = window_manager._find(name)   # e.g. Store apps whose window has another process
@@ -1433,13 +1455,85 @@ def get_system_status() -> str:
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(oscompat.system_disk())
     battery = psutil.sensors_battery()
-    status = (f"Diagnostik sistem: CPU {cpu:.0f} persen, RAM terpakai {mem.percent:.0f} persen "
-              f"dengan {mem.available / 1024**3:.1f} GB tersedia, {oscompat.SYSTEM_DISK_NAME} tersisa "
-              f"{disk.free / 1024**3:.0f} GB.")
+    heat = temperatures(gpu=False).get("cpu")
+    status = (f"Diagnostik sistem: CPU {cpu:.0f} persen{f' ({heat:.0f} derajat)' if heat else ''}, RAM terpakai "
+              f"{mem.percent:.0f} persen dengan {mem.available / 1024**3:.1f} GB tersedia, {oscompat.SYSTEM_DISK_NAME} "
+              f"tersisa {disk.free / 1024**3:.0f} GB.")
     if battery:
         plug = "sedang dicas" if battery.power_plugged else "memakai baterai"
         status += f" Baterai {battery.percent:.0f} persen, {plug}."
     return status
+
+
+CPU_SENSORS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "acpitz")   # Intel, AMD, AMD, ARM, the board's
+
+
+def _nvidia_temperature() -> float | None:
+    """The NVIDIA card's temperature, unless it is asleep (asking would wake it up and cost battery)."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    if not IS_WINDOWS:
+        for dev in Path("/sys/bus/pci/devices").glob("*"):
+            try:
+                if (dev / "vendor").read_text().strip() == "0x10de" and (dev / "class").read_text().startswith("0x03") \
+                        and (dev / "power" / "runtime_status").read_text().strip() == "suspended":
+                    return None
+            except OSError:
+                continue
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=3, creationflags=NO_WINDOW).stdout
+        return float(out.split()[0])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+def temperatures(sensors: dict | None = None, gpu: bool = True) -> dict:
+    """{'cpu': 52.0, 'gpu': 47.0, 'ssd': 41.9} in °C, whatever this computer's sensors report (Linux; Windows only
+    the NVIDIA card)."""
+    if sensors is None:
+        try:
+            sensors = psutil.sensors_temperatures()
+        except (AttributeError, OSError):
+            sensors = {}
+    found = {}
+    for name in CPU_SENSORS:
+        readings = [s for s in sensors.get(name) or [] if s.current]
+        if readings:
+            package = [s.current for s in readings if s.label.startswith(("Package", "Tctl", "Tdie"))]
+            found["cpu"] = package[0] if package else max(s.current for s in readings)
+            break
+    amd = [s.current for s in sensors.get("amdgpu") or [] if s.current]
+    if amd:
+        found["gpu"] = max(amd)
+    elif gpu:
+        nvidia = _nvidia_temperature()
+        if nvidia:
+            found["gpu"] = nvidia
+    disks = [s.current for s in sensors.get("nvme") or [] if s.current and s.label in ("Composite", "")]
+    if disks:
+        found["ssd"] = max(disks)
+    return found
+
+
+def get_temperature() -> str:
+    """How hot the computer is: CPU, graphics card (GPU) and SSD temperature, and the fan speed. Use for
+    "suhu laptop berapa", "laptop panas nggak", "cek suhu CPU", "kipasnya kencang kenapa"."""
+    heat = temperatures()
+    if not heat:
+        return f"Maaf {T}, sensor suhu tidak bisa dibaca di komputer ini."
+    names = {"cpu": "CPU", "gpu": "GPU", "ssd": "SSD"}
+    parts = [f"{names[k]} {v:.0f} derajat" for k, v in heat.items()]
+    try:
+        fans = [f.current for group in (psutil.sensors_fans() or {}).values() for f in group if f.current]
+    except (AttributeError, OSError):
+        fans = []
+    fan = f", kipas {max(fans)} rpm" if fans else ""
+    hottest = max(heat.get("cpu", 0), heat.get("gpu", 0))
+    verdict = ("masih sejuk" if hottest < 60 else "normal" if hottest < 80 else
+               "cukup panas, wajar saat bekerja berat" if hottest < 90 else
+               "panas sekali; pastikan lubang ventilasinya tidak tertutup")
+    return f"Suhu {', '.join(parts)}{fan}. {verdict[0].upper() + verdict[1:]}, {T}."
 
 
 def get_network_info() -> str:
@@ -1507,6 +1601,15 @@ def _do_power_linux(action: str) -> str:
         threading.Timer(2, ld.log_out).start()
         return f"Sign out sekarang, {T}."
     if action == "sleep":
+        import alarms
+        upcoming = alarms.next_ring(config.ALARM_KEEP_AWAKE_HOURS)
+        if upcoming:                     # asleep, the laptop couldn't ring it: only the screen goes off
+            when = datetime.datetime.fromtimestamp(upcoming["due"]).strftime("%H.%M")
+            what = {"alarm": "alarm", "reminder": "pengingat", "timer": "timer"}.get(upcoming["kind"], "alarm")
+            threading.Timer(4, lambda: ld.run(["hyprctl", "dispatch", "dpms", "off"]) if shutil.which("hyprctl")
+                            else ld.run(["xset", "dpms", "force", "off"])).start()
+            return (f"Ada {what} pukul {when}, {T}, jadi laptop tidak saya tidurkan: layarnya saja saya matikan supaya "
+                    f"{what} tetap berbunyi. Selamat tidur.")
         threading.Timer(2, lambda: ld.run(["systemctl", "suspend"])).start()
         return f"Masuk mode sleep, {T}. Sampai jumpa."
     return "Aksi tidak dikenal."
@@ -1627,7 +1730,7 @@ def get_weather(city: str = "") -> str:
     """Current weather for a city (empty = current location based on IP)."""
     city = (city or config.DEFAULT_CITY or "").strip()
     words = city.split()
-    # "Bandar Lampung tanjung bintang" isn't known: try "Bandar Lampung tanjung", then "Bandar Lampung", ... and
+    # "Kota Bekasi bantar gebang" isn't known: try "Kota Bekasi bantar", then "Kota Bekasi", ... and
     # finally the location of the internet connection
     attempts = [" ".join(words[:n]) for n in range(len(words), 0, -1)] + [""]
     reached = False
@@ -1710,7 +1813,7 @@ AI_TOOLS = [
     write_note, append_to_last_note, read_last_note,
     open_folder, create_folder, find_files, open_file, delete_file, open_project,
     empty_recycle_bin, recycle_bin_status, clean_temp_files, system_cleanup,
-    get_system_status, get_network_info, get_time, get_date, lock_workstation,
+    get_system_status, get_temperature, get_network_info, get_time, get_date, lock_workstation,
     shutdown_pc, restart_pc, sleep_pc, log_off, cancel_shutdown, run_command,
     get_weather, sleep_timer,
     remember, forget, recall_memories,

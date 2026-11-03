@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import config
+import storage
 
 T = config.USER_TITLE
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "digidaw"
@@ -85,7 +86,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    storage.save_json(STATE_FILE, state, indent=1)
 
 
 def _calendar_id(session, state: dict) -> str:

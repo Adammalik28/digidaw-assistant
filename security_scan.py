@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 import psutil
 
 import config
+import storage
 import events
 import oscompat
 import safety
@@ -530,7 +531,7 @@ def _load_state() -> dict:
 def _save_state(state: dict):
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+        storage.save_json(STATE_FILE, state, indent=1)
     except OSError:
         pass
 

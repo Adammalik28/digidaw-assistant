@@ -7,6 +7,7 @@ import psutil
 
 import config
 import oscompat
+import system_control
 
 T = config.USER_TITLE
 BATTERY_LEVELS = (5, 10, 20)
@@ -14,6 +15,8 @@ COOLDOWN = 600   # seconds between repeated CPU warnings
 RAM_REPEAT_AFTER = 3600     # the same memory warning is repeated at most hourly...
 RAM_WORSE_BY = 3            # ...unless memory use climbed this many points since the last warning
 RAM_CALM = 85               # below this the memory warning is reset
+HOT_FOR = 60                # the CPU has to stay at config.HEAT_ALERT_CELSIUS this long (a short peak is normal)...
+HOT_COOLDOWN = 1800         # ...and the warning is repeated at most every half hour
 MAX_ESTIMATE_HOURS = 12     # longer battery estimates are noise (right after unplugging): not said
 
 
@@ -62,8 +65,8 @@ def _loop(announce):
     start = psutil.sensors_battery()
     # already plugged in and (almost) full when Digidaw starts: this charge was announced before
     full_announced = bool(start and start.power_plugged and start.percent >= 95)
-    cpu_high = ram_high = 0
-    last_cpu_alert = last_ram_alert = 0.0
+    cpu_high = ram_high = cpu_hot = 0
+    last_cpu_alert = last_ram_alert = last_hot_alert = 0.0
     last_ram_level = 0.0
     disk_alerted = False
     psutil.cpu_percent(None)
@@ -100,6 +103,13 @@ def _loop(announce):
                 last_cpu_alert = time.time()
                 announce(f"{T}, CPU bekerja {cpu:.0f} persen lebih dari satu menit. "
                          f"Penyebab terbesar: {_top_process('cpu')}.", "warning")
+
+            heat = config.HEAT_ALERT_CELSIUS and system_control.temperatures(gpu=False).get("cpu")
+            cpu_hot = cpu_hot + 1 if heat and heat >= config.HEAT_ALERT_CELSIUS else 0
+            if cpu_hot * config.MONITOR_INTERVAL >= HOT_FOR and time.time() - last_hot_alert > HOT_COOLDOWN:
+                last_hot_alert = time.time()
+                announce(f"{T}, CPU sudah {heat:.0f} derajat lebih dari semenit. Pemakai terbesar: "
+                         f"{_top_process('cpu')}. Pastikan lubang ventilasi laptop tidak tertutup.", "warning")
 
             ram = psutil.virtual_memory().percent
             ram_high = ram_high + 1 if ram >= 92 else 0

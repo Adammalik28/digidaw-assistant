@@ -95,3 +95,6 @@ segno>=1.6        # QR code for opening the HUD on a phone
 google-auth-oauthlib>=1.2   # optional: sync the agenda to Google Calendar
 piper-tts>=1.2    # local fallback voice (models/piper) when the Edge voice is down
 pywebpush>=2.0  # notifications on the phone while the HUD page is closed (Web Push)
+nvidia-cublas-cu12>=12.4; sys_platform == "linux"   # optional: Whisper (wake-word check) on an NVIDIA GPU instead of the CPU
+nvidia-cudnn-cu12>=9,<10; sys_platform == "linux"
+tinytuya==1.20.0

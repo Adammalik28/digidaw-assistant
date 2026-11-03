@@ -6,13 +6,24 @@ import os
 import re
 import sys
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 import config
+import storage
 
 YES_NO = None
-VOICES_ID = [("id-ID-ArdiNeural", "Ardi (pria)"), ("id-ID-GadisNeural", "Gadis (wanita)")]
+# Indonesian voices. The "multibahasa" ones are Microsoft's newer, more natural voices (made for Copilot); they speak
+# Indonesian correctly too (checked 31 Oct 2026 by transcribing samples), and English in the same voice. Andrew is left
+# out: its server was so busy that it often took 5 s or timed out (measured median first audio: Ardi 1.2 s, Florian
+# 0.9 s, William 1.5 s, Emma 1.6 s, Brian 1.7-2.5 s, Ava 2.8 s).
+VOICES_ID = [("id-ID-ArdiNeural", "Ardi (pria, Indonesia)"), ("id-ID-GadisNeural", "Gadis (wanita, Indonesia)"),
+             ("de-DE-FlorianMultilingualNeural", "Florian (pria, multibahasa, natural, cepat)"),
+             ("en-AU-WilliamMultilingualNeural", "William (pria, multibahasa, natural)"),
+             ("en-US-BrianMultilingualNeural", "Brian (pria, multibahasa, santai · sedikit lebih lambat)"),
+             ("en-US-EmmaMultilingualNeural", "Emma (wanita, multibahasa, ceria)"),
+             ("en-US-AvaMultilingualNeural", "Ava (wanita, multibahasa, ekspresif · lebih lambat)")]
 VOICES_EN = [("en-GB-RyanNeural", "Ryan (Inggris, pria)"), ("en-GB-ThomasNeural", "Thomas (Inggris, pria)"),
              ("en-GB-SoniaNeural", "Sonia (Inggris, wanita)"), ("en-US-AndrewNeural", "Andrew (Amerika, pria)"),
              ("en-US-GuyNeural", "Guy (Amerika, pria)"), ("en-US-AriaNeural", "Aria (Amerika, wanita)")]
@@ -91,6 +102,11 @@ FIELDS = [
     ("Pendengaran", "PUSH_TO_TALK_HOTKEY", "Hotkey bicara / menyela", "text", {"restart": True}),
     ("Pendengaran", "SHOW_HUD_HOTKEY", "Hotkey menampilkan HUD", "text", {"restart": True}),
     ("Pendengaran", "ACK_SOUND", "Bunyi \"tik\" saat perintah dipahami", "bool", {}),
+    ("Pendengaran", "BARGE_IN", "Bisa disela dengan suara saat Digidaw bicara (eksperimental)", "bool",
+     {"help": "Ucapkan \"Digidaw, stop\" atau \"Digidaw, <perintah lain>\" saat Digidaw sedang bicara. Memakai peredam "
+              "gema PipeWire khusus untuk mic & suara Digidaw; perangkat audio lain tidak diubah. Suara mic jadi "
+              "diolah, sehingga panggilan \"Digidaw\" bisa lebih sering tidak terdengar: matikan lagi kalau begitu.",
+      "restart": True}),
 
     ("Suara", "TTS_ENGINE", "Mesin suara", "choice",
      {"options": [("edge", "Edge Neural (paling natural)"), ("gtts", "Google TTS"), ("sapi", "Windows (offline)")]}),
@@ -98,6 +114,8 @@ FIELDS = [
     ("Suara", "EDGE_VOICE_EN", "Suara bahasa Inggris", "choice", {"options": VOICES_EN}),
     ("Suara", "EDGE_RATE", "Kecepatan bicara", "choice",
      {"options": [("-10%", "Lambat"), ("+0%", "Normal"), ("+5%", "Sedikit cepat"), ("+12%", "Cepat"), ("+20%", "Sangat cepat")]}),
+    ("Suara", "STREAM_REPLIES", "Ucapkan jawaban panjang sambil AI masih menulisnya", "bool",
+     {"help": "Kalimat pertama sudah terdengar sebelum jawaban AI online selesai ditulis."}),
     ("Suara", "THINKING_FILLER_SECONDS", "Bilang \"Sebentar\" bila jawaban lebih lama dari (detik)", "int",
      {"min": 0, "max": 15, "help": "0 = tidak pernah."}),
 
@@ -111,7 +129,9 @@ FIELDS = [
     ("Media", "DUCK_LEVEL", "Volume musik saat dikecilkan", "choice",
      {"options": [(0.15, "15%"), (0.3, "30%"), (0.5, "50%")]}),
 
-    ("AI", "GEMINI_API_KEY", "Gemini API key", "secret", {"help": "Disimpan di file .env, tidak ditampilkan lagi."}),
+    ("AI", "GEMINI_API_KEY", "Gemini API key", "secret",
+     {"help": "Disimpan di file .env, tidak ditampilkan lagi. Boleh lebih dari satu, pisahkan dengan koma: kalau batas "
+              "key pertama penuh, Digidaw otomatis memakai key berikutnya, lalu kembali ke yang pertama."}),
     ("AI", "ADDRESS_STYLE", "Gaya bicara Digidaw", "choice",
      {"options": [("anda", "Sopan santai (saya / Anda)"), ("kamu", "Akrab (aku / kamu)")]}),
     ("AI", "BRAIN_MODE", "Otak utama", "choice",
@@ -132,6 +152,36 @@ FIELDS = [
     ("Keamanan & Sistem", "CONFIRM_DANGEROUS_ACTIONS", "Minta konfirmasi untuk aksi berbahaya", "bool",
      {"help": "Shutdown, kosongkan Recycle Bin, jalankan perintah PowerShell, dll."}),
     ("Keamanan & Sistem", "PROACTIVE_ALERTS", "Peringatan otomatis (baterai, CPU, RAM, disk)", "bool", {}),
+    ("Keamanan & Sistem", "HEAT_ALERT_CELSIUS", "Peringatan CPU terlalu panas (°C, 0 = mati)", "int",
+     {"min": 0, "max": 110, "help": "Diucapkan kalau suhu CPU bertahan setinggi ini lebih dari semenit."}),
+
+    ("Asisten Proaktif", "ANNOUNCE_MESSAGES", "Beri tahu saat ada pesan masuk", "choice",
+     {"options": [("personal", "Chat pribadi"), ("all", "Semua, termasuk grup"), ("off", "Mati")],
+      "help": "Hanya nama pengirim yang diucapkan (\"ada pesan WhatsApp dari Rina, mau saya bacakan?\"); isinya hanya "
+              "kalau Anda jawab \"ya\". Diam saat Do Not Disturb, saat layar penuh (game/film), atau saat aplikasi "
+              "chat-nya sedang Anda buka."}),
+    ("Asisten Proaktif", "AWAY_MINUTES", "Dianggap pergi setelah tidak ada aktivitas (menit, 0 = mati)", "int",
+     {"min": 0, "max": 180, "help": "Tanpa keyboard, mouse, atau perintah selama ini: kabar kecil (pesan, gambar "
+                                    "selesai, baterai penuh) disimpan dan diceritakan saat Anda kembali. Peringatan "
+                                    "dan pengingat tetap diucapkan langsung."}),
+    ("Asisten Proaktif", "WELCOME_BACK", "Sapa & ceritakan yang terlewat saat Anda kembali", "bool",
+     {"help": "Pagi hari setelah semalaman pergi: langsung ringkasan hari ini (agenda, cuaca, pesan)."}),
+    ("Asisten Proaktif", "RAIN_ALERTS", "Peringatan sebelum hujan", "bool",
+     {"help": "Prakiraan Open-Meteo untuk kota di Umum → Kota untuk cuaca. Paling banyak sekali per 3 jam, "
+              "jam 06.00–21.00."}),
+    ("Asisten Proaktif", "DAILY_RECAP_HOUR", "Rangkuman hari otomatis mulai jam (0 = hanya saat diminta)", "int",
+     {"min": 0, "max": 23, "help": "Sekali sehari saat Anda di depan laptop: lama aktif & aplikasi yang dipakai, pesan "
+                                  "masuk, dan agenda/alarm/cuaca besok. Bisa juga diminta: \"rangkuman hari ini\"."}),
+
+    ("Rumah (Lampu)", "LAMP_AUTO", "Lampu otomatis mengikuti matahari & keberadaan Anda", "bool",
+     {"help": "Menyala hangat menjelang matahari terbenam (bila Anda di depan laptop), menyala saat Anda kembali "
+              "setelah gelap (sebelum tengah malam), dan meredup saat Anda pergi lama."}),
+    ("Rumah (Lampu)", "LAMP_NIGHT_HOUR", "Lampu diredupkan mulai jam (0 = tidak)", "int", {"min": 0, "max": 23}),
+    ("Rumah (Lampu)", "LAMP_NIGHT_BRIGHTNESS", "Kecerahan lampu malam (%)", "int", {"min": 1, "max": 100}),
+    ("Rumah (Lampu)", "LAMP_AWAY_MINUTES", "Redupkan lampu bila pergi lebih dari (menit, 0 = tidak)", "int",
+     {"min": 0, "max": 240}),
+    ("Rumah (Lampu)", "LAMP_ALARM_LIGHT", "Lampu ikut alarm & pengingat", "bool",
+     {"help": "Alarm: lampu menyala perlahan seperti matahari terbit. Timer/pengingat: lampu berkedip (kalau menyala)."}),
 ]
 FIELD_MAP = {f[1]: f for f in FIELDS}
 
@@ -197,10 +247,8 @@ def _validate(key: str, value):
 
 
 def _saved() -> dict:
-    try:
-        return json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    data = storage.load_json(config.SETTINGS_FILE, {})
+    return data if isinstance(data, dict) else {}
 
 
 def _save_api_key(key: str):
@@ -211,7 +259,7 @@ def _save_api_key(key: str):
     env.write_text("\n".join(lines) + "\n", encoding="utf-8")
     config.GEMINI_API_KEY = key
     import llm
-    llm._client = None   # reconnect with the new key
+    llm.reset_keys()     # reconnect with the new key(s)
 
 
 def save(values: dict) -> dict:
@@ -242,7 +290,7 @@ def save(values: dict) -> dict:
         config.apply_model_preference()
     if "START_WITH_WINDOWS" in changed:
         set_autostart(config.START_WITH_WINDOWS)
-    config.SETTINGS_FILE.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(config.SETTINGS_FILE, stored, backup=True, mode=storage.PRIVATE, indent=2)
     return {"changed": changed, "restart": restart}
 
 
@@ -287,6 +335,9 @@ KEEP_APPS_CONF = """# Written by Digidaw. Apps Digidaw opens (Firefox, WhatsApp,
 # service; without this, stopping or restarting Digidaw would close all of them too. Only Digidaw itself is stopped.
 [Service]
 KillMode=process
+# a crash (e.g. the audio driver aborting the process) brings Digidaw back; "Matikan" exits cleanly and stays off
+Restart=on-failure
+RestartSec=3
 """
 
 
@@ -304,14 +355,62 @@ def ensure_keep_apps():
         pass
 
 
+# Digidaw's own user service (3 Nov 2026): whoever starts it (the user's script, the app menu, autostart), systemd
+# watches it — a crash or a hang (no heartbeat for WatchdogSec) brings it back. Only the service is restarted: the apps
+# it opened stay open (KillMode=process).
+LINUX_SERVICE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user" / "digidaw.service"
+
+
+def service_unit() -> str:
+    return f"""# Written by Digidaw (settings.install_service). Start / stop: systemctl --user start|stop digidaw
+[Unit]
+Description=Digidaw - asisten suara
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart={config.BASE_DIR / "start_digidaw.sh"} --background
+# apps Digidaw opens (Firefox, WhatsApp, terminals…) live in this service too: stopping Digidaw must not close them
+KillMode=process
+# a crash, or a hang (main.py stops sending its heartbeat), brings Digidaw back; "Matikan" exits cleanly and stays off
+Restart=on-failure
+RestartSec=3
+NotifyAccess=main
+WatchdogSec=120
+TimeoutStopSec=20
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
+
+def install_service() -> bool:
+    """Write (or update) the user service. True when it is in place."""
+    if os.name == "nt" or not shutil.which("systemctl"):
+        return False
+    try:
+        text = service_unit()
+        if not (LINUX_SERVICE.exists() and LINUX_SERVICE.read_text(encoding="utf-8") == text):
+            LINUX_SERVICE.parent.mkdir(parents=True, exist_ok=True)
+            LINUX_SERVICE.write_text(text, encoding="utf-8")
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=10)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def set_autostart(enabled: bool):
     if os.name != "nt":
-        if enabled:
+        # at login through the service (supervised), never also through the desktop autostart (a second copy)
+        LINUX_AUTOSTART.unlink(missing_ok=True)
+        if install_service():
+            subprocess.run(["systemctl", "--user", "enable" if enabled else "disable", "digidaw.service"],
+                           capture_output=True, timeout=10)
+        elif enabled:
             LINUX_AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
             LINUX_AUTOSTART.write_text(linux_desktop_entry("--background"), encoding="utf-8")
             ensure_keep_apps()
-        else:
-            LINUX_AUTOSTART.unlink(missing_ok=True)
         return
     link = _startup_shortcut()
     if enabled:
@@ -341,8 +440,18 @@ def pick_folder(initial: str = "") -> str:
     return os.path.normpath(result.stdout.strip()) if result.stdout.strip() else ""
 
 
+def alias_sounds_like_name(alias: str) -> bool:
+    """Does the word sound anything like "Digidaw" ("digital" 0.71, "di bidang" 0.67)? Ordinary words ("gak" 0.2,
+    "saya", "volume") would make Digidaw wake up all day."""
+    import difflib
+    key = re.sub(r"[^a-z]", "", alias.lower())
+    return len(key) >= 3 and difflib.SequenceMatcher(None, key, "digidaw").ratio() >= 0.5
+
+
 def add_wake_alias(alias: str) -> list[str]:
     """Add one mis-heard form of the name (from the HUD log) to the wake aliases."""
+    if not alias_sounds_like_name(alias):
+        raise ValueError(f'"{alias}" tidak mirip bunyi "Digidaw"; kalau dijadikan panggilan, Digidaw akan sering salah bangun')
     aliases = list(config.WAKE_ALIASES) + [alias]
     save({"WAKE_ALIASES": aliases})
     return config.WAKE_ALIASES

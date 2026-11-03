@@ -77,6 +77,8 @@ AGENT_SKIP_PERMISSIONS = True  # let the agent install packages / run commands w
 BUILD_TIMEOUT_MINUTES = 30
 BRIEF_SILENCE_SECONDS = 20     # while describing a project, this much silence means "done"
 ALARM_RING_SECONDS = 60        # an alarm rings this long unless stopped / snoozed
+ALARM_MIN_VOLUME = 60            # % — an alarm is never quieter than this ("mode tidur" leaves the volume at 10)
+ALARM_KEEP_AWAKE_HOURS = 16     # an alarm due within this many hours: "sleep" only turns the screen off
 ALARM_SNOOZE_MINUTES = 5
 ALARM_SHOW_HUD = True          # bring the HUD up while ringing (STOP / TUNDA buttons)
 GENERATE_DIR = ""              # where generated images/files go ("" = Documents\\Digidaw Generated)
@@ -86,7 +88,7 @@ ESC_TO_TALK = "single"          # in the HUD window: Esc = talk now / Esc again 
 STARTUP_BRIEFING = True        # first bare "Digidaw" of the day: agenda, weather, battery (never at boot)
 STT_PRIVACY_MODE = True        # recognise speech on this laptop first; only phrases for Digidaw go to Google
 OFFLINE_STT = True             # without internet, recognise commands on this laptop (Whisper "base")
-LOCAL_STT_THREADS = 4
+LOCAL_STT_THREADS = 2          # Whisper on the CPU: 2 threads = same speed as 4 here (0.38 s), ~20% less CPU
 MEDIA_WORDS_WITHOUT_WAKE = True   # "pause", "stop", "next" alone control the music without saying "Digidaw"
 LOG_OVERHEARD = False          # write ignored speech (other people's conversations) into the log file
 SECURITY_AUTO_SCAN_DAYS = 7    # automatic security scan every N days (0 = off); only new findings are spoken
@@ -101,15 +103,39 @@ START_WITH_WINDOWS = False     # start quietly in the background when you sign i
 # ── Proactive monitoring ────────────────────────────────────────────
 PROACTIVE_ALERTS = True        # battery / charger / CPU / RAM / disk warnings
 MONITOR_INTERVAL = 20          # seconds between checks
+HEAT_ALERT_CELSIUS = 95        # warn when the CPU stays this hot for a minute (0 = never)
+
+# ── Awareness: what a butler notices without being asked ────────────
+AWAY_MINUTES = 10              # no keyboard/mouse/command this long = away: small news waits for you (0 = never away)
+WELCOME_BACK = True            # back at the computer: what happened meanwhile (messages, finished jobs, battery)
+ANNOUNCE_MESSAGES = "personal" # say who sent a new chat message: "personal" chats | "all" (groups too) | "off"
+RAIN_ALERTS = True             # warn shortly before it rains in DEFAULT_CITY (Open-Meteo forecast)
+DAILY_RECAP_HOUR = 21          # the day in one breath at this hour (daily.py; 0 = only when asked)
+
+# ── Home: the lamp follows the day and the user (home_auto.py) ──────
+LAMP_AUTO = True               # warm light shortly before sunset, on when back after dark, dimmed while away long
+LAMP_NIGHT_HOUR = 22           # a lamp still bright at this hour gets dim and warm, once a night (0 = never)
+LAMP_NIGHT_BRIGHTNESS = 30     # percent, for that night light
+LAMP_AWAY_MINUTES = 30         # away this long with the lamp on: dimmed until you are back (0 = never)
+LAMP_ALARM_LIGHT = True        # a wake-up alarm turns the lamp on slowly like a sunrise; timers/reminders blink it
+
+# ── Conversation ────────────────────────────────────────────────────
+BARGE_IN = False               # interrupt Digidaw by voice while it talks ("Digidaw, stop"): PipeWire echo cancellation.
+                               # Off by default: the cleaned-up microphone sound made "Digidaw" much harder to hear
+                               # (3 Nov 2026: most calls were missed right after a start)
+STREAM_REPLIES = True          # long AI answers start being spoken while the rest is still being written
 
 # Load .env manually if exists
 ENV_FILE = BASE_DIR / ".env"
+ENV_FILE_KEYS: list[str] = []      # set from .env (the API key): Digidaw's own, not passed to programs it starts
 if ENV_FILE.exists():
     with open(ENV_FILE, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, val = line.split("=", 1)
+                if key.strip() not in os.environ:
+                    ENV_FILE_KEYS.append(key.strip())
                 os.environ[key.strip()] = val.strip().strip('"').strip("'")
 
 # Gemini AI Settings
@@ -150,7 +176,9 @@ ADDRESS_STYLE = "anda"              # how Digidaw speaks to you: "anda" (saya/An
 OLLAMA_URL = "http://127.0.0.1:11434"
 LOCAL_MODEL = "qwen3:4b-instruct"   # a non-thinking model: a "thinking" one takes 10-50 s per answer
 LOCAL_TIMEOUT_SECONDS = 25
-LOCAL_CONTEXT = 3072                # tokens; small enough that a 4B model fits a 4 GB GPU (2-3x faster)
+LOCAL_CONTEXT = 4096                # tokens: system prompt (~1.4k) + tools + 6 turns of dialogue fit without cutting
+LOCAL_FULL_GPU = True               # all layers on the GPU (Ollama's own estimate leaves ~8% on the CPU): 43 -> 55 tok/s
+                                    # on a 4 GB RTX 3050; falls back by itself when the GPU memory is taken
 LOCAL_KEEP_ALIVE = "60m"            # keep the model in (V)RAM between commands
 
 # Safety: ask "ya/tidak" before shutdown, emptying Recycle Bin, running commands, etc.
@@ -231,9 +259,12 @@ How to act:
 - "skip iklan" / "lewati iklan" -> media_control('skip_ad').
 - Speech recognition may mishear words; infer the most likely intent from the habits listed below and the open
   windows. But if a name is very short or unclear (e.g. "buka ho") and no app, site or habit clearly fits, ASK
-  which one the user means instead of guessing; never open an unrelated app or site.
+  which one the user means instead of guessing; never open an unrelated app or site. A fragment with no clear
+  request at all ("dan tik", "this", "gigi daun") is a mishearing: ask "Maksudnya apa?" briefly, do NOT act.
+- A site that is open in a browser (see the open windows in [Konteks]) is closed with close_tab, not
+  close_application ("tutup instagram" -> close_tab(name="instagram")).
 - When the user states a lasting personal fact or preference ("saya lebih suka Firefox", "nama kucing saya Mochi",
-  "saya kuliah di Darmajaya"), call remember with it without being asked, then reply normally.
+  "saya kuliah di Universitas Indonesia"), call remember with it without being asked, then reply normally.
 - "apa yang kamu pelajari tentang saya" / "apa kebiasaan saya" -> learned_habits (and recall_memories).
 - For general questions, just answer from your knowledge concisely.
 """
@@ -298,7 +329,18 @@ Aturan kerja:
   lengkap, lalu panggil write_note dengan isi lengkap itu (bukan judulnya saja).
 - Jawaban singkat user seperti "ya", "oke", "langsung" melanjutkan tawaranmu sebelumnya: lakukan dengan tool,
   jangan mengarang bahwa sesuatu sudah terjadi.
-- Jangan pernah menulis "membuka/mencari/memutar ..." kecuali tool-nya benar-benar kamu panggil."""
+- Jangan pernah menulis "membuka/mencari/memutar ..." kecuali tool-nya benar-benar kamu panggil.
+- [Konteks] berisi jam, jendela aktif dan (untuk perintah jendela) jendela yang terbuka: pakai untuk memilih target.
+
+Contoh pemanggilan tool (ikuti polanya):
+- "ke WhatsApp" / "pindah ke discord" -> focus_window(name="whatsapp")
+- "tutup instagram" saat Instagram terbuka sebagai tab browser -> close_tab(name="instagram")
+- "kecilkan suara dikit" -> volume_down(amount=10)
+- "putar lagu santai buat belajar" -> play_youtube(query="lagu santai untuk belajar", mix=true)
+- "ingatkan minum obat jam 8 malam" -> set_reminder_at(time_hhmm="20:00", message="minum obat")
+- "catat beli susu dan roti" -> write_note(content="beli susu dan roti")
+- "nama kucingku Mochi" -> remember(fact="Nama kucing user adalah Mochi")
+- Nama aneh/tidak jelas ("buka gigi daun"): JANGAN menebak aplikasi lain; tanya balik singkat apa maksudnya."""
 
 if os.name != "nt":
     SYSTEM_PROMPT = (SYSTEM_PROMPT
@@ -326,9 +368,9 @@ def _load_user_settings():
     import json
     if not SETTINGS_FILE.exists():
         return
-    try:
-        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    import storage
+    data = storage.load_json(SETTINGS_FILE)          # (a damaged settings.json falls back to its .bak)
+    if not isinstance(data, dict):
         return
     for key, value in data.items():
         if key.isupper() and key in globals() and key not in ("SYSTEM_PROMPT", "BASE_DIR", "GEMINI_API_KEY"):

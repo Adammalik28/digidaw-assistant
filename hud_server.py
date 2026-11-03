@@ -27,6 +27,14 @@ import oscompat
 
 TOKEN = secrets.token_urlsafe(24)
 HUD_FILE = config.BASE_DIR / "hud" / "index.html"
+HOLO3D_FILE = HUD_FILE.parent / "holo3d.js"
+VENDOR_DIR = (HUD_FILE.parent / "vendor").resolve()
+
+
+def vendor_file(url_path: str):
+    """A file of the 3D library (hud/vendor: Three.js), never anything outside that folder."""
+    path = (VENDOR_DIR / url_path.removeprefix("/vendor/")).resolve()
+    return path if path.suffix == ".js" and VENDOR_DIR in path.parents and path.is_file() else None
 ALLOWED_HOSTS = {f"127.0.0.1:{config.HUD_PORT}", f"localhost:{config.HUD_PORT}"}
 
 _handlers = {"command": None, "action": None}
@@ -215,6 +223,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _library(self, url_path: str):
+        """Three.js: the same for a whole release, so the browser may keep it (unlike the rest, which is no-store)."""
+        path = vendor_file(url_path)
+        if not path:
+            return self._json(404, {"error": "not found"})
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=604800")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _json(self, code: int, obj):
         self._send(code, json.dumps(obj, default=str).encode("utf-8"), "application/json")
 
@@ -226,6 +247,10 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/", "/index.html"):
             page = HUD_FILE.read_text(encoding="utf-8").replace("__DIGIDAW_TOKEN__", TOKEN)
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+        if parsed.path == "/holo3d.js" and HOLO3D_FILE.is_file():            # the 3D drawing code (no secrets in it)
+            return self._send(200, HOLO3D_FILE.read_bytes(), "text/javascript; charset=utf-8")
+        if parsed.path.startswith("/vendor/"):
+            return self._library(parsed.path)
         if not self._token_ok(query):
             return self._json(401, {"error": "unauthorized"})
         if parsed.path == "/api/events":
@@ -308,7 +333,10 @@ class _Handler(BaseHTTPRequestHandler):
             alias = str(data.get("alias", "")).strip()[:30]
             if not alias:
                 return self._json(400, {"error": "alias kosong"})
-            aliases = settings.add_wake_alias(alias)
+            try:
+                aliases = settings.add_wake_alias(alias)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
             events.emit("settings", changed=["WAKE_ALIASES"])
             return self._json(200, {"ok": True, "aliases": aliases})
         if self.path == "/api/pick-folder":

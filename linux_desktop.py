@@ -32,7 +32,8 @@ MINIMIZED_WS = "special:digidaw-minimized"
 
 
 def _detached() -> dict:
-    return {"start_new_session": True, "close_fds": True, **QUIET}
+    import oscompat
+    return {"start_new_session": True, "close_fds": True, "env": oscompat.user_env(), **QUIET}
 
 
 def run(args: list[str], timeout: float = 5, input: bytes | str | None = None) -> subprocess.CompletedProcess | None:
@@ -51,8 +52,12 @@ def out(args: list[str], timeout: float = 5) -> str:
 
 def spawn(args: list[str], cwd: str | None = None) -> bool:
     """Start a GUI program that outlives Digidaw."""
+    options = _detached()
+    if args and os.path.basename(args[0]) == "whatsie":
+        import whatsapp                  # with its control port on, so "balas …" never has to restart it first
+        options["env"] = dict(options["env"], QTWEBENGINE_REMOTE_DEBUGGING=f"127.0.0.1:{whatsapp.PORT}")
     try:
-        subprocess.Popen(args, cwd=cwd, **_detached())
+        subprocess.Popen(args, cwd=cwd, **options)
         return True
     except OSError:
         return False
@@ -327,6 +332,9 @@ def duck(level: float) -> dict[int, int]:
     ducked = {}
     for item in _sink_inputs():
         props = item.get("properties") or {}
+        if props.get("application.process.id") == me and _input_percent(item) < 95:
+            # Digidaw's own voice turned down (a remembered volume, or a mistake): it must be heard
+            run(["pactl", "set-sink-input-volume", str(item["index"]), "100%"], timeout=2)
         if item.get("corked") or props.get("application.process.id") == me or props.get("application.name") == APP_NAME \
                 or props.get("media.role") in ("Notification", "Alarm", "Event") \
                 or props.get("application.name") in ("pw-play", "paplay") or _is_child(props.get("application.process.id")):
@@ -580,7 +588,9 @@ def launch_app(app: dict) -> bool:
         # no captured output: the app inherits gio's stdout, and a captured pipe would keep this call waiting
         # until the timeout (and then the app was started a second time)
         try:
-            r = subprocess.run(["gio", "launch", app["Path"]], timeout=5, start_new_session=True, **QUIET)
+            import oscompat
+            r = subprocess.run(["gio", "launch", app["Path"]], timeout=5, start_new_session=True,
+                               env=oscompat.user_env(), **QUIET)
             if r.returncode == 0:
                 return True
         except (OSError, subprocess.TimeoutExpired):

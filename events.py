@@ -22,10 +22,19 @@ HISTORY_TYPES = {"user", "digidaw", "tool", "alert"}
 
 _subscribers: list[queue.Queue] = []
 _lock = threading.Lock()
+_command = threading.local()
+
+
+def working_on(command_id):
+    """The calling thread now handles this command: its replies carry the id (None = not a command any more)."""
+    _command.id = command_id
 
 
 def emit(event_type: str, **data) -> dict:
     event = {"type": event_type, "ts": time.time(), **data}
+    command_id = getattr(_command, "id", None)
+    if command_id is not None and event_type == "digidaw":
+        event.setdefault("cmd", command_id)
     if event_type in HISTORY_TYPES:
         history.append(event)
     with _lock:

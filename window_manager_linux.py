@@ -90,7 +90,24 @@ def focus_window(name: str) -> str:
                 return result
         return f"Tidak ada jendela '{name}' yang terbuka, {T}."
     _force_foreground(w["hwnd"])
-    return f"Beralih ke {w['title'][:60]}, {T}."
+    return f"Beralih ke {_spoken_name(w, name)}, {T}."
+
+
+SPOKEN_APP = {"kitty": "Terminal", "alacritty": "Terminal", "foot": "Terminal", "thunar": "File manager",
+              "whatsie": "WhatsApp", "code": "VS Code", "org.gnome.nautilus": "Files", "google-chrome": "Chrome"}
+
+
+def _spoken_name(w: dict, asked: str) -> str:
+    """How to say the window: 'Discord', or 'YouTube di Firefox' for a page; never a raw address such as
+    'discordapp.com/app?_=1793…' or a long title."""
+    label = SPOKEN_APP.get(_app_label(w).lower(), _app_label(w))
+    title = re.sub(r"\s+[—–-]\s+(?:Mozilla Firefox|Google Chrome|Chromium|Brave|Discord)$", "", w["title"]).strip()
+    asked = (asked or "").strip().lower()
+    if not title or re.search(r"\w+\.\w{2,}/|https?://|\?_=", title) or asked in label.lower() or len(title) > 40:
+        return label
+    if asked and asked in title.lower() and asked not in label.lower():
+        return f"{title} di {label}" if label.lower() not in title.lower() else title
+    return label
 
 
 def window_action(action: str, name: str = "") -> str:

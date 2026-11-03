@@ -34,3 +34,10 @@ neural_test.mp3
 .idea/
 .DS_Store
 Thumbs.db
+smarthome.json
+# tinytuya wizard / scan output (the wizard writes Local Keys into devices.json)
+devices.json
+snapshot.json
+tuya-raw.json
+# words kept out of tests/golden_commands.json (personal): local only
+tests/private_words.txt

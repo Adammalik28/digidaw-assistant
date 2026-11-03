@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# git pre-commit hook (installed by scripts/install-hooks.sh): no commit while a test fails.
+# Skip once in an emergency: git commit --no-verify
+echo "Menjalankan tes Digidaw sebelum commit..."
+exec "$(git rev-parse --show-toplevel)/tests/run_all.sh"

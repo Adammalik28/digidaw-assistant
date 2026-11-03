@@ -24,6 +24,7 @@ import urllib.parse
 import requests
 
 import config
+import storage
 import oscompat
 import firefox_player
 
@@ -660,7 +661,7 @@ def _last_query() -> str:
 
 def _remember_query(query: str):
     try:
-        STATE_FILE.write_text(json.dumps({"last_query": query}, ensure_ascii=False), encoding="utf-8")
+        storage.save_json(STATE_FILE, {"last_query": query})
     except OSError:
         pass
 

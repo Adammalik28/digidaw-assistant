@@ -13,6 +13,7 @@ speaking the microphone is gated (fed silence) so he never hears himself.
 
 Without webrtcvad (or if the mic can't run at 16 kHz) an energy-threshold detector is used instead.
 """
+import re
 import sys
 import time
 import queue
@@ -20,11 +21,64 @@ import warnings
 import threading
 import collections
 from concurrent.futures import ThreadPoolExecutor
+from http.cookiejar import DefaultCookiePolicy
 
 import pyaudio
+import requests
 import speech_recognition as sr
 
 import config
+import diag
+
+# Google's speech service, over one kept-alive connection instead of a new one per sentence (the library's way: a
+# DNS lookup and a TCP handshake every time; on a lossy network the lookup alone sometimes took 5 s). HTTPS: what the
+# user says is not sent in clear text (the library uses plain http).
+GOOGLE_STT_URL = "https://www.google.com/speech-api/v2/recognize"
+WAKE_LENGTH = (0.3, 1.8)  # seconds: "Digidaw" alone; the laptop's recognizer "hears" the name in longer music / TV
+
+
+def sounds_like_name(text: str) -> bool:
+    """Does Google's text confirm the name the laptop heard: the name (or an alias) itself, or a short phrase that
+    sounds like it ("pigi chord" 0.53, "gigi kau" 0.57)? Chatter scores below 0.3 ("tulang lunak", "kok bisa")."""
+    import difflib
+    import local_stt
+    if local_stt.mentions_wake(text):
+        return True
+    words = text.lower().split()
+    if not 1 <= len(words) <= 3:
+        return False
+    key = "".join(words)
+    return max(difflib.SequenceMatcher(None, "digidaw", key[i:i + 8]).ratio()
+               for i in range(max(1, len(key) - 6))) >= 0.5
+def confirm_alias(local: str | None, text: str) -> str:
+    """The laptop's own recognizer heard "Digidaw" itself, and Google wrote one of the words it mishears the name as
+    ("digital, ganti lampu ke hijau"): two recognizers agree it's a call, so the name is written as such and the
+    phrase counts as a sure call (an alias alone only lets commands that start like one through)."""
+    if not local or not text:
+        return text
+    import core
+    if not core.WAKE_RE.search(local) or core.WAKE_RE.search(text):
+        return text
+    start_re, end_re = core._alias_patterns()
+    if start_re and (m := start_re.match(text)):
+        return ("Digidaw " + text[m.end():].lstrip(" ,.!?")).strip()
+    if end_re and (m := end_re.search(text)) and m.start() > 0:
+        return text[:m.start()].rstrip(" ,.!?") + ", Digidaw"
+    return text
+
+
+# a phrase ending like this isn't finished ("lebih…", "pindah ke…"): wait a little longer for the rest of it
+DANGLING_RE = re.compile(r"\b(?:lebih|agak|paling|kurang|ke|di|dari|yang|dan|atau|tapi|untuk|buat|dengan|kalau|"
+                         r"jadi|biar|supaya|mau|ingin|pengen|tolong|coba|warna|mode|sama)[\s,.]*$", re.IGNORECASE)
+DANGLING_HOLD = 1.6        # seconds after such a phrase ends (the usual mid-sentence gap is config.STT_MERGE_GAP)
+
+
+def dangling(text: str) -> bool:
+    return bool(DANGLING_RE.search(text or ""))
+
+
+_google_session = requests.Session()
+_google_session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))   # no cookies, as before: not traceable
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
@@ -218,6 +272,10 @@ class SpeechToText:
         self.mode = "energy"
         self.vad_microphone = None
         self.phrase_in_progress_since = None     # set while the user is mid-phrase (VAD mode)
+        self.last_frame_at = 0.0                 # the microphone last delivered sound (VAD mode)
+        self.phrases_heard = 0
+        self._capture_gen = 0                    # a stalled capture thread is replaced; the old one then stops
+        self._segmenter = None
         self._running = threading.Event()
         self._phrases: queue.Queue = queue.Queue()
         with _device_scan_quiet():
@@ -304,15 +362,81 @@ class SpeechToText:
         capture = self._capture_loop_vad if self.mode == "vad" else self._capture_loop_energy
         threading.Thread(target=capture, args=(is_muted,), daemon=True, name="stt-capture").start()
         threading.Thread(target=self._recognize_loop, args=(on_text,), daemon=True, name="stt-recognize").start()
+        if self.mode == "vad":
+            threading.Thread(target=self._watch_mic, args=(is_muted,), daemon=True, name="stt-mic-watch").start()
         return True
+
+    MIC_STALL_SECONDS = 8          # no sound at all from the microphone this long: its stream is stuck
+    MIC_SILENT_LEVEL = 3           # a real room is never this quiet: the microphone only sends zeros (muted?)
+
+    def mic_report(self) -> str:
+        """'level ruangan 40–2100, 3 frasa' for the log: is the microphone really hearing anything?"""
+        seg = self._segmenter
+        levels = sorted(seg.energies) if seg and seg.energies else []
+        if not levels:
+            return "belum ada suara dari mikrofon"
+        return f"level ruangan {levels[len(levels) // 5]}–{levels[-1]}, {self.phrases_heard} frasa tertangkap"
+
+    def _watch_mic(self, is_muted):
+        """A microphone that stops delivering sound (its stream stuck after a device change) or delivers only
+        silence used to leave Digidaw deaf without a word. Now it says so, and a stuck stream is opened again."""
+        import events
+        started, told_level, told_stall, reported = time.time(), False, False, False
+        last_tick = started
+        while self._running.is_set():
+            time.sleep(2)
+            now = time.time()
+            if now - last_tick > 30:             # the laptop slept (suspend): every stream starts over quietly
+                last_tick = self.last_frame_at = now
+                print("[STT] laptop bangun dari tidur: mikrofon diperiksa lagi")
+                continue
+            last_tick = now
+            if not reported and now - started > 20:
+                reported = True
+                print(f"[STT] mikrofon: {self.mic_report()}")
+            stalled_for = now - (self.last_frame_at or started)
+            if stalled_for > (self.MIC_STALL_SECONDS if self.last_frame_at else 20):   # (opening takes a moment)
+                if not told_stall:
+                    told_stall = True
+                    print(f"[STT] mikrofon tidak mengirim suara sejak {stalled_for:.0f} dtk: dibuka ulang")
+                    import metrics
+                    metrics.count("mikrofon_macet")
+                    events.emit("alert", text="Mikrofon tidak mengirim suara; sedang dibuka ulang.", level="warning",
+                                push=False)
+                self.last_frame_at = now             # (one new try per MIC_STALL_SECONDS)
+                self._capture_gen += 1
+                try:                                 # a new microphone object: the stuck one is still "in use"
+                    self.vad_microphone = _keep_portaudio(sr.Microphone(device_index=self.device_index,
+                                                                        sample_rate=16000, chunk_size=480))
+                except Exception as e:
+                    print(f"[STT] mikrofon tidak bisa dibuka ulang: {e}")
+                    continue
+                threading.Thread(target=self._capture_loop_vad, args=(is_muted,), daemon=True,
+                                 name="stt-capture").start()
+                continue
+            if told_stall and stalled_for < 2:
+                told_stall = False
+                print("[STT] mikrofon mengirim suara lagi")
+            seg = self._segmenter
+            if seg and len(seg.energies) == seg.energies.maxlen and not is_muted():
+                loudest = max(seg.energies)
+                if loudest <= self.MIC_SILENT_LEVEL and not told_level:
+                    told_level = True
+                    print("[STT] mikrofon hanya mengirim keheningan (mati / di-mute?): Digidaw tidak bisa mendengar")
+                    events.emit("alert", text="Mikrofon hanya mengirim keheningan. Cek apakah mic di-mute.",
+                                level="warning", push=False)
+                elif loudest > self.MIC_SILENT_LEVEL * 4:
+                    told_level = False
 
     def stop_background(self):
         self._running.clear()
 
     def _capture_loop_vad(self, is_muted):
         segmenter = _VadSegmenter(16000)
+        self._segmenter = segmenter
         frame_samples = segmenter.frame_samples
-        while self._running.is_set():
+        gen = self._capture_gen
+        while self._running.is_set() and gen == self._capture_gen:
             try:
                 with self.vad_microphone as source:
                     if source.stream is None:
@@ -320,6 +444,9 @@ class SpeechToText:
                     while self._running.is_set():
                         frame = source.stream.read(frame_samples)
                         now = time.time()
+                        if gen != self._capture_gen:
+                            return                        # this stream got stuck and was replaced meanwhile
+                        self.last_frame_at = now
                         if is_muted():
                             segmenter.reset()             # DIGIDAW is talking: hear nothing
                             self.phrase_in_progress_since = None
@@ -328,6 +455,7 @@ class SpeechToText:
                         self.phrase_in_progress_since = segmenter.started_at if segmenter.triggered else None
                         if audio:
                             duration = len(audio) / 32000
+                            self.phrases_heard += 1
                             self._phrases.put((sr.AudioData(audio, 16000, 2), now - duration, now))
             except Exception as e:
                 self.phrase_in_progress_since = None
@@ -357,11 +485,33 @@ class SpeechToText:
                     print(f"[Microphone Error] {e} — mencoba lagi...")
                     time.sleep(2)
 
+    def _google(self, audio):
+        """Google's raw answer for one phrase, like recognize_google(show_all=True) but over the kept connection.
+        Raises sr.UnknownValueError (nothing understood) / sr.RequestError (no connection) like the library."""
+        from speech_recognition.recognizers import google
+        builder = google.create_request_builder(endpoint=GOOGLE_STT_URL, language=self.language)
+        url, data, headers = builder.build_url(), builder.build_data(audio), builder.build_headers(audio)
+        for attempt in (1, 2):
+            try:
+                response = _google_session.post(url, data=data, headers=headers,
+                                                timeout=self.recognizer.operation_timeout)
+                break
+            except requests.ConnectionError as e:
+                # Google closes a connection that sat idle; the first request after that finds it dead
+                # ("Remote end closed connection"). That's no reason to think the internet is gone: once more, fresh.
+                if attempt == 2:
+                    raise sr.RequestError(f"recognition connection failed: {e}")
+            except requests.RequestException as e:
+                raise sr.RequestError(f"recognition connection failed: {e}")
+        if response.status_code >= 400:
+            raise sr.RequestError(f"recognition request failed: {response.status_code} {response.reason}")
+        return google.OutputParser(show_all=True, with_confidence=False).parse(response.text)
+
     def _recognize(self, audio) -> str:
         """Best transcript — but if any of Google's alternatives contains the assistant's name, use
         that one (Google's top guess usually "corrects" an unusual name like Digidaw to "digital")."""
         try:
-            result = self.recognizer.recognize_google(audio, language=self.language, show_all=True)
+            result = self._google(audio)
             self._set_online(True)          # Google answered (even "nothing recognised" means we're online)
             alternatives = [a.get("transcript", "") for a in result.get("alternative", [])] \
                 if isinstance(result, dict) else []
@@ -377,20 +527,33 @@ class SpeechToText:
         except Exception:
             return ""
 
-    def _user_kept_talking(self, ended: float, next_started: float | None = None) -> bool:
-        """Did a new phrase start within STT_MERGE_GAP of this one ending? (mid-sentence pause)"""
+    def _user_kept_talking(self, ended: float, next_started: float | None = None, gap: float | None = None) -> bool:
+        """Did a new phrase start within STT_MERGE_GAP (or `gap`) of this one ending? (mid-sentence pause)"""
+        gap = config.STT_MERGE_GAP if gap is None else gap
         if next_started is not None:
-            return next_started - ended <= config.STT_MERGE_GAP
+            return next_started - ended <= gap
         if not self._phrases.empty():
-            return self._phrases.queue[0][1] - ended <= config.STT_MERGE_GAP
+            return self._phrases.queue[0][1] - ended <= gap
         started = self.phrase_in_progress_since
-        return started is not None and started - ended <= config.STT_MERGE_GAP
+        return started is not None and started - ended <= gap
 
     online = True
     on_connectivity = None     # set by core: called with True/False when internet comes back / drops
     needs_full_text = staticmethod(lambda: False)   # set by core: Digidaw is listening (armed / follow-up / brief)
     media_playing = staticmethod(lambda: False)     # set by core: short phrases may be "pause" / "next"
+    # set by core, so Digidaw reacts before Google has answered (~0.5-1 s, at times much more):
+    on_wake_hint = None        # fn(local_text) -> bool: the laptop heard the name; True = it already chimed
+    on_wake_unconfirmed = None  # fn(): ...but Google heard something else: undo the chime
+    on_phrase_for_us = None    # fn(): a phrase Digidaw is waiting for goes to Google (warm the voice up)
     gated = 0                  # phrases that stayed on this PC (privacy mode)
+
+    @staticmethod
+    def _call(fn, *args):
+        try:
+            return fn(*args) if fn else None
+        except Exception as e:
+            print(f"[STT callback error] {e}")
+            return None
 
     def _recognize_smart(self, audio, duration: float) -> str:
         """Local-first recognition: see local_stt. Falls back to Google-only if no local model."""
@@ -400,7 +563,10 @@ class SpeechToText:
             if text:
                 print(f"[STT] (offline, dikenali di laptop) {text}")
             return text
-        if config.STT_PRIVACY_MODE and local_stt.available(local_stt.GATE_MODEL) and not self.needs_full_text():
+        chimed = False
+        local = None
+        expected = self.needs_full_text()
+        if config.STT_PRIVACY_MODE and local_stt.available(local_stt.GATE_MODEL) and not expected:
             try:
                 local = local_stt.transcribe(audio, local_stt.GATE_MODEL)
             except Exception as e:
@@ -408,10 +574,19 @@ class SpeechToText:
                 local = None
             if local is not None:
                 short_media = duration <= 2.5 and self.media_playing()
-                if not local_stt.mentions_wake(local) and not short_media:
+                wake = local_stt.mentions_wake(local)
+                if not wake and not short_media:
                     self.gated += 1
                     return local          # not for Digidaw: stays on this PC, Digidaw ignores it
-        text = self._recognize(audio)
+                if wake and WAKE_LENGTH[0] <= duration <= WAKE_LENGTH[1]:
+                    chimed = bool(self._call(self.on_wake_hint, local))
+        elif expected:
+            self._call(self.on_phrase_for_us)
+        text = confirm_alias(local, self._recognize(audio))
+        # the early chime stands when Google heard the name or something like it ("pigi chord"); nothing at all or
+        # other words means the laptop's recognizer imagined it in noise / a song (it chimed for "tulang lunak")
+        if chimed and not sounds_like_name(text):
+            self._call(self.on_wake_unconfirmed)
         if not text and not self.online and config.OFFLINE_STT and local_stt.available(local_stt.OFFLINE_MODEL):
             text = local_stt.transcribe(audio, local_stt.OFFLINE_MODEL)   # Google just failed: use the local one
             if text:
@@ -431,14 +606,16 @@ class SpeechToText:
         self.online = online
         if online:
             print("[STT] Internet tersambung lagi; pengenalan suara normal.")
+            import local_stt
+            local_stt.unload(local_stt.OFFLINE_MODEL)   # ~0.5 GB that was only needed while offline
         else:
             print(f"[STT] Tidak ada internet untuk pengenalan suara ({error}). Memakai pengenalan di laptop…")
             threading.Thread(target=self._probe_until_online, daemon=True, name="stt-probe").start()
         if self.on_connectivity:
             try:
                 self.on_connectivity(online)
-            except Exception:
-                pass
+            except Exception as e:
+                diag.warn_once("stt.connectivity", "kabar internet putus/tersambung gagal diteruskan", e)
 
     max_phrase_seconds = 0.0   # >0 while Digidaw is paused: longer phrases are dropped without being sent anywhere
 
@@ -460,16 +637,26 @@ class SpeechToText:
             while inflight and inflight[0][0].done():
                 future, started, ended = inflight.popleft()
                 text = future.result()
+                if text:
+                    try:
+                        import presence
+                        presence.note_voice(ended)    # someone talks in the room (for the lamp, not for "here")
+                    except Exception:
+                        pass
                 if pending:
                     pending = (f"{pending[0]} {text}".strip(), pending[1], ended)
                 elif text:
                     pending = (text, started, ended)
-                if pending and inflight and not self._user_kept_talking(pending[2], inflight[0][1]):
+                gap = DANGLING_HOLD if pending and dangling(pending[0]) else None
+                if pending and inflight and not self._user_kept_talking(pending[2], inflight[0][1], gap):
                     self._deliver(on_text, pending)   # the next phrase is a new sentence
                     pending = None
-            if pending and not inflight and not self._user_kept_talking(pending[2]):
-                self._deliver(on_text, pending)
-                pending = None
+            if pending and not inflight:
+                unfinished = dangling(pending[0])
+                if not self._user_kept_talking(pending[2], gap=DANGLING_HOLD if unfinished else None) and not (
+                        unfinished and time.time() - pending[2] < DANGLING_HOLD):
+                    self._deliver(on_text, pending)   # ("lebih" … "terang": one sentence, said with a pause)
+                    pending = None
         pool.shutdown(wait=False)
 
     @staticmethod

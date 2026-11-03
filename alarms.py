@@ -9,6 +9,7 @@ Timers, alarms and reminders that behave like a phone's clock app.
   "bangunkan saya jam 5.45", "ingatkan saya 20 menit lagi untuk angkat jemuran", "ingatkan besok jam 8 rapat".
 """
 import os
+import shutil
 import re
 import json
 import time
@@ -18,6 +19,8 @@ import threading
 from pathlib import Path
 
 import config
+import diag
+import storage
 import events
 import oscompat
 
@@ -44,16 +47,13 @@ _stop_ring = threading.Event()
 def _save():
     keep = [{k: v for k, v in i.items() if k != "action"} for i in _items if not i.get("action")]
     try:
-        STATE_FILE.write_text(json.dumps(keep, ensure_ascii=False, indent=1), encoding="utf-8")
+        storage.save_json(STATE_FILE, keep, backup=True, mode=storage.PRIVATE, indent=1)
     except OSError:
         pass
 
 
 def _load() -> list[dict]:
-    try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
+    return storage.load_json(STATE_FILE, [])
 
 
 def _changed():
@@ -183,8 +183,16 @@ def _ring(item: dict, text: str):
         import hud_server
         if config.ALARM_SHOW_HUD:
             hud_server.open_window()        # so the STOP / TUNDA buttons are right there
-    except Exception:
-        pass
+    except Exception as e:
+        diag.warn_once("alarm.hud", "HUD tidak bisa dibuka saat alarm berbunyi", e)
+    try:
+        import home_auto
+        home_auto.on_alarm(item["kind"])    # the lamp: a sunrise for an alarm, a blink for a timer / reminder
+    except Exception as e:
+        diag.warn_once("alarm.lamp", "lampu tidak ikut menyala saat alarm", e)
+    if not oscompat.IS_WINDOWS:
+        ld.run(["hyprctl", "dispatch", "dpms", "on"]) if shutil.which("hyprctl") else None   # "mode tidur" turned it off
+    restore = _loud_enough()
     _say(text)
     seconds = config.ALARM_RING_SECONDS if item["kind"] == "alarm" else min(config.ALARM_RING_SECONDS, 20)
     sound = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Media", SOUNDS.get(item["kind"], SOUNDS["alarm"]))
@@ -208,10 +216,39 @@ def _ring(item: dict, text: str):
         winsound.PlaySound(None, 0)
     if media:
         media.unduck()
+    if restore:
+        try:
+            ld.set_volume(restore[0])
+            if restore[1]:
+                ld.set_mute(True)
+        except Exception:
+            pass
     if _ringing is item:
         _ringing = None
         events.state["alarm"] = {"ringing": False}
         events.emit("alarm", ringing=False, id=item["id"])
+
+
+def next_ring(within_hours: float = 24) -> dict | None:
+    """The next alarm or reminder due within this many hours (timers too), or None."""
+    limit = time.time() + within_hours * 3600
+    due = [i for i in _items if i.get("kind") in ("alarm", "reminder", "timer") and time.time() < i["due"] <= limit]
+    return min(due, key=lambda i: i["due"]) if due else None
+
+
+def _loud_enough():
+    """The alarm must be heard even after "mode tidur" turned the volume down to 10 or muted it: raised to
+    config.ALARM_MIN_VOLUME while it rings. Returns the volume to go back to afterwards (None = untouched)."""
+    if oscompat.IS_WINDOWS:
+        return None
+    try:
+        current = ld.get_volume()
+        if current and (current[1] or current[0] < config.ALARM_MIN_VOLUME):
+            ld.set_volume(max(current[0], config.ALARM_MIN_VOLUME))
+            return current
+    except Exception as e:
+        diag.warn_once("alarm.volume", "volume alarm tidak bisa dinaikkan", e)
+    return None
 
 
 def is_ringing() -> bool:
@@ -467,7 +504,28 @@ def _set_alarm(time_hhmm: str, label: str = "", repeat: str = "", repeat_days: l
     rep = f" {_repeat_text(days)}" if days else ""
     left = _fmt_left(item["due"] - time.time())
     return (f"Alarm {hour:02d}.{minute:02d}{rep}{' untuk ' + label if label else ''} diset, {T}. "
-            f"Berbunyi {_when_text(item['due'])}, {left} lagi.")
+            f"Berbunyi {_when_text(item['due'])}, {left} lagi.") + _awake_note(item)
+
+
+_awake_told = {"day": ""}
+
+
+def _awake_note(item: dict) -> str:
+    """A laptop asleep can't ring: said once a day when an alarm is an hour or more away."""
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    if item["due"] - time.time() < 3600 or _awake_told["day"] == today or not _on_battery_device():
+        return ""
+    _awake_told["day"] = today
+    return " Biarkan laptop tetap menyala ya; kalau laptopnya tidur, alarm tidak bisa berbunyi."
+
+
+def _on_battery_device() -> bool:
+    try:
+        import psutil
+        return psutil.sensors_battery() is not None
+    except Exception:
+        return False
 
 
 def _reminder_at(hour: int, minute: int, label: str, text: str, repeat=None) -> str:

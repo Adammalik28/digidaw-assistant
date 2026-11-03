@@ -16,11 +16,22 @@ IS_LINUX = sys.platform.startswith("linux")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+# environment variables meant for Digidaw itself (start_digidaw.sh; main.py adds the ones it set)
+OWN_ENV = {"DIGIDAW_NO_CONSOLE"}
+
+
+def user_env() -> dict:
+    """The environment for a program Digidaw opens for the user (apps, terminals, coding agents): without Digidaw's
+    own settings. OMP_NUM_THREADS=1 would make their number crunching (numpy, PyTorch, builds) use one core."""
+    return {k: v for k, v in os.environ.items() if k not in OWN_ENV}
+
+
 def detached() -> dict:
     """Popen keyword arguments for a program that must outlive Digidaw and never block it."""
     if IS_WINDOWS:
-        return {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, "close_fds": True}
-    return {"start_new_session": True, "close_fds": True,
+        return {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, "close_fds": True,
+                "env": user_env()}
+    return {"start_new_session": True, "close_fds": True, "env": user_env(),
             "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
 
 

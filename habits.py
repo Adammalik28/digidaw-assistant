@@ -11,6 +11,7 @@ import threading
 import time
 
 import config
+import storage
 
 HABITS_FILE = config.BASE_DIR / "habits.json"
 TOP_IN_PROMPT = 6
@@ -41,9 +42,8 @@ _data: dict | None = None
 def _load() -> dict:
     global _data
     if _data is None:
-        try:
-            _data = json.loads(HABITS_FILE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        _data = storage.load_json(HABITS_FILE, {})
+        if not isinstance(_data, dict):
             _data = {}
         _data.setdefault("usage", {})
         _data.setdefault("aliases", {})
@@ -52,7 +52,7 @@ def _load() -> dict:
 
 def _save():
     try:
-        HABITS_FILE.write_text(json.dumps(_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        storage.save_json(HABITS_FILE, _data, backup=True, mode=storage.PRIVATE, indent=2)
     except OSError:
         pass
 

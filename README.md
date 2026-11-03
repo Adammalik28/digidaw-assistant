@@ -113,7 +113,7 @@ langsung aktif tanpa restart (yang perlu restart diberi tanda; ada tombol **Rest
 | **Umum** | Sapaan untuk Anda, kota cuaca, jalankan otomatis saat Windows menyala, buka HUD saat mulai |
 | **Folder & Project** | **Folder project fokus**: dipakai saat Anda bilang *"buka project"*, *"cari file …"*, *"buat folder …"*. Juga editor project (VS Code / Explorer / Terminal), folder catatan, folder screenshot |
 | **Pendengaran** | Mode percakapan & durasinya, wajib wake word, filter kebisingan, jeda akhir kalimat, hotkey |
-| **Suara** | Mesin suara, suara Indonesia (Ardi/Gadis) & Inggris, kecepatan bicara, "Sebentar, Sir." |
+| **Suara** | Mesin suara, suara Indonesia (Ardi/Gadis + suara multibahasa Florian, William, Brian, Emma, Ava) & Inggris, kecepatan bicara, "Sebentar, Sir." |
 | **Media** | Browser pemutar YouTube, skip iklan, pause musik lain, pengecilan musik saat Digidaw bicara |
 | **AI** | Gemini API key (disimpan di `.env`), prioritas model cepat/pintar |
 | **Keamanan & Sistem** | Konfirmasi aksi berbahaya, peringatan otomatis |
@@ -139,10 +139,23 @@ langsung aktif tanpa restart (yang perlu restart diberi tanda; ada tombol **Rest
 - **Ketik**: di kolom perintah HUD (tekan `/` untuk fokus, `Esc` untuk menyela).
 
 ### ⚡ Kecepatan Respons
+- **Bunyi *ting* tanpa menunggu Google**: pengenal suara di laptop (Whisper) sudah mendengar "Digidaw" ±0,1 detik
+  setelah Anda diam, jadi *ting* langsung berbunyi dan suara Digidaw mulai disiapkan. Google tetap memastikan; kalau
+  ternyata bukan panggilan (lagu, obrolan), Digidaw kembali siaga.
+- **Tahan jaringan lambat**: alamat server disimpan di memori (cache DNS) dan koneksi ke Google (pengenalan suara,
+  Gemini) tetap terbuka. Di jaringan yang sering kehilangan paket (hotspot HP), satu paket DNS yang hilang dulu membuat
+  Digidaw diam 5 detik sebelum memahami perintah; sekarang tidak lagi (uji 20×: p90 6,2 → 0,8 detik).
 - **Jalur cepat**: perintah sederhana dan jelas (jam, tanggal, volume, pause/lanjut/next, "putar lagu X",
   screenshot, kunci layar, buka/tutup aplikasi umum, "buka project", status sistem) dijalankan tanpa menunggu AI.
 - **Satu panggilan AI**: untuk perintah aksi lain, Gemini hanya dipanggil sekali.
 - **Suara streaming**: suara mulai diputar begitu potongan audio pertama tiba; frasa yang sering dipakai disimpan di cache.
+- **Jawaban diucapkan sambil ditulis**: untuk pertanyaan yang dijawab Gemini, kalimat pertama sudah terdengar
+  sementara sisa jawaban masih ditulis (Control Panel → Suara). Jawaban otak lokal tetap utuh dulu, karena Digidaw
+  baru tahu jawaban lokal itu ragu (dan perlu Gemini) setelah selesai.
+- **Bisa disela**: saat Digidaw bicara, ucapkan *"Digidaw, stop"*, *"cukup"*, atau langsung *"Digidaw, putar musik"*.
+  Memakai peredam gema PipeWire (WebRTC) khusus untuk mic & suara Digidaw: suara Digidaw dihapus dari yang didengar
+  mic (terukur ±25 dB), suara Anda tetap lolos. Selama Digidaw bicara hanya "Digidaw …" atau kata berhenti yang
+  dianggap; obrolan lain diabaikan. Perangkat audio default tidak diubah (Control Panel → Pendengaran).
 - Ukuran tipikal (selesai bicara → jawaban siap): jalur cepat ±0.8 detik, via AI ±2–3.5 detik, lalu suara mulai ±0.4–1 detik.
 
 ---
@@ -162,6 +175,26 @@ Format: PDF (termasuk hasil scan), Word, Excel, PowerPoint, CSV, teks, kode, dan
 
 *"Diagnosa sistem"* membaca Event Viewer, mengelompokkan error penting (crash aplikasi, mati mendadak, disk, driver,
 perangkat keras), lalu menjelaskannya dalam bahasa sehari-hari.
+
+## 💡 Lampu Pintar (Bardi / Tuya)
+
+*"nyalakan lampu"*, *"matikan lampu kamar"*, *"redupkan lampu 30 persen"*, *"lampu lebih terang"*, *"lampu warna merah"*,
+*"lampu putih hangat"*, *"lampu mode santai"* / *"suasana film"* (baca, kerja, fokus, santai, malam, tidur, film,
+romantis, pesta), *"status lampu"*, *"kapan matahari terbenam"*. Dikendalikan langsung lewat Wi-Fi rumah (tanpa cloud):
+satu koneksi dibiarkan terbuka, jadi perintah sampai dalam ±0,05 detik; setiap perubahan dikirim sebagai satu pesan.
+Perangkat ada di `smarthome.json` (nama, nama lain, Device ID, IP, versi protokol); **Local Key** tiap lampu disimpan di
+`.env` sebagai `TUYA_KEY_<device id>` (platform.tuya.com → tautkan akun Smart Life → API Explorer → Query Devices in
+Project, kolom `localKey`). Kalau router memberi lampu IP baru, Digidaw mencarinya lagi lewat Device ID.
+
+- **HUD & HP**: panel *Lampu* (nyala/mati, kecerahan, warna, suasana) di HUD dan di tab Bicara pada HUD HP.
+- **Lampu otomatis** (Control Panel → Rumah): menyala putih hangat 15 menit sebelum matahari terbenam bila Anda di
+  depan laptop (jam terbenam dihitung dari kota cuaca, tanpa internet), menyala saat Anda kembali setelah gelap
+  (sebelum tengah malam, dan tidak bila Anda sendiri mematikannya malam itu), diredupkan mulai jam 22.00, dan
+  diredupkan saat Anda pergi lebih dari 30 menit (kembali = kecerahan semula).
+- **Ikut alarm & pengingat**: alarm membuat lampu menyala perlahan seperti matahari terbit; timer/pengingat membuat
+  lampu berkedip (hanya kalau sedang menyala).
+- **Protokol**: kerja (terang), santai (hangat), fokus (putih terang), tidur (lampu mati sebelum laptop tidur), pesta
+  (efek warna-warni bawaan lampu).
 
 ## ⏰ Timer, Alarm & Pengingat
 
@@ -197,6 +230,47 @@ Aplikasi yang dibuka Digidaw (Notepad, folder, file, catatan, browser) kini lang
 - Setelah memulai pekerjaan latar (gambar, file, scan), Digidaw tidak membuka jendela percakapan, supaya kata yang
   kebetulan terdengar tidak dianggap permintaan baru.
 - "Baterai sudah terisi penuh" hanya diucapkan sekali per pengisian, bukan setiap kali Digidaw menyala.
+
+## 🧭 Asisten Proaktif (ala Jarvis)
+
+Digidaw memperhatikan keadaan tanpa diminta, seperti butler yang tahu kapan harus bicara:
+
+- **Pesan masuk**: *"Tuan, ada pesan WhatsApp dari Rina. Mau saya bacakan?"* Jawab **"ya"** (tanpa "Digidaw")
+  untuk mendengar isinya. Yang diucapkan hanya nama pengirim, bukan isinya. Pesan beruntun digabung, chat yang sama
+  diumumkan paling sering sekali per 5 menit, dan grup hanya bila dipilih. Digidaw diam saat **Do Not Disturb**
+  (swaync / mako / dunst), saat ada aplikasi **layar penuh** (game, film), saat aplikasi chat-nya sedang Anda buka,
+  dan menunggu jeda kalau Anda sedang bicara dengannya.
+- **Tahu Anda pergi & kembali**: tanpa keyboard, mouse, atau perintah selama 10 menit, Anda dianggap pergi. Kabar
+  kecil (gambar selesai, baterai penuh, pesan) disimpan, lalu saat Anda kembali: *"Selamat datang kembali, Tuan.
+  Selama 40 menit tadi: gambar sudah jadi. Juga ada 3 pesan baru, dari Rina dan grup Kelas TI. Mau saya bacakan?"*
+  Peringatan dan pengingat tetap diucapkan langsung. Kembali setelah semalaman (≥ 3 jam) dan ringkasan hari ini
+  belum diberikan (sebelum jam 12): langsung ringkasan pagi. Mengetik password di layar kunci belum dihitung kembali.
+  Di Linux, Digidaw hanya mencatat *bahwa* ada input dari keyboard/mouse (butuh grup `input`), tidak pernah tombol apa.
+- **Peringatan sebelum hujan**: *"Tuan, sekitar jam 14.00 kemungkinan hujan di Bantargebang, peluangnya 80 persen.
+  Kalau ada jemuran, sebaiknya diangkat."* Paling banyak sekali per 3 jam, jam 06.00–21.00.
+  Pertanyaan *"besok hujan nggak?"*, *"nanti sore hujan?"*, *"prakiraan cuaca lusa"* dijawab dari prakiraan nyata
+  ([Open-Meteo](https://open-meteo.com), gratis tanpa API key), bukan tebakan AI. Ringkasan pagi menyebut peluang
+  hujan hari itu bila tinggi.
+- **Suhu laptop**: *"suhu laptop berapa"*, *"laptop panas nggak"*: suhu CPU, GPU, SSD, dan kecepatan kipas.
+  Digidaw memperingatkan bila CPU bertahan ≥ 95 °C lebih dari semenit (atur di Control Panel → Keamanan & Sistem).
+
+- **"Kabari saya kalau …"**: *"kabari saya kalau unduhan selesai"*, *"kabari kalau Rina membalas"*,
+  *"kabari kalau hujan reda"* / *"kalau mau hujan"*, *"kabari kalau baterai penuh"* / *"di bawah 20 persen"*,
+  *"kabari kalau ffmpeg selesai"*, *"kabari kalau internet nyala lagi"*, *"kabari kalau situs kampus.ac.id bisa
+  dibuka"*. Sekali terjadi, Digidaw bilang (juga ke HP) lalu berhenti memantau. *"apa saja yang sedang kamu pantau"*,
+  *"batalkan pantauan hujan"*. Pantauan hilang saat Digidaw dimulai ulang.
+- **Membalas WhatsApp dengan suara**: setelah *"ada pesan WhatsApp dari Rina"* atau dibacakan, ucapkan *"balas oke
+  saya otw"*, atau *"kirim WhatsApp ke Budi isinya nanti malam jadi"*. Digidaw **selalu** bertanya dulu (*"Apakah Anda
+  yakin ingin mengirim WhatsApp ke Rina: "oke saya otw"?"*), lalu di aplikasi Whatsie membuka chat itu, memastikan
+  nama chat-nya benar, mengetik, Enter, dan memastikan terkirim; kalau ada langkah yang janggal ia berhenti sebelum
+  mengirim. Pertama kali, Whatsie dibuka ulang sekali dengan DevTools (hanya 127.0.0.1, port 9230); login WhatsApp
+  tetap.
+- **Rangkuman hari**: jam 21.00 (sekali, saat Anda di depan laptop) atau *"rangkuman hari ini"*: lama aktif di laptop
+  dan aplikasi yang paling lama dipakai, jumlah perintah, pesan masuk, lalu agenda, alarm, dan cuaca besok.
+  *"berapa lama saya di depan laptop hari ini"*. Yang disimpan hanya nama aplikasi dan menitnya
+  (`logs/daily/`, 14 hari), bukan judul jendela atau isi.
+
+Atur semuanya di **Control Panel → Asisten Proaktif** (dan **Rumah** untuk lampu).
 
 ---
 
@@ -386,6 +460,12 @@ Panel tambahan: **Keamanan** (skor, scan terakhir/berikutnya, penjaga unduhan, t
 **Project / Generate** (pengerjaan aktif, project terbaru dengan status berjalan & jumlah versi, galeri hasil generate).
 Tab berpindah otomatis ke pekerjaan yang sedang berjalan. Tombol ⏸ di atas menjeda pendengaran.
 
+**Tampilan HUD 2D Ringan & Responsif**: antarmuka futuristik ala Iron Man berbasis Canvas 2D dan CSS hardware-accelerated
+yang sangat halus (60+ FPS konstan) dengan beban CPU/GPU mendekati 0%. Arc reactor reaktif (efek pendar, kisi coil tembaga,
+audio bar responsif suara, komet orbit saat berpikir, dan cincin teks HUD berputar) langsung menyesuaikan dengan status Digidaw.
+Panel kaca gelap beraksen cyber tajam dan mudah dibaca tanpa lag pergerakan kursor. Di ponsel (PWA), antarmuka terasa
+ringan dan hemat daya baterai.
+
 Saat start, jendela HUD ala Iron Man terbuka otomatis (`http://127.0.0.1:8765`):
 arc reactor yang bereaksi (siaga · mendengarkan · memproses · berbicara), telemetri live
 (CPU, RAM, baterai, disk, jaringan), cuaca, log percakapan + skill yang dijalankan, *now playing*
@@ -439,7 +519,8 @@ Ini mencegah salah dengar mikrofon berakibat fatal. Bisa dimatikan lewat
 
 ### 🔔 Peringatan Proaktif
 Tanpa diminta, Digidaw akan bicara saat baterai tinggal 20/10/5%, charger dicolok/dicabut,
-baterai penuh, CPU > 90% lebih dari 1 menit, RAM hampir penuh, atau disk C < 5 GB.
+baterai penuh, CPU > 90% lebih dari 1 menit, CPU terlalu panas, RAM hampir penuh, disk C < 5 GB,
+ada pesan masuk, atau sebentar lagi hujan (lihat *Asisten Proaktif*).
 
 ### 📴 Mode Offline
 Jika internet/Gemini tidak tersedia, DIGIDAW otomatis memakai pencocokan kata kunci lokal
@@ -482,10 +563,15 @@ catatan di folder Documents/Digidaw Notes, screenshot di Pictures/Screenshots.
 | `linux_desktop.py` · `oscompat.py` | Lapisan sistem Linux (hyprctl, PipeWire, XDG) · perbedaan Windows/Linux |
 | `ai_skills.py` · `screen_context.py` | Vision layar, pencarian web, berita · konteks jendela & tab yang aktif |
 | `protocols.py` · `alarms.py` · `monitor.py` | Protokol multi-langkah · timer/alarm · peringatan proaktif |
+| `presence.py` · `notifications.py` · `weather.py` | Tahu Anda pergi/kembali · pesan masuk · prakiraan & peringatan hujan |
+| `smarthome.py` · `home_auto.py` | Lampu Bardi/Tuya (koneksi tetap, suasana, kedip, fajar) · lampu otomatis ikut matahari & Anda |
+| `watchers.py` · `daily.py` · `whatsapp.py` | "Kabari saya kalau …" · waktu layar & rangkuman hari · balas WhatsApp (Whatsie) |
+| `aec.py` | Peredam gema PipeWire untuk mic & suara Digidaw (bisa disela saat bicara) |
 | `hud_server.py` · `hud/index.html` | Server & tampilan HUD |
 | `project_builder.py` · `generator.py` | Buat project · gambar & dokumen dengan suara |
 | `settings.py` | Skema & penyimpanan Control Panel (`settings.json`), autostart, pemilih folder |
 | `tts.py` · `stt.py` · `local_stt.py` | Suara keluar (Edge neural, cache) · pengenalan suara (Google + Whisper lokal) |
+| `dnscache.py` | Cache DNS di dalam Digidaw (jaringan yang sering kehilangan paket tidak lagi membuat jeda 5 detik) |
 | `check_setup.py` · `setup_digidaw.*` | Pemeriksaan & instalasi |
 
 Menambah skill: tulis fungsi Python (dengan type hint + docstring yang jelas) di modul yang sesuai,

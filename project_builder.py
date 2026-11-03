@@ -36,6 +36,7 @@ from pathlib import Path
 import requests
 
 import config
+import storage
 import events
 import oscompat
 import safety
@@ -118,7 +119,7 @@ def _save_meta(b: dict):
     meta = {k: b.get(k) for k in ("name", "agent", "conversation_id", "created", "summary", "status", "url", "port")}
     meta["updated"] = time.time()
     _meta_path(folder).parent.mkdir(parents=True, exist_ok=True)
-    _meta_path(folder).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(_meta_path(folder), meta, indent=2)
 
 
 def _adopt_legacy(folder: Path):
@@ -466,7 +467,7 @@ def _run_job(b: dict):
         with open(log_path, "a", encoding="utf-8") as log:
             proc = subprocess.Popen(cmd, cwd=folder, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    creationflags=oscompat.NO_WINDOW)
+                                    creationflags=oscompat.NO_WINDOW, env=oscompat.user_env())
             b["proc"] = proc
             threading.Thread(target=_watchdog, args=(b, proc, deadline), daemon=True).start()
             for line in proc.stdout:
@@ -550,11 +551,12 @@ def open_terminal(command: str, folder: Path, title: str = "Project"):
         argv = ld.terminal_argv(str(folder), command, f"{title} - Digidaw")
         if argv:
             proc = subprocess.Popen(argv, cwd=folder, start_new_session=True, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=oscompat.user_env())
         else:                                        # no terminal emulator: run it in the background, log to a file
             log = open(folder / ".digidaw" / "run.log", "a", encoding="utf-8")
             proc = subprocess.Popen(["bash", "-c", command], cwd=folder, start_new_session=True,
-                                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                    env=oscompat.user_env())
     _servers[str(folder)] = proc
 
 

@@ -9,6 +9,7 @@ Separate from the desktop HUD (which stays on 127.0.0.1) and deliberately small:
   cookie is HttpOnly + SameSite=Strict.
 """
 import hashlib
+import re
 import ipaddress
 import os
 import ssl
@@ -23,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import config
+import storage
 import events
 
 PAGE = Path(config.BASE_DIR) / "hud" / "mobile.html"
@@ -172,7 +174,7 @@ def _load_sessions():
 
 def _save_sessions():
     try:
-        SESSIONS_FILE.write_text(json.dumps(_sessions), encoding="utf-8")
+        storage.save_json(SESSIONS_FILE, _sessions, mode=storage.PRIVATE)
     except OSError:
         pass
 
@@ -202,10 +204,12 @@ def _state() -> dict:
         "media": hud_server._latest.get("media") or {}, "weather": hud_server._latest.get("weather") or {},
         "battery": stats.get("battery"), "plugged": stats.get("plugged"), "volume": volume,
         "agenda": agenda.snapshot(), "timers": system_control.timers_snapshot(), "log": replies,
-        # for notifications on the phone: recent alerts (reminders, agenda, battery...) and a ringing alarm
+        # for notifications on the phone: recent alerts (reminders, agenda, battery...) and a ringing alarm, not the
+        # ones only meant for the PC (a message announcement: the phone shows the message itself)
         "alerts": [{"text": e.get("text", ""), "ts": e.get("ts"), "level": e.get("level", "info")}
-                   for e in list(events.history) if e.get("type") == "alert"][-5:],
+                   for e in list(events.history) if e.get("type") == "alert" and e.get("push", True)][-5:],
         "alarm": events.state.get("alarm") or {"ringing": False},
+        "lamp": events.state.get("lamp") or None,
     }
 
 
@@ -243,13 +247,81 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (extra or {}):
+            self.send_header("Cache-Control", "no-store")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _stream_voice(self, text: str) -> bool:
+        """The phone hears the reply while it is still being made (like the PC), sentence by sentence, the first piece
+        cut short so it starts sooner; pieces already in the cache go out at once. Before: the whole recording was
+        made first (1.5 s for a short reply, 2.5-4 s for a long one before any sound).
+        False = nothing sent (Edge unavailable / no audio in time): the caller sends a finished recording instead."""
+        import queue
+        import tts
+        engine = tts.tts_engine
+        clean = tts.clean_for_speech(text)
+        if not clean or config.TTS_ENGINE != "edge" or not engine.edge_ok():
+            return False
+        pieces = _voice_pieces(clean, engine._chunks)
+        if len(pieces) == 1 and engine._cache_path(clean, "edge").exists():
+            return False                                   # one recording, already made: sent whole at once
+        started = False
+        for n, piece in enumerate(pieces):
+            cache = engine._cache_path(piece, "edge")
+            if cache.exists() and cache.stat().st_size > 0:
+                data = [cache.read_bytes()]
+            else:
+                incoming: queue.Queue = queue.Queue()
+
+                def run(piece=piece, incoming=incoming):
+                    try:
+                        engine.link.stream(piece, engine._voice_for(piece), incoming.put,
+                                           first_timeout=2.5 if engine.link.is_warm() else 3.5)
+                        incoming.put(None)
+                    except Exception as e:
+                        incoming.put(e)
+                threading.Thread(target=run, daemon=True, name="hp-tts").start()
+                data = incoming
+            try:
+                if not started:
+                    first = data[0] if isinstance(data, list) else data.get(timeout=4.5)
+                    if not isinstance(first, bytes):
+                        return False                       # Edge failed before any audio: the fallback voice
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/mpeg")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.close_connection = True           # the end of the audio = the end of the connection
+                    started = True
+                    chunks = [first]
+                    self.wfile.write(first)
+                    self.wfile.flush()
+                else:
+                    chunks = []
+                if isinstance(data, list):
+                    if chunks != data:
+                        self.wfile.write(data[0])
+                    continue
+                while True:
+                    item = data.get(timeout=15)
+                    if not isinstance(item, bytes):
+                        break
+                    chunks.append(item)
+                    self.wfile.write(item)
+                    self.wfile.flush()
+            except (queue.Empty, OSError):
+                return started
+            if item is None and len(piece) <= tts.CACHE_MAX_CHARS:
+                try:
+                    cache.write_bytes(b"".join(chunks))    # next time (on the PC too) it plays from the cache
+                except OSError:
+                    pass
+        return started
 
     def _send_file(self, path: Path):
         """Stream a file to the phone as a download (never read whole into memory)."""
@@ -285,6 +357,13 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        if path == "/holo3d.js" and (PAGE.parent / "holo3d.js").is_file():                     # the 3D drawing code, shared with the PC HUD
+            return self._send(200, (PAGE.parent / "holo3d.js").read_bytes(), "text/javascript; charset=utf-8")
+        if path.startswith("/vendor/"):              # Three.js: kept by the phone for a week, it's ~700 KB
+            import hud_server
+            lib = hud_server.vendor_file(path)
+            return self._send(200, lib.read_bytes(), "text/javascript; charset=utf-8",
+                              {"Cache-Control": "max-age=604800"}) if lib else self._send(404, b"", "text/plain")
         if path == "/api/state":
             if not self._session_ok():
                 return self._json(401, {"login": True})
@@ -313,6 +392,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/tts":
             from urllib.parse import parse_qs
             text = (parse_qs(urlparse(self.path).query).get("text") or [""])[0][:600]
+            if self._stream_voice(text):
+                return None
             audio, kind = _voice_audio(text)
             return self._send(200, audio, kind) if audio else self._send(503, b"", "text/plain")
         if path == "/ca.crt":                     # optional: install once on the phone to drop the warning
@@ -421,7 +502,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/media":
             return self._json(200, {"result": _media(str(data.get("action", "")), data.get("value"))})
         if path == "/api/command":
-            return self._json(200, {"reply": _command(str(data.get("text", ""))[:500], bool(data.get("pc_voice", True)))})
+            return self._json(200, {"reply": _command(str(data.get("text", ""))[:500], bool(data.get("pc_voice", True))),
+                                    "quiet": _answered_on_pc()})
         if path == "/api/window":
             return self._json(200, {"result": _window_action(str(data.get("action", "")), str(data.get("id", "")),
                                                              str(data.get("workspace", "")))})
@@ -438,6 +520,10 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/api/pointer":
                 return self._json(200, {"ok": _pointer(data)})
             return self._json(200, {"result": _key(data)})
+        if path == "/api/lamp":
+            import smarthome
+            result = smarthome.handle_action(str(data.get("action", ""))[:20], data.get("value"))
+            return self._json(200, {"result": result, "lamp": smarthome.state()})
         if path == "/api/alarm":
             import alarms
             if str(data.get("action", "")) == "snooze":
@@ -471,7 +557,7 @@ class _Handler(BaseHTTPRequestHandler):
         pc_voice = self.headers.get("X-PC-Voice", "1") != "0"
         if not pc_voice:
             note_phone_voice()
-        return self._json(200, {"heard": heard, "reply": _command(heard, pc_voice)})
+        return self._json(200, {"heard": heard, "reply": _command(heard, pc_voice), "quiet": _answered_on_pc()})
 
     def _listen(self):
         """Hands-free mode: one phrase the phone heard by itself. Only phrases that call "Digidaw" are acted on
@@ -509,7 +595,7 @@ class _Handler(BaseHTTPRequestHandler):
             note_phone_voice()
         if what == "arm":                        # just "Digidaw": the next phrase is the command
             return self._json(200, {"armed": True, "loose": command == "loose", "heard": heard})
-        return self._json(200, {"heard": command, "reply": _command(command, pc_voice)})
+        return self._json(200, {"heard": command, "reply": _command(command, pc_voice), "quiet": _answered_on_pc()})
 
     def _stream_screen(self, width: int, fps: float):
         """The screen as a live MJPEG stream (one connection, a new frame whenever the screen changes, up to
@@ -527,15 +613,19 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             interval = 1.0 / max(1.0, min(fps, 15.0))
             last, last_sent, until = b"", 0.0, time.time() + STREAM_MAX_SECONDS
+            still_since = time.time()
             while time.time() < until and config.MOBILE_SCREEN:
                 started = time.time()
                 frame = _grim_jpeg(width)
+                if frame and frame != last:
+                    still_since = started
                 if frame and (frame != last or started - last_sent > 2.0):   # unchanged frames aren't resent
                     self.wfile.write(b"--ddwframe\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                      + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
                     self.wfile.flush()
                     last, last_sent = frame, started
-                time.sleep(max(0.0, interval - (time.time() - started)))
+                still = started - still_since > STILL_AFTER and time.time() - _streams["poke"] > STILL_AFTER
+                time.sleep(max(0.0, (STILL_INTERVAL if still else interval) - (time.time() - started)))
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError):
             pass                                 # the phone left the Layar tab
         finally:
@@ -643,24 +733,36 @@ def _echo(heard: str) -> bool:
     return False
 
 
+_reply_info = threading.local()
+
+
+def _answered_on_pc() -> bool:
+    """The last _command() on this thread was a sentence the PC's own microphone had already caught and answered out
+    loud: the phone shows the answer but doesn't say it again (the PC would hear it and answer its own words)."""
+    return bool(getattr(_reply_info, "quiet", False))
+
+
 def _command(text: str, pc_voice: bool = True) -> str:
     """Run a typed command like the HUD's text box and wait (up to 40 s) for Digidaw's answer.
     pc_voice=False: the PC stays quiet (the phone reads the answer out itself). A sentence the PC's own
     microphone also heard runs only once (core skips the later one and hands back the earlier answer)."""
     import hud_server
+    _reply_info.quiet = False
     text = text.strip()
     if not text or not hud_server._handlers.get("command"):
         return ""
-    sent = time.time()                     # history is a capped deque: find the answer by time, not by position
     done = hud_server._handlers["command"](text, "hp" if pc_voice else "hp-silent")
-    deadline = sent + config.COMMAND_TIMEOUT_SECONDS
-    # answer the phone as soon as the reply text exists; "done" only comes after the PC has finished speaking it
+    # (waiting in the queue behind a voice command counts too: Digidaw's limit only starts when it is processed)
+    deadline = time.time() + config.COMMAND_TIMEOUT_SECONDS + 20
+    # answer the phone as soon as the reply text exists; "done" only comes after the PC has finished speaking it.
+    # Only replies to THIS command: a voice command, "Sama-sama" or a reminder said meanwhile is not the answer.
     while time.time() < deadline:
         replies = [e.get("text", "") for e in list(events.history)
-                   if e.get("type") == "digidaw" and e.get("ts", 0) >= sent]
+                   if e.get("type") == "digidaw" and e.get("cmd") == getattr(done, "id", None)]
         if replies:
             return replies[-1]
         if hasattr(done, "is_set") and done.is_set():
+            _reply_info.quiet = getattr(done, "duplicate", "") == "pc"
             return getattr(done, "reply", "") or "Perintah dikirim."
         time.sleep(0.1)
     return "Perintah dikirim."
@@ -713,6 +815,7 @@ SCREEN_NOTICE_EVERY = 300
 def _screen_in_use(ip: str, what: str):
     """Make it visible on the PC that a phone is watching / controlling it (once per 5 minutes per phone)."""
     now = time.time()
+    _streams["poke"] = now                   # input from the phone: the live picture goes back to full speed
     with _lock:
         if now - _screen_notice.get(ip, 0) < SCREEN_NOTICE_EVERY:
             return
@@ -806,6 +909,21 @@ def _key(data: dict) -> str:
     return system_control.press_keys(combo) if combo else "tombol tidak dikenal"
 
 
+def _voice_pieces(text: str, sentence_split) -> list[str]:
+    """Sentences, and a long first one cut at its first comma: the first sound comes from the first piece."""
+    pieces = sentence_split(text) if len(text) > 110 else [text]
+    first = pieces[0]
+    if len(first) > 70:
+        cut = first.find(", ", 25)
+        if 0 < cut < len(first) - 15:
+            pieces[0:1] = [first[:cut + 1], first[cut + 2:]]
+        else:                                    # no comma: before a joining word ("... bumi | dan warna biru ...")
+            m = re.search(r"(?<=.{30}) (?=(?:sehingga|dan|karena|tetapi|tapi|lalu|kemudian|namun|yang) )", first)
+            if m and m.start() < len(first) - 15:
+                pieces[0:1] = [first[:m.start()], first[m.end():]]
+    return pieces
+
+
 def _voice_audio(text: str) -> tuple[bytes, str]:
     """Digidaw's own voice (Edge, or the local fallback) for the phone, so a reply sounds the same as on the PC."""
     import tts
@@ -839,8 +957,11 @@ def _recognize(data, prefer_wake: bool = False) -> str:
     """Google (Indonesian) first, Whisper on this PC as fallback. prefer_wake: among Google's alternatives take one
     that contains "Digidaw" (its top guess tends to "correct" the name to "digital")."""
     import speech_recognition as sr
+    import stt
     try:
-        result = sr.Recognizer().recognize_google(data, language=config.STT_LANGUAGE, show_all=True)
+        # the PC's kept-alive connection with its 7 s limit (a fresh Recognizer has no time limit at all: the phone
+        # once waited 15.7 s for "Digidaw, digidaw")
+        result = stt.stt_engine._google(data)
         options = [a.get("transcript", "") for a in result.get("alternative", [])] if isinstance(result, dict) else []
         if options:
             name = config.WAKE_WORDS[0].lower()
@@ -862,7 +983,9 @@ def _transcribe(audio: bytes) -> str:
 
 MAX_STREAMS = 2                 # live screen streams at once (each costs a little CPU on the PC)
 STREAM_MAX_SECONDS = 15 * 60    # a forgotten open tab doesn't stream forever
-_streams = {"count": 0}
+_streams = {"count": 0, "poke": 0.0}     # poke: last touchpad / keyboard input from a phone
+STILL_AFTER = 3.0           # the screen hasn't changed for this long (and no input): a still picture
+STILL_INTERVAL = 0.5        # ...then only 2 checks a second instead of 8 (every check runs grim: ~80 ms of CPU)
 _monitor = {"width": 0}
 
 

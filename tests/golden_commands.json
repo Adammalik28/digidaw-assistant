@@ -1,0 +1,1902 @@
+[
+{
+"said": "buka Mouse pa",
+"tool": "open_application",
+"args": {
+"name": "mousepad"
+}
+},
+{
+"said": "mousepad",
+"tool": "open_application",
+"args": {
+"name": "mousepad"
+}
+},
+{
+"said": "pindah ke wasit loss",
+"tool": "focus_window",
+"args": {
+"name": "wasit loss"
+}
+},
+{
+"said": "pindah ke wapsi",
+"tool": "focus_window",
+"args": {
+"name": "wapsi"
+}
+},
+{
+"said": "pindah ke WhatsApp",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "putar musik",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "putar musik YouTube",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "Buka Instagram",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "tutup Firefox",
+"tool": "close_application",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "Buka terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "Firefox",
+"tool": "open_application",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "tutup Brave",
+"tool": "close_application",
+"args": {
+"name": "brave"
+}
+},
+{
+"said": "tutup Chrome",
+"tool": "close_application",
+"args": {
+"name": "chrome"
+}
+},
+{
+"said": "buka Firefox",
+"tool": "open_application",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "putar Be My Baby",
+"tool": "play_youtube",
+"args": {
+"query": "be my baby",
+"mix": false
+}
+},
+{
+"said": "skip iklan",
+"tool": "media_control",
+"args": {
+"action": "skip_ad"
+}
+},
+{
+"said": "buka Ho",
+"tool": "show_hud",
+"args": {}
+},
+{
+"said": "buka tik",
+"tool": "open_website",
+"args": {
+"site": "tiktok"
+}
+},
+{
+"said": "buka Gemini",
+"tool": "open_website",
+"args": {
+"site": "gemini"
+}
+},
+{
+"said": "buka floating terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "buka 2 terminal",
+"tool": "open_many",
+"args": {
+"names": [
+"terminal",
+"terminal"
+]
+}
+},
+{
+"said": "pindah ke Fire",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "tutup tab Gemini",
+"tool": "close_tab",
+"args": {
+"name": "gemini"
+}
+},
+{
+"said": "pindah ke workspace 4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "jam",
+"tool": "get_time",
+"args": {}
+},
+{
+"said": "Putar lagu Be My Baby",
+"tool": "play_youtube",
+"args": {
+"query": "be my baby",
+"mix": false
+}
+},
+{
+"said": "pindah ke Word",
+"tool": "focus_window",
+"args": {
+"name": "word"
+}
+},
+{
+"said": "pindahkan Firefox ke workspace 4",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "4",
+"follow": false,
+"name": "firefox"
+}
+},
+{
+"said": "Cari YouTube",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "Cari YouTube di",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "buka Tik Tok",
+"tool": "open_website",
+"args": {
+"site": "tiktok"
+}
+},
+{
+"said": "putar musik di My Baby",
+"tool": "play_youtube",
+"args": {
+"query": "musik di my baby",
+"mix": false
+}
+},
+{
+"said": "buka mousepad",
+"tool": "open_application",
+"args": {
+"name": "mousepad"
+}
+},
+{
+"said": "pindah ke word PS4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "workspace 4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "Terminal dan File Explorer",
+"tool": "open_many",
+"args": {
+"names": [
+"terminal",
+"file manager"
+]
+}
+},
+{
+"said": "pindah ke works PS4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "pindah ke work space 4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "tik",
+"tool": "open_website",
+"args": {
+"site": "tiktok"
+}
+},
+{
+"said": "tutup semua tik to",
+"tool": "close_tab",
+"args": {
+"name": "tiktok"
+}
+},
+{
+"said": "atur volume di 20%",
+"tool": "set_volume",
+"args": {
+"level": 20
+}
+},
+{
+"said": "atur kecerahan di 10%",
+"tool": "set_brightness",
+"args": {
+"level": 10
+}
+},
+{
+"said": "Putar lagu",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka YouTube",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "putar Astaga bercanda",
+"tool": "play_youtube",
+"args": {
+"query": "astaga bercanda",
+"mix": false
+}
+},
+{
+"said": "buka Hud",
+"tool": "show_hud",
+"args": {}
+},
+{
+"said": "Buka tab YouTube",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "nonton Doraemon",
+"tool": "play_youtube",
+"args": {
+"query": "doraemon",
+"mix": false
+}
+},
+{
+"said": "tutup Fire",
+"tool": "close_application",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "buka Mouse",
+"tool": "open_application",
+"args": {
+"name": "mousepad"
+}
+},
+{
+"said": "tutup Firefox dan mosfet",
+"tool": "close_many",
+"args": {
+"names": [
+"firefox",
+"mosfet"
+]
+}
+},
+{
+"said": "screenshot layar",
+"tool": "take_screenshot",
+"args": {}
+},
+{
+"said": "Jam berapa sekarang",
+"tool": "get_time",
+"args": {}
+},
+{
+"said": "tutup web browser",
+"tool": "close_many",
+"args": {
+"names": [
+"browser"
+]
+}
+},
+{
+"said": "pindah ke word PS2 dan buka Firefox",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "pindah ke WordPress 4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "buka file mana",
+"tool": "open_application",
+"args": {
+"name": "file manager"
+}
+},
+{
+"said": "pindah ke Words PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "pindah ke workspace 2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "buka Note",
+"tool": "open_application",
+"args": {
+"name": "notepad"
+}
+},
+{
+"said": "Putar film Doraemon di YouTube",
+"tool": "play_youtube",
+"args": {
+"query": "film doraemon",
+"mix": false
+}
+},
+{
+"said": "Putar musik Do I Wanna Know",
+"tool": "play_youtube",
+"args": {
+"query": "musik do i wanna know",
+"mix": false
+}
+},
+{
+"said": "pindah ke WordPress 2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "ke for PS3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "Pindahkan aplikasi digital ke workspace 3",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "3",
+"follow": false,
+"name": "aplikasi digital"
+}
+},
+{
+"said": "buka Fire",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "pindahkan Firefox ke workspace 3",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "3",
+"follow": false,
+"name": "firefox"
+}
+},
+{
+"said": "pindah ke WordPress 3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "buka Notepad",
+"tool": "open_application",
+"args": {
+"name": "notepad"
+}
+},
+{
+"said": "buka telegram",
+"tool": "open_application",
+"args": {
+"name": "telegram"
+}
+},
+{
+"said": "tutup telegram",
+"tool": "close_application",
+"args": {
+"name": "telegram"
+}
+},
+{
+"said": "tutup terminal",
+"tool": "close_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "Buka terminal dan Terminal lagi",
+"tool": "open_many",
+"args": {
+"names": [
+"terminal",
+"terminal"
+]
+}
+},
+{
+"said": "refresh halaman",
+"tool": "navigate",
+"args": {
+"action": "refresh"
+}
+},
+{
+"said": "setel Fairy Tail",
+"tool": "play_youtube",
+"args": {
+"query": "fairy tail",
+"mix": false
+}
+},
+{
+"said": "Buka Instagram bidang",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "buka WhatsApp",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "buka WhatsApp lost",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "buka Firefox cari tik to",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "buka Chrome",
+"tool": "open_application",
+"args": {
+"name": "chrome"
+}
+},
+{
+"said": "Buka situs Claude",
+"tool": "open_website",
+"args": {
+"site": "claude"
+}
+},
+{
+"said": "pindahkan Firefox ke works PS4",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "4",
+"follow": false,
+"name": "firefox"
+}
+},
+{
+"said": "pindah ke Words PS3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "putar",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "lanjutkan musik",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka work space 2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "cuaca hari ini",
+"tool": "get_weather",
+"args": {}
+},
+{
+"said": "pindah ke Firefox",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "pindah ke Words PS4",
+"tool": "switch_workspace",
+"args": {
+"workspace": "4"
+}
+},
+{
+"said": "lanjutkan pemutaran YouTube",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "Putar YouTube",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka Hood",
+"tool": "show_hud",
+"args": {}
+},
+{
+"said": "putar musik selanjutnya",
+"tool": "media_control",
+"args": {
+"action": "next"
+}
+},
+{
+"said": "putar video",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka work PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "pindahkan Firefox ke work PS3",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "3",
+"follow": false,
+"name": "firefox"
+}
+},
+{
+"said": "ke Firefox",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "WhatsApp",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "pindah ke Android Studio",
+"tool": "focus_window",
+"args": {
+"name": "android studio"
+}
+},
+{
+"said": "putar musik tradisional",
+"tool": "play_youtube",
+"args": {
+"query": "musik tradisional",
+"mix": false
+}
+},
+{
+"said": "pindahkan WhatsApp ke workspace 1",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "1",
+"follow": false,
+"name": "whatsapp"
+}
+},
+{
+"said": "Instagram",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "buka Twitter",
+"tool": "open_website",
+"args": {
+"site": "twitter"
+}
+},
+{
+"said": "Buka Facebook",
+"tool": "open_website",
+"args": {
+"site": "facebook"
+}
+},
+{
+"said": "YouTube",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "pindah ke YouTube",
+"tool": "focus_window",
+"args": {
+"name": "youtube"
+}
+},
+{
+"said": "pindah ke works PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "pindahkan WhatsApp ke WordPress 1",
+"tool": "move_to_workspace",
+"args": {
+"workspace": "1",
+"follow": false,
+"name": "whatsapp"
+}
+},
+{
+"said": "berapa penggunaan ram saya",
+"tool": "get_system_status",
+"args": {}
+},
+{
+"said": "Buka chat GPT",
+"tool": "open_website",
+"args": {
+"site": "chatgpt"
+}
+},
+{
+"said": "pindah ke workspace 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "cari Instagram",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "IG",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "Buka Gmail",
+"tool": "open_website",
+"args": {
+"site": "gmail"
+}
+},
+{
+"said": "buka Claude",
+"tool": "open_website",
+"args": {
+"site": "claude"
+}
+},
+{
+"said": "pindah ke Words PS1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "buka file manager",
+"tool": "open_application",
+"args": {
+"name": "file manager"
+}
+},
+{
+"said": "tutup File Manager",
+"tool": "close_application",
+"args": {
+"name": "file manager"
+}
+},
+{
+"said": "work space 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "Tik Tok dan Instagram",
+"tool": "open_many",
+"args": {
+"names": [
+"tiktok",
+"instagram"
+]
+}
+},
+{
+"said": "Putar lagu Do I Wanna Know",
+"tool": "play_youtube",
+"args": {
+"query": "do i wanna know",
+"mix": false
+}
+},
+{
+"said": "buka github",
+"tool": "open_website",
+"args": {
+"site": "github"
+}
+},
+{
+"said": "cek penggunaan ram",
+"tool": "get_system_status",
+"args": {}
+},
+{
+"said": "pindah ke Instagram",
+"tool": "focus_window",
+"args": {
+"name": "instagram"
+}
+},
+{
+"said": "pindah ke git ha",
+"tool": "_ask",
+"args": {
+"options": [
+"Github"
+]
+}
+},
+{
+"said": "pindah ke github",
+"tool": "focus_window",
+"args": {
+"name": "github"
+}
+},
+{
+"said": "pindah ke chat cbt",
+"tool": "focus_window",
+"args": {
+"name": "chat cbt"
+}
+},
+{
+"said": "pindah ke word PS3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "refresh",
+"tool": "navigate",
+"args": {
+"action": "refresh"
+}
+},
+{
+"said": "pindah ke workspace 6",
+"tool": "switch_workspace",
+"args": {
+"workspace": "6"
+}
+},
+{
+"said": "Apakah besok hujan",
+"tool": "get_forecast",
+"args": {
+"when": "besok"
+}
+},
+{
+"said": "pindah ke World PS2",
+"tool": "focus_window",
+"args": {
+"name": "world ps2"
+}
+},
+{
+"said": "Buka file Explorer",
+"tool": "open_application",
+"args": {
+"name": "file explorer"
+}
+},
+{
+"said": "lagu apa ini",
+"tool": "now_playing",
+"args": {}
+},
+{
+"said": "Tutup WhatsApp",
+"tool": "close_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "buka Firefox putar musik Be My Baby",
+"tool": "focus_window",
+"args": {
+"name": "firefox"
+}
+},
+{
+"said": "putar musik Be My Baby",
+"tool": "play_youtube",
+"args": {
+"query": "musik be my baby",
+"mix": false
+}
+},
+{
+"said": "tutup Tik Tok",
+"tool": "close_tab",
+"args": {
+"name": "tiktok"
+}
+},
+{
+"said": "buka Firefox dan cari Instagram",
+"tool": "open_many",
+"args": {
+"names": [
+"firefox",
+"cari instagram"
+]
+}
+},
+{
+"said": "Putar lagu I was never there the weekend",
+"tool": "play_youtube",
+"args": {
+"query": "i was never there the weekend",
+"mix": false
+}
+},
+{
+"said": "status sistem",
+"tool": "get_system_status",
+"args": {}
+},
+{
+"said": "pause musik",
+"tool": "media_control",
+"args": {
+"action": "pause"
+}
+},
+{
+"said": "putar lagu be my baby the ronettes",
+"tool": "play_youtube",
+"args": {
+"query": "be my baby the ronettes",
+"mix": false
+}
+},
+{
+"said": "tutup Instagram",
+"tool": "close_tab",
+"args": {
+"name": "instagram"
+}
+},
+{
+"said": "house music",
+"tool": "play_youtube",
+"args": {
+"query": "house music",
+"mix": false
+}
+},
+{
+"said": "hari ini tanggal berapa",
+"tool": "get_date",
+"args": {}
+},
+{
+"said": "buka hot",
+"tool": "show_hud",
+"args": {}
+},
+{
+"said": "putar musik I was never there the weekend",
+"tool": "play_youtube",
+"args": {
+"query": "musik i was never there the weekend",
+"mix": false
+}
+},
+{
+"said": "Pause music",
+"tool": "media_control",
+"args": {
+"action": "pause"
+}
+},
+{
+"said": "Matikan musik",
+"tool": "media_control",
+"args": {
+"action": "pause"
+}
+},
+{
+"said": "musik",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka Gemi",
+"tool": "open_website",
+"args": {
+"site": "gemini"
+}
+},
+{
+"said": "buka github di Firefox",
+"tool": "open_website",
+"args": {
+"site": "github",
+"browser": "firefox"
+}
+},
+{
+"said": "putar musik Back to friend",
+"tool": "play_youtube",
+"args": {
+"query": "musik back to friend",
+"mix": false
+}
+},
+{
+"said": "buka termi",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "mainkan musik",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "butuh terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "pindah ke pantai",
+"tool": "focus_window",
+"args": {
+"name": "pantai"
+}
+},
+{
+"said": "putar musik Why you on call me when you hi",
+"tool": "play_youtube",
+"args": {
+"query": "musik why you on call me when you hi",
+"mix": false
+}
+},
+{
+"said": "naikkan volume ke 70",
+"tool": "set_volume",
+"args": {
+"level": 70
+}
+},
+{
+"said": "Matikan lagu",
+"tool": "media_control",
+"args": {
+"action": "pause"
+}
+},
+{
+"said": "putar musik always never there",
+"tool": "play_youtube",
+"args": {
+"query": "musik always never there",
+"mix": false
+}
+},
+{
+"said": "Putar lagu I was never there",
+"tool": "play_youtube",
+"args": {
+"query": "i was never there",
+"mix": false
+}
+},
+{
+"said": "pindah",
+"tool": "switch_workspace",
+"args": {
+"workspace": "next"
+}
+},
+{
+"said": "lanjut",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "pindah ke Wordpress",
+"tool": "focus_window",
+"args": {
+"name": "wordpress"
+}
+},
+{
+"said": "pindah ke WordPress 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "Putar lagu Always something",
+"tool": "play_youtube",
+"args": {
+"query": "always something",
+"mix": false
+}
+},
+{
+"said": "putar into you at by",
+"tool": "play_youtube",
+"args": {
+"query": "into you at by",
+"mix": false
+}
+},
+{
+"said": "naikkan volume 10% lagi",
+"tool": "volume_up",
+"args": {
+"amount": 10
+}
+},
+{
+"said": "Putar lagu konsumen cek",
+"tool": "play_youtube",
+"args": {
+"query": "konsumen cek",
+"mix": false
+}
+},
+{
+"said": "Putar lagu konsumen csat",
+"tool": "play_youtube",
+"args": {
+"query": "konsumen csat",
+"mix": false
+}
+},
+{
+"said": "Putar lagu konsumen dari CCT",
+"tool": "play_youtube",
+"args": {
+"query": "konsumen dari cct",
+"mix": false
+}
+},
+{
+"said": "Putar lagu konsumen",
+"tool": "play_youtube",
+"args": {
+"query": "konsumen",
+"mix": false
+}
+},
+{
+"said": "PUTAR LAGU CONSUME CHASEATE",
+"tool": "play_youtube",
+"args": {
+"query": "consume chaseate",
+"mix": false
+}
+},
+{
+"said": "Putar lagu santai Luffy",
+"tool": "play_youtube",
+"args": {
+"query": "santai luffy",
+"mix": false
+}
+},
+{
+"said": "putar musik fokus study",
+"tool": "play_youtube",
+"args": {
+"query": "musik fokus study",
+"mix": false
+}
+},
+{
+"said": "naikkan volume 20% lagi",
+"tool": "volume_up",
+"args": {
+"amount": 20
+}
+},
+{
+"said": "volume 10%",
+"tool": "set_volume",
+"args": {
+"level": 10
+}
+},
+{
+"said": "naikkan volume 50%",
+"tool": "volume_up",
+"args": {
+"amount": 50
+}
+},
+{
+"said": "kecerahan ke 10%",
+"tool": "set_brightness",
+"args": {
+"level": 10
+}
+},
+{
+"said": "putar musik top 10 lagu spotify",
+"tool": "play_youtube",
+"args": {
+"query": "musik top 10 lagu spotify",
+"mix": false
+}
+},
+{
+"said": "kecilkan volume 20%",
+"tool": "volume_down",
+"args": {
+"amount": 20
+}
+},
+{
+"said": "volume 35%",
+"tool": "set_volume",
+"args": {
+"level": 35
+}
+},
+{
+"said": "Buka Instagram BoBoiBoy",
+"tool": "open_website",
+"args": {
+"site": "instagram"
+}
+},
+{
+"said": "kecilkan volume ke 20%",
+"tool": "set_volume",
+"args": {
+"level": 20
+}
+},
+{
+"said": "YouTube YouTube YouTube",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "bukan terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "pindah ke word P1",
+"tool": "focus_window",
+"args": {
+"name": "word p1"
+}
+},
+{
+"said": "lanjutkan",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "Hidupkan musik",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "matikan",
+"tool": "media_control",
+"args": {
+"action": "pause"
+}
+},
+{
+"said": "pindah ke work PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "volume ke 50",
+"tool": "set_volume",
+"args": {
+"level": 50
+}
+},
+{
+"said": "Buka terminal dan WhatsApp",
+"tool": "open_many",
+"args": {
+"names": [
+"terminal",
+"whatsapp"
+]
+}
+},
+{
+"said": "putar musik fokus today",
+"tool": "play_youtube",
+"args": {
+"query": "musik fokus today",
+"mix": false
+}
+},
+{
+"said": "tutup Chrome YouTube",
+"tool": "close_tab",
+"args": {
+"name": "youtube"
+}
+},
+{
+"said": "tutup Notepad",
+"tool": "close_application",
+"args": {
+"name": "notepad"
+}
+},
+{
+"said": "Buka YouTube dan Tik Tok",
+"tool": "open_many",
+"args": {
+"names": [
+"youtube",
+"tiktok"
+]
+}
+},
+{
+"said": "ke WhatsApp",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "Putar lagu spotify Indonesia",
+"tool": "play_youtube",
+"args": {
+"query": "spotify indonesia",
+"mix": false
+}
+},
+{
+"said": "discord",
+"tool": "open_application",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "pindah keluar SP1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "pindah ke disco",
+"tool": "focus_window",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "buka Firefox dan Buka Instagram dan tiktok",
+"tool": "open_many",
+"args": {
+"names": [
+"firefox",
+"buka instagram",
+"tiktok"
+]
+}
+},
+{
+"said": "Putar lagu trust issue the weekend",
+"tool": "play_youtube",
+"args": {
+"query": "trust issue the weekend",
+"mix": false
+}
+},
+{
+"said": "atur volume ke 30",
+"tool": "set_volume",
+"args": {
+"level": 30
+}
+},
+{
+"said": "atur volume ke 50",
+"tool": "set_volume",
+"args": {
+"level": 50
+}
+},
+{
+"said": "tutup discord",
+"tool": "close_application",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "ke Terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "workspace 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "pindah ke word PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
+"said": "pindah kurs PS3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "Putar lagu Indonesia viral spotify",
+"tool": "play_youtube",
+"args": {
+"query": "indonesia viral spotify",
+"mix": false
+}
+},
+{
+"said": "untuk Firefox",
+"tool": "_ask",
+"args": {
+"options": [
+"Firefox"
+]
+}
+},
+{
+"said": "lagu workspace 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "pindah ke workspace",
+"tool": "focus_window",
+"args": {
+"name": "workspace"
+}
+},
+{
+"said": "buka discord",
+"tool": "open_application",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "pindah ke work space 1",
+"tool": "switch_workspace",
+"args": {
+"workspace": "1"
+}
+},
+{
+"said": "Buka Facebook gigi",
+"tool": "open_website",
+"args": {
+"site": "facebook"
+}
+},
+{
+"said": "buka file",
+"tool": "open_application",
+"args": {
+"name": "file manager"
+}
+},
+{
+"said": "tutup tik",
+"tool": "close_tab",
+"args": {
+"name": "tiktok"
+}
+},
+{
+"said": "putar musik I was never there",
+"tool": "play_youtube",
+"args": {
+"query": "musik i was never there",
+"mix": false
+}
+},
+{
+"said": "Buka YouTube itu cuma bisa jalan",
+"tool": "open_website",
+"args": {
+"site": "youtube"
+}
+},
+{
+"said": "Buka Instagram dan YouTube",
+"tool": "open_many",
+"args": {
+"names": [
+"instagram",
+"youtube"
+]
+}
+},
+{
+"said": "tutup vs chord",
+"tool": "_ask",
+"args": {
+"options": [
+"Discord"
+]
+}
+},
+{
+"said": "pindah ke works PS2 Nyanyi dong",
+"tool": "focus_window",
+"args": {
+"name": "works ps 2 nyanyi"
+}
+},
+{
+"said": "putar lagu. putar lagu. putar lagu",
+"tool": "media_control",
+"args": {
+"action": "play"
+}
+},
+{
+"said": "buka wa",
+"tool": "open_application",
+"args": {
+"name": "whatsapp"
+}
+},
+{
+"said": "putar musik I wish never that",
+"tool": "play_youtube",
+"args": {
+"query": "musik i wish never that",
+"mix": false
+}
+},
+{
+"said": "Buka Instagram dan tik",
+"tool": "open_many",
+"args": {
+"names": [
+"instagram",
+"tik"
+]
+}
+},
+{
+"said": "buka disco",
+"tool": "focus_window",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "ubah lampu ke merah",
+"tool": "lamp_color",
+"args": {
+"color": "merah",
+"name": "lampu"
+}
+},
+{
+"said": "ubah lampu ke biru",
+"tool": "lamp_color",
+"args": {
+"color": "biru",
+"name": "lampu"
+}
+},
+{
+"said": "Matikan lampu",
+"tool": "lamp_power",
+"args": {
+"on": false,
+"name": "lampu"
+}
+},
+{
+"said": "Hidupkan lampu",
+"tool": "lamp_power",
+"args": {
+"on": true,
+"name": "lampu"
+}
+},
+{
+"said": "ubah lampu Ke kuning",
+"tool": "lamp_color",
+"args": {
+"color": "kuning",
+"name": "lampu"
+}
+},
+{
+"said": "kamera",
+"tool": "open_application",
+"args": {
+"name": "kamera"
+}
+},
+{
+"said": "ubah lampu ke putih",
+"tool": "lamp_color",
+"args": {
+"color": "putih",
+"name": "lampu"
+}
+},
+{
+"said": "jual lampu ke biru",
+"tool": "lamp_color",
+"args": {
+"color": "biru",
+"name": "lampu"
+}
+},
+{
+"said": "lampu mode santai",
+"tool": "lamp_scene",
+"args": {
+"scene": "santai",
+"name": "lampu"
+}
+},
+{
+"said": "ubah lampu ke hijau",
+"tool": "lamp_color",
+"args": {
+"color": "hijau",
+"name": "lampu"
+}
+},
+{
+"said": "lagu Back to friend",
+"tool": "play_youtube",
+"args": {
+"query": "back to friend",
+"mix": false
+}
+},
+{
+"said": "buka kamera",
+"tool": "open_application",
+"args": {
+"name": "kamera"
+}
+},
+{
+"said": "ubah lampu Keputih",
+"tool": "lamp_color",
+"args": {
+"color": "putih",
+"name": "lampu"
+}
+},
+{
+"said": "ubah lampu ke warna merah",
+"tool": "lamp_color",
+"args": {
+"color": "merah",
+"name": "lampu"
+}
+},
+{
+"said": "pindah ke discord",
+"tool": "focus_window",
+"args": {
+"name": "discord"
+}
+},
+{
+"said": "bawa lampu Keputih",
+"tool": "lamp_color",
+"args": {
+"color": "putih",
+"name": "lampu"
+}
+},
+{
+"said": "File Manager",
+"tool": "open_application",
+"args": {
+"name": "file manager"
+}
+},
+{
+"said": "buka Firefox dan Buka Instagram",
+"tool": "open_many",
+"args": {
+"names": [
+"firefox",
+"buka instagram"
+]
+}
+},
+{
+"said": "Buka terminal Buka terminal",
+"tool": "open_application",
+"args": {
+"name": "terminal"
+}
+},
+{
+"said": "pindah ke work space 5",
+"tool": "switch_workspace",
+"args": {
+"workspace": "5"
+}
+},
+{
+"said": "pindah ke workspace 3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
+"said": "kenapa langit biru",
+"tool": null,
+"args": null
+},
+{
+"said": "buatkan pantun",
+"tool": null,
+"args": null
+},
+{
+"said": "harga bitcoin hari ini",
+"tool": null,
+"args": null
+},
+{
+"said": "siapa juara liga inggris musim lalu",
+"tool": null,
+"args": null
+},
+{
+"said": "berita terbaru tentang teknologi",
+"tool": null,
+"args": null
+},
+{
+"said": "buatkan saya cerita singkat",
+"tool": null,
+"args": null
+},
+{
+"said": "siapa anda",
+"tool": null,
+"args": null
+},
+{
+"said": "kucing mau makan apa",
+"tool": null,
+"args": null
+}
+]

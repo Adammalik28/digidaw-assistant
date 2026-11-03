@@ -2,11 +2,14 @@ import re
 import time
 import datetime
 import functools
+import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from rich.console import Console
 from rich.markup import escape
 
 import config
+import metrics
 import events
 import llm
 import memory
@@ -26,6 +29,12 @@ import agenda
 import mobile_server
 import notifications
 import gcal_sync
+import weather
+import smarthome
+import home_auto
+import watchers
+import daily
+import whatsapp
 import antigravity_analysis
 import habits
 import persona
@@ -85,6 +94,7 @@ def _logged(fn):
     """Wrap a skill so every tool call is shown on the console + HUD and its result recorded."""
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        _check_cancel()                  # the user was already told this command took too long: do nothing more
         arg_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
         console.print(f"[dim cyan]  ⚙ {fn.__name__}({arg_str})[/dim cyan]")
         events.emit("tool", name=fn.__name__, args={k: str(v)[:80] for k, v in kwargs.items()})
@@ -101,6 +111,7 @@ def _logged(fn):
         _calls_this_turn.append((fn.__name__, dict(kwargs), str(result)))
         try:
             habits.record(fn.__name__, kwargs, str(result))
+            daily.note_tool(fn.__name__)
         except Exception:
             pass
         return result
@@ -126,7 +137,7 @@ def self_check() -> dict:
     """One tiny request with exactly the setup every command uses (system prompt + all tools), so a broken
     tool, a rejected key or a missing connection shows up right away instead of at the first real command."""
     from google.genai import types
-    result = {"ok": False, "model": "", "ms": 0, "dropped": list(DROPPED_TOOLS), "reason": ""}
+    result = {"ok": False, "model": "", "ms": 0, "dropped": list(DROPPED_TOOLS), "reason": "", "kind": ""}
     try:
         client = llm.get_client()
     except Exception:
@@ -137,7 +148,9 @@ def self_check() -> dict:
         return result
     llm.mark_checking()
     tried = False
-    for model in llm.candidates()[:2]:
+    # every model, not only the first two: on a busy evening the two fastest both answered "high demand" while the
+    # others worked, and Digidaw announced the AI as unusable at every start
+    for model in llm.candidates():
         tried = True
         started = time.time()
         try:
@@ -155,6 +168,7 @@ def self_check() -> dict:
                 break
     llm.mark_failed(tried)
     result["reason"] = llm.short_reason()
+    result["kind"] = llm._last_error.get("kind", "") if tried else ""
     return result
 
 
@@ -193,7 +207,7 @@ def forget_correction(word: str) -> str:
 
 
 ALL_SKILLS = (sc.AI_TOOLS + media.AI_TOOLS + window_manager.AI_TOOLS + ai_skills.AI_TOOLS
-              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + notifications.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
+              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + notifications.AI_TOOLS + weather.AI_TOOLS + smarthome.AI_TOOLS + home_auto.AI_TOOLS + watchers.AI_TOOLS + daily.AI_TOOLS + whatsapp.AI_TOOLS + metrics.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
 def _usable(fn) -> bool:
     """Gemini must be able to build a schema from the function signature; one bad tool would make every
     AI request fail, so such a tool is left out (and reported) instead."""
@@ -214,16 +228,18 @@ TOOL_MAP = {f.__name__: f for f in TOOLS}
 # ─────────────────────────── Gemini agent ───────────────────────────
 
 def _system_prompt() -> str:
-    now = datetime.datetime.now()
-    prompt = config.SYSTEM_PROMPT + f"\nCurrent date/time: {sc.HARI[now.weekday()]}, {now:%d-%m-%Y %H:%M}."
+    """Only what rarely changes: Gemini reuses (caches) an unchanged prompt prefix, which is faster and saves quota.
+    The clock, the active window and the open windows go into each message instead (_dynamic_context)."""
+    prompt = config.SYSTEM_PROMPT
     prompt += (f"\nThe user's title is '{T}' (exactly this spelling and capitalisation; never Sir, Tuan, King or another "
                f"title). Use it sparingly, not in every reply.")
     prompt += ("\nCall yourself 'aku' and the user 'kamu' (close, friendly)." if config.ADDRESS_STYLE == "kamu"
                else "\nCall yourself 'saya' and the user 'Anda' (never 'aku/kamu'), relaxed and warm.")
-    try:
-        prompt += screen_context.prompt_hint()
-    except Exception:
-        pass
+    prompt += ("\nEach user message starts with a [Konteks: ...] line: the current date/time, the window the user is "
+               "looking at and, for window commands, the open windows. When they say 'ini' (this page/tab/text/link) "
+               "they mean the active window: use summarize_current_page, close_current_tab, save_current_link, "
+               "copy_current_link or get_selected_text. Use the open-window list to pick the right target (a site open "
+               "in a browser is closed with close_tab, an app with close_application).")
     if config.PROJECT_DIR:
         prompt += (f"\nThe user's focus project folder is: {config.PROJECT_DIR}. When they say 'project', "
                    "'proyek saya' or ask to find/create files without a location, it's this folder "
@@ -236,6 +252,49 @@ def _system_prompt() -> str:
     if facts and len(facts) <= memory.ALL_IN_PROMPT:
         prompt += "\nThings you remember about the user:\n" + "\n".join(f"- {f}" for f in facts)
     return prompt
+
+
+WINDOW_TALK_RE = re.compile(r"\b(?:buka|tutup|close|pindah|beralih|fokus|ke|kembali|balik|jendela|aplikasi|tab|minimize|"
+                            r"maximize|kecilkan|besarkan|workspace|layar|ini|itu)\b")
+
+
+def _windows_hint(limit: int = 8) -> str:
+    """'jendela terbuka: Firefox (TikTok - Make Your Day); Discord (Friends - Discord); Kitty (zsh)'."""
+    try:
+        import window_manager as wm
+        wins = wm.closable_windows()[:limit]
+    except Exception:
+        return ""
+    if not wins:
+        return "tidak ada jendela aplikasi yang terbuka"
+    parts = []
+    for w in wins:
+        label = wm._app_label(w)
+        title = re.sub(r"\s+[—–-]\s+(?:Mozilla Firefox|Google Chrome|Chromium|Brave|Discord)$", "", w["title"]).strip()[:45]
+        parts.append(f"{label} ({title})" if title and title.lower() != label.lower() else label)
+    return "jendela terbuka: " + "; ".join(parts)
+
+
+def _dynamic_context(text: str, windows: bool | None = None, active: bool = True) -> str:
+    """The changing facts for one message: time, active window, and the open windows for window commands.
+    active=False leaves the active window out unless the request points at it ("ini", "halaman ini"): the small
+    local model otherwise starts commenting on it ("Aku lihat jendela Waydroid aktif")."""
+    now = datetime.datetime.now()
+    part = "pagi" if 4 <= now.hour < 11 else "siang" if now.hour < 15 else "sore" if now.hour < 18 else "malam"
+    context = [f"sekarang {sc.HARI[now.weekday()]} {part}, {now:%d-%m-%Y %H:%M}"]
+    try:
+        w = screen_context.current() if active or DEICTIC_RE.search(_normalize(text)) else None
+        if w:
+            kind = f"tab {screen_context.BROWSERS[w['process'].lower()]}" if screen_context.is_browser(w) \
+                else w["process"].removesuffix(".exe")
+            context.append(f'jendela aktif: "{w["title"][:90]}" ({kind})')
+    except Exception:
+        pass
+    if windows if windows is not None else WINDOW_TALK_RE.search(_normalize(text)):
+        hint = _windows_hint()
+        if hint:
+            context.append(hint)
+    return "[Konteks: " + " | ".join(context) + "]"
 
 
 def _enrich_with_memory(message: str) -> str:
@@ -290,32 +349,226 @@ def _combine(results: list[str]) -> str:
     parts = []
     for r in (r.strip() for r in results):
         if r.startswith(safety.CONFIRMATION_TOKEN):
-            r = f"Apakah Anda yakin ingin {safety.pending_description()}, {T}? Jawab ya atau tidak."
+            r = safety.question()
         parts.append(r)
     # "A, Sir. B, Sir." -> "A. B, Sir."
     parts = [p.removesuffix(f", {T}.").rstrip(".") + "." for p in parts[:-1]] + parts[-1:]
     return " ".join(parts)
 
 
-def _run_turn(model: str, message: str, direct_ok: bool) -> str:
-    """One user turn with manual function calling. The history is only updated on success."""
+# ── a slow Google answer must not freeze Digidaw for 20-40 s ──
+HEDGE_AFTER = 4.0          # no answer yet after this many seconds: ask the next model too, take whichever is first
+FIRST_CALL_BUDGET = 12.0   # the first decision never waits longer than this (each model alone may take 20 s); for
+                           # online questions a search answered by the local model takes over (_local_search_answer)
+# A command that ran out of time must not open / close / type anything afterwards. Each command runs on its own
+# thread with its own number, so cancelling the late one never touches the next command.
+_command_local = threading.local()
+_command_ids = iter(range(1, 10**12))
+_current_command = 0
+_cancelled: set[int] = set()
+
+
+class Cancelled(Exception):
+    pass
+
+
+def cancel_current():
+    """The command took too long and the user was told so: stop it before it does anything else."""
+    _cancelled.add(_current_command)
+
+
+def _check_cancel():
+    if getattr(_command_local, "id", None) in _cancelled:
+        raise Cancelled("perintah dibatalkan karena terlalu lama")
+
+
+def _turn_contents(message: str) -> list:
+    from google.genai import types
+    return list(_history) + [types.Content(role="user", parts=[types.Part(text=message)])]
+
+
+# ── speaking an answer while it is being written (config.STREAM_REPLIES) ──
+# core gives each spoken command a tts.LiveSpeech; a question's answer is then streamed from Gemini and every finished
+# sentence is said at once, instead of waiting for the whole answer (a long one takes seconds longer to write).
+_live = None
+_voiced: set[int] = set()            # id() of responses whose text went to the live voice
+
+
+def set_live(live):
+    global _live
+    _live = live
+    _voiced.clear()
+
+
+class Superseded(Exception):
+    """Another model already started answering (and speaking): this one's answer isn't needed."""
+
+
+def _merge_stream(chunks: list):
+    """The chunks of a streamed answer as one response, the same as generate_content would give: the text pieces
+    joined (with the thought signature Gemini puts on the last one), function calls as they came."""
+    from google.genai import types
+    parts, finish = [], None
+    for chunk in chunks:
+        cand = chunk.candidates[0] if chunk.candidates else None
+        if cand is None:
+            continue
+        finish = cand.finish_reason or finish
+        for p in (cand.content.parts or []) if cand.content else []:
+            if p.function_call:
+                parts.append(p)
+            elif p.thought:
+                continue
+            elif p.text is not None or p.thought_signature:
+                last = parts[-1] if parts else None
+                if last is not None and not last.function_call and last.text is not None:
+                    parts[-1] = types.Part(text=(last.text or "") + (p.text or ""),
+                                           thought_signature=p.thought_signature or last.thought_signature)
+                else:
+                    parts.append(types.Part(text=p.text or "", thought_signature=p.thought_signature))
+    parts = [p for p in parts if p.function_call or p.text or p.thought_signature]
+    content = types.Content(role="model", parts=parts) if parts else None
+    return types.GenerateContentResponse(candidates=[types.Candidate(content=content, finish_reason=finish)])
+
+
+def _stream_generate(model: str, contents: list, gen_config, claim: dict | None = None):
+    """generate_content, streamed: the answer's text goes to the live voice while it arrives. With several models
+    racing (claim), only the first one to answer speaks; the others stop (Superseded)."""
+    live, mine, voiced = _live, claim is None, False
+    chunks = []
+    stream = llm.get_client().models.generate_content_stream(model=model, contents=contents, config=gen_config)
+    for chunk in stream:
+        chunks.append(chunk)
+        if not mine:
+            with claim["lock"]:
+                claim["owner"] = claim["owner"] or model
+                mine = claim["owner"] == model
+            if not mine:
+                raise Superseded(model)
+        cand = chunk.candidates[0] if chunk.candidates else None
+        if live is not None and cand is not None and cand.content:
+            delta = "".join(p.text for p in cand.content.parts or [] if p.text and not p.thought)
+            if delta:
+                live.feed(delta)
+                voiced = True
+    if voiced:
+        live.flush()
+    response = _merge_stream(chunks)
+    if voiced:
+        _voiced.add(id(response))
+    return response
+
+
+def _first_response(models: list[str], contents: list, stream: bool = False):
+    """The first model's answer; if Google is slow (nothing after HEDGE_AFTER s) the next model is asked as well and
+    the first answer wins. A model that fails at once (quota) is replaced at once. Returns (model, response).
+    stream: the answer is spoken while it is written (only the model that answers first speaks; its answer is then
+    the one used, however long the rest of it takes)."""
+    client = llm.get_client()
+    queue, pending = list(models), {}
+    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="gemini")
+    start, hedged, last_error = time.time(), False, None
+    key = llm.active_key()
+    claim = {"owner": None, "lock": threading.Lock()} if stream else None
+    backup = None                        # a finished answer from a model that isn't the one speaking
+
+    def launch() -> bool:
+        nonlocal key
+        if not queue and llm.key_count() > 1:
+            fresh = llm.candidates()         # every model of this key at its limit: another key may have room
+            if llm.active_key() != key:
+                key = llm.active_key()
+                queue.extend(fresh)
+        if not queue:
+            return False
+        model = queue.pop(0)
+        llm.record_call(model)
+        if stream:
+            pending[pool.submit(_stream_generate, model, contents, _generation_config(model), claim)] = model
+        else:
+            pending[pool.submit(client.models.generate_content, model=model, contents=contents,
+                                config=_generation_config(model))] = model
+        return True
+
+    def budget() -> float:               # an answer already being spoken may take as long as it needs to finish
+        return config.AI_TIMEOUT_SECONDS + 15 if claim and claim["owner"] else FIRST_CALL_BUDGET
+
+    try:
+        launch()
+        while pending and time.time() - start < budget():
+            _check_cancel()
+            done, _ = wait(list(pending), timeout=0.25, return_when=FIRST_COMPLETED)
+            if not done:
+                if not hedged and queue and time.time() - start >= HEDGE_AFTER:
+                    hedged = True
+                    console.print(f"[dim]  ↪ {', '.join(pending.values())} lambat, {queue[0]} ikut ditanya[/dim]")
+                    launch()
+                continue
+            for future in done:
+                model = pending.pop(future)
+                try:
+                    response = future.result()
+                    if not response.candidates or response.candidates[0].content is None:
+                        raise RuntimeError("respons kosong dari Gemini")
+                except Superseded:
+                    continue                     # the other model answered first and is speaking
+                except Exception as e:
+                    last_error = e
+                    console.print(f"[dim red]  [{model}] {escape(llm.report_error(model, e))}[/dim red]")
+                    if llm.classify(e) in llm.GLOBAL_FAILURES:
+                        raise
+                    if claim and claim["owner"] == model and backup:
+                        return backup            # the one speaking broke off: the other's finished answer
+                    if not pending:
+                        launch()                 # failed at once (quota, retired): the next model right away
+                    continue
+                if claim and claim["owner"] not in (None, model):
+                    backup = backup or (model, response)
+                    continue                     # the model that is speaking finishes its own answer
+                if hedged:
+                    console.print(f"[dim]  ↪ dijawab {model} ({time.time() - start:.1f} dtk)[/dim]")
+                return model, response
+        if backup:
+            return backup
+        if last_error and not pending:
+            raise last_error
+        raise TimeoutError(f"Gemini tidak menjawab dalam {FIRST_CALL_BUDGET:.0f} dtk")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)   # a late answer from the slower model is simply ignored
+
+
+def _run_turn(model: str, message: str, direct_ok: bool, first=None, stream: bool = False) -> str:
+    """One user turn with manual function calling. The history is only updated on success.
+    first: the model's answer to the opening request when _first_response already got it.
+    stream: the answer is spoken while it is written (tts.LiveSpeech)."""
     from google.genai import types
     client = llm.get_client()
     gen_config = _generation_config(model)
-    contents = list(_history) + [types.Content(role="user", parts=[types.Part(text=message)])]
-    for _ in range(config.MAX_TOOL_CALLS):
-        llm.record_call(model)
-        response = client.models.generate_content(model=model, contents=contents, config=gen_config)
+    contents = _turn_contents(message)
+    for step in range(config.MAX_TOOL_CALLS):
+        _check_cancel()
+        if step == 0 and first is not None:
+            response = first
+        else:
+            llm.record_call(model)
+            if stream and _live is not None:
+                response = _stream_generate(model, contents, gen_config)
+            else:
+                response = client.models.generate_content(model=model, contents=contents, config=gen_config)
         if not response.candidates or response.candidates[0].content is None:
             raise RuntimeError("respons kosong dari Gemini")
         contents.append(response.candidates[0].content)
         calls = response.function_calls or []
         if not calls:
             _commit(contents)
-            return llm.clean(response.text)
+            reply = llm.clean(response.text)
+            if _live is not None and id(response) in _voiced:
+                _live.covered_text = reply       # said already, while it was written
+            return reply
 
         results = []
         for call in calls:
+            _check_cancel()                      # out of time: no action may happen after the user was told so
             fn = TOOL_MAP.get(call.name)
             if call.name in ("close_application", "kill_process") and TAB_WORD.search(_user_text):
                 results.append("DITOLAK: user meminta menutup sebuah TAB, bukan seluruh aplikasi/browser. "
@@ -374,16 +627,33 @@ def ask_agent(text: str) -> str | None:
         message = "[Catatan sistem: " + " | ".join(_system_notes[-6:]) + "]\n" + text
         _system_notes.clear()
     message = _enrich_with_memory(message)
+    message = _dynamic_context(text) + "\n" + message
     direct_ok = not QUESTION_RE.search(text)
+    # a question's answer is spoken while it is written; an action's reply is the tool's own short result
+    stream = _live is not None and not direct_ok and config.STREAM_REPLIES
 
-    # always start from the fastest model that is available right now (never "sticks" to a slow one)
-    tried, slow_failures = False, 0
-    for model in llm.candidates():
-        tried = True
+    # always start from the fastest model that is available right now (never "sticks" to a slow one); a slow first
+    # answer is hedged with the next model (_first_response) instead of waiting 20 s per model
+    models = llm.candidates()
+    tried, slow_failures, first, first_model = bool(models), 0, None, None
+    if models:
+        try:
+            first_model, first = _first_response(models, _turn_contents(message), stream=stream)
+            models = [first_model] + [m for m in models if m != first_model]
+        except Cancelled:
+            return None
+        except Exception as e:
+            if not isinstance(e, TimeoutError):
+                console.print(f"[dim red]  [Gemini] {escape(str(e)[:120])}[/dim red]")
+            models = []
+    for model in models:
         _tool_results.clear()
         had_pending = safety.has_pending()
         try:
-            reply = _run_turn(model, message, direct_ok)
+            reply = _run_turn(model, message, direct_ok, first if model == first_model else None, stream=stream)
+            first = None
+        except Cancelled:
+            return _combine(_tool_results[-1:]) if _tool_results else None
         except Exception as e:
             console.print(f"[dim red]  [{model}] {escape(llm.report_error(model, e))}[/dim red]")
             if _tool_results:  # a skill already ran; don't repeat it via fallback
@@ -396,15 +666,17 @@ def ask_agent(text: str) -> str | None:
                 break          # no internet / bad key / a bug: the next model would fail the same way
             if kind == "busy":
                 slow_failures += 1
-                if slow_failures >= 3:
+                if slow_failures >= 2:
                     break      # Google is slow right now: don't make the user wait for every model
             continue           # quota / retired model: the next one answers immediately
         llm.mark_ok(model)
 
         if safety.has_pending() and not had_pending and "?" not in reply:
-            reply = f"Apakah Anda yakin ingin {safety.pending_description()}, {T}? Jawab ya atau tidak."
+            reply = safety.question()
         if not reply:
             reply = _combine(_tool_results[-1:]) if _tool_results else f"Selesai, {T}."
+        if _live is not None and getattr(_live, "covered_text", None) == reply:
+            _live.covered = True                 # core must not say it a second time
         return reply
 
     llm.mark_failed(tried)
@@ -423,15 +695,18 @@ LOCAL_TOOL_NAMES = [
     "volume_mute", "set_brightness", "take_screenshot", "type_text", "press_keys", "write_note", "read_last_note",
     "set_timer", "set_alarm", "set_reminder_at", "list_timers", "cancel_timers", "get_time", "get_date",
     "add_event", "list_events", "delete_event",
-    "get_weather", "get_system_status", "open_folder", "open_file", "find_files", "remember", "recall_memories",
+    "get_weather", "get_forecast", "get_system_status", "get_temperature", "open_folder",
+    "lamp_power", "lamp_brightness", "lamp_color", "lamp_status", "open_file", "find_files", "remember", "recall_memories",
     "learned_habits", "lock_workstation", "shutdown_pc", "restart_pc", "sleep_pc", "google_search",
-    "read_notifications",
+    "read_notifications", "reply_message", "lamp_scene", "sun_today", "watch_for", "list_watches", "cancel_watch", "daily_recap",
+    "screen_time", "performance_report",
 ]
 # words that mean the answer has to come from the internet, the screen, a document or a big Gemini skill
 ONLINE_TOPIC_RE = re.compile(
     r"\b(?:berita|news|headline|harga|kurs|nilai tukar|saham|bitcoin|crypto|kripto|ihsg|skor|klasemen|"
     r"hasil (?:pertandingan|pemilu|liga)|jadwal (?:pertandingan|tayang|rilis|kereta|pesawat|sholat|shalat)|"
     r"trending|viral|gempa|banjir|cari(?:kan)? (?:di |informasi |info )?(?:internet|google|web|online)|"
+    r"juara|pemenang|siapa yang menang|musim (?:ini|lalu|kemarin)|tahun lalu|bulan lalu|minggu lalu|"
     r"googling|browsing|search|cek (?:di )?internet|link|website (?:resmi|untuk))\b")
 RECENT_RE = re.compile(r"\b(?:terbaru|terkini|hari ini|kemarin|semalam|minggu ini|bulan ini|tahun ini|barusan|"
                        r"sekarang|saat ini|update|20[2-3]\d)\b")
@@ -482,6 +757,8 @@ ACTION_VERB_RE = re.compile(
     r"^(?:tolong |coba |bisa |bisakah |mohon |dong )?(?:buka|bukakan|tutup|nyalakan|hidupkan|matikan|aktifkan|nonaktifkan|"
     r"putar|putarkan|setel|mainkan|jeda|pause|lanjutkan|hentikan|stop|kecilkan|besarkan|naikkan|turunkan|keraskan|"
     r"pelankan|atur|ubah|ganti|rubah|jalankan|pindah|pindahkan|kirim|ketik|ketikkan|tekan|klik|pencet|kunci|minimize|"
+    r"balas|bales|balasin|balaskan|jawab|jawabin|bilang ke|bilangin|sampaikan|kabari|kabarin|berikan jawaban|"
+    r"beri jawaban|kasih jawaban|"
     r"maximize|nonton|tonton|restart|reboot|shutdown|kembali ke|balik ke|ingat|ingatkan|ingetin|ingatin|catat|catatkan|"
     r"sembunyikan|tampilkan|perbesar|perkecil|redupkan|terangkan|ingatkan|bangunkan|hapus|simpan|salin|tangkap|ambil)\b")
 # "Saya sudah buat puisi dan masukkan ke editor" / "Saya buka tab YouTube" / "sudah saya scan": a claimed deed
@@ -513,6 +790,11 @@ def ask_online_ai(reason: str) -> str:
     return "ESCALATE"
 
 
+MULTI_ACTION_RE = re.compile(r"(?:^|\b(?:dan|lalu|terus|kemudian|habis itu|setelah itu|sambil)\s+|,\s*)"
+                             r"(?:buka|tutup|putar|putarkan|ketik|ketikkan|cari|carikan|catat|tulis|kirim|setel|"
+                             r"atur|matikan|nyalakan|pindah|pindahkan|simpan|ingatkan)\b")
+
+
 def gemini_reason(text: str) -> str:
     """Why this request should skip the local model ('' = Qwen answers it). Instant keyword check."""
     cmd = _normalize(text)
@@ -524,6 +806,8 @@ def gemini_reason(text: str) -> str:
         return "data terbaru"   # "siapa juara liga sekarang" — but "jam berapa sekarang" is local
     if COMPLEX_RE.search(cmd):
         return "pertanyaan kompleks"
+    if len(MULTI_ACTION_RE.findall(cmd)) >= 2:
+        return "beberapa perintah sekaligus"
     words = len(cmd.split())
     if words > 30 or (words > 14 and len(ASKING_RE.findall(cmd)) >= 3):
         return "pertanyaan panjang"   # several questions in one go
@@ -539,7 +823,7 @@ def needs_gemini(text: str) -> bool:
 LOCAL_TOOL_GROUPS = [
     (r"buka|jalankan|open|tutup|close|keluar dari|aplikasi|app|situs|website|web", [
         "open_application", "open_many", "open_website", "close_application", "close_many", "focus_window"]),
-    (r"jendela|window|minimi|maksimal|maximi|kecilkan jendela|kiri|kanan|pindah|workspace|ruang kerja|desktop", [
+    (r"^ke |kembali ke|balik ke|beralih|fokus|jendela|window|minimi|maksimal|maximi|kecilkan jendela|kiri|kanan|pindah|workspace|ruang kerja|desktop", [
         "window_action", "focus_window", "list_windows", "switch_workspace", "move_to_workspace"]),
     (r"tab|halaman|scroll|gulir|refresh|muat ulang|kembali|mundur", [
         "close_tab", "switch_tab", "close_current_tab", "navigate"]),
@@ -554,9 +838,17 @@ LOCAL_TOOL_GROUPS = [
         "set_timer", "set_alarm", "set_reminder_at", "list_timers", "cancel_timers"]),
     (r"acara|agenda|jadwal|ulang ?tahun|ultah|tanggal|rapat|meeting|kondangan|ujian|wisuda|arisan|janji|deadline", [
         "add_event", "list_events", "delete_event"]),
-    (r"status|baterai|batre|cpu|ram|memori|sistem|laptop|komputer|pc", ["get_system_status"]),
-    (r"cuaca|hujan|panas|suhu|dingin|cerah|weather", ["get_weather"]),
+    (r"status|baterai|batre|cpu|ram|memori|sistem|laptop|komputer|pc|suhu|panas|kipas|temperatur|gpu", [
+        "get_system_status", "get_temperature"]),
+    (r"cuaca|hujan|panas|suhu|dingin|cerah|weather|besok|lusa|prakiraan|ramalan", ["get_weather", "get_forecast"]),
+    (r"lampu|lamp|suasana", ["lamp_power", "lamp_brightness", "lamp_color", "lamp_scene", "lamp_status"]),
+    (r"matahari|terbenam|terbit|senja", ["sun_today"]),
+    (r"kabari|kabarin|beri ?tahu|kasih ?tahu|pantau|awasi", ["watch_for", "list_watches", "cancel_watch"]),
+    (r"rangkuman|rekap|ringkasan hari|hari ini ngapain|screen time|waktu layar|di depan laptop", [
+        "daily_recap", "screen_time"]),
+    (r"kinerja|performa|seberapa (?:bagus|baik|cepat)", ["performance_report"]),
     (r"pesan|chat|notif|notifikasi|whatsapp|telegram|email|surel", ["read_notifications"]),
+    (r"balas|bales|kirim (?:pesan|wa|whatsapp)", ["reply_message"]),
     (r"file|berkas|folder|direktori|dokumen|unduhan|download", ["open_folder", "open_file", "find_files"]),
     (r"ketik|ketikkan|tekan|shortcut|tombol|enter", ["type_text", "press_keys"]),
     (r"screenshot|tangkap layar|tangkapan layar", ["take_screenshot"]),
@@ -597,10 +889,8 @@ def _local_tools(text: str = "", offline: bool = False) -> list[dict] | None:
     if _last_action and time.time() - _last_action.get("at", 0) < CORRECTION_WINDOW:
         names += [n for n, _, _ in _last_action["calls"]]
     names += ALWAYS_LOCAL_TOOLS
-    seen = []
-    for n in names:
-        if n in LOCAL_TOOL_NAMES and n in TOOL_MAP and n not in seen:
-            seen.append(n)
+    wanted = set(names)
+    seen = [n for n in LOCAL_TOOL_NAMES if n in wanted and n in TOOL_MAP]     # one fixed order: a stable prompt prefix
     return [_schema(n) for n in seen]
 
 
@@ -612,7 +902,9 @@ def _local_system_prompt(offline: bool) -> str:
     import random
     hour = datetime.datetime.now().hour
     part = "pagi" if 4 <= hour < 11 else "siang" if hour < 15 else "sore" if hour < 18 else "malam"
-    examples = "\n".join(f"User: {q} → {random.choice(answers)}".replace("{part}", part)
+    # the same examples for the whole part of the day: an unchanged prompt is reused by Ollama (~1 s saved per request)
+    rng = random.Random(f"{datetime.date.today()}-{part}")
+    examples = "\n".join(f"User: {q} → {rng.choice(answers)}".replace("{part}", part)
                          for q, answers in config.LOCAL_TONE_EXAMPLES.items())
     prompt = config.LOCAL_SYSTEM_PROMPT.format(title=T, pronouns=pronouns, examples=examples)
     if offline:
@@ -669,16 +961,9 @@ def ask_local(text: str, offline: bool = False) -> str | None:
     messages = [{"role": "system", "content": _local_system_prompt(offline)}]
     for turn in _dialog[-DIALOG_TURNS:]:
         messages += [{"role": "user", "content": turn["user"][:300]}, {"role": "assistant", "content": turn["reply"][:300]}]
-    now = datetime.datetime.now()
-    part = "pagi" if 4 <= now.hour < 11 else "siang" if now.hour < 15 else "sore" if now.hour < 18 else "malam"
-    context = [f"sekarang {sc.HARI[now.weekday()]} {part}, {now:%d-%m-%Y %H:%M}"]
-    if DEICTIC_RE.search(_normalize(text)):         # "tutup ini", "rangkum halaman ini": then the active window matters
-        try:
-            context.append(screen_context.prompt_hint().strip())
-        except Exception:
-            pass
-    context += _system_notes[-4:]
-    messages.append({"role": "user", "content": "[Konteks: " + " | ".join(c for c in context if c) + "]\n" + text})
+    context = _dynamic_context(text, active=False)
+    notes = " | ".join(_system_notes[-4:])
+    messages.append({"role": "user", "content": context + (f"\n[Catatan: {notes}]" if notes else "") + "\n" + text})
     tools = _local_tools(text, offline)
     if tools is None:
         console.print("[dim]  ↪ perintah di luar kemampuan otak lokal, diteruskan ke Gemini[/dim]")
@@ -708,6 +993,7 @@ def ask_local(text: str, offline: bool = False) -> str | None:
                         messages += [{"role": "assistant", "content": reply}, {"role": "user", "content": NUDGE}]
                         continue
                     console.print("[dim]  ↪ otak lokal mengaku beraksi tanpa tool, diteruskan ke Gemini[/dim]")
+                    metrics.count("eskalasi_lokal")
                     return None
                 if not offline and not ran and config.BRAIN_MODE == "hybrid" and LOCAL_UNSURE_RE.search(reply):
                     console.print("[dim]  ↪ otak lokal ragu, diteruskan ke Gemini[/dim]")
@@ -722,6 +1008,7 @@ def ask_local(text: str, offline: bool = False) -> str | None:
             messages.append({"role": "assistant", "content": msg.get("content", ""), "tool_calls": calls})
             results = []
             for call in calls:
+                _check_cancel()
                 name = call["function"]["name"]
                 fn = TOOL_MAP.get(name) if name in LOCAL_TOOL_NAMES else None
                 if not fn:
@@ -733,11 +1020,13 @@ def ask_local(text: str, offline: bool = False) -> str | None:
             ran += results
             if safety.has_pending():
                 _brain_used = "local"
-                return f"Apakah Anda yakin ingin {safety.pending_description()}, {T}? Jawab ya atau tidak."
+                return safety.question()
             if direct_ok and not any(c["function"]["name"] in NEEDS_REPLY_TOOLS for c in calls):
                 _brain_used = "local"
                 return _combine(results)
         _brain_used = "local"
+        return _combine(ran[-1:]) if ran else None
+    except Cancelled:
         return _combine(ran[-1:]) if ran else None
     except Exception as e:
         console.print(f"[dim red]  [lokal {config.LOCAL_MODEL}] {escape(str(e)[:120])}[/dim red]")
@@ -746,11 +1035,67 @@ def ask_local(text: str, offline: bool = False) -> str | None:
         return _combine(ran[-1:]) if ran else None     # a skill already ran: never run it twice via Gemini
 
 
+# a scrap of speech with no request in it ("dan tik", "this", "yang itu tadi") — misheard; ask instead of guessing
+FRAGMENT_RE = re.compile(r"(?:dan|sama|terus|lalu|atau|tapi|trus|this|that|the|a|um|eh|hmm|anu)(?: \S{1,12})?")
+
+
+# short questions about one current fact: a web search answered by the local model takes ~2.5 s (Gemini 5-15 s)
+QUICK_FACT_RE = re.compile(r"\b(?:harga|kurs|nilai tukar|skor|klasemen|hasil pertandingan|jadwal (?:sholat|shalat|imsak)|"
+                           r"hasil (?:liga|pertandingan)|bitcoin|emas|saham|juara|pemenang)\b")
+NOT_FOUND_RE = re.compile(r"belum ketemu|tidak (?:menyebutkan|ditemukan|ada informasi)|tidak memuat", re.IGNORECASE)
+
+
+_search_answers: dict[str, tuple[float, str]] = {}     # the same question again within a minute: no second search
+
+
+def _local_search_answer(text: str) -> str | None:
+    """Gemini is down or too slow for a question about current facts: search the web here (~1 s) and let the local
+    model answer from the results — never from its own (outdated) memory, which only makes numbers up."""
+    global _brain_used
+    key = _normalize(text)
+    cached = _search_answers.get(key)
+    if cached and time.time() - cached[0] < 60:
+        _brain_used = "local"
+        return cached[1]
+    if not local_llm.available():
+        return None
+    try:
+        results = ai_skills.web_search(text)
+    except Exception:
+        return None
+    if results.startswith("Pencarian untuk"):          # nothing found / no internet
+        return None
+    prompt = (f"{_dynamic_context(text, active=False)}\n[Hasil pencarian internet]\n{results[:3500]}\n\n"
+              f"Jawab pertanyaan user HANYA dari hasil pencarian di atas, 1-2 kalimat lisan. Sebut angka/fakta terbaru "
+              f"beserta sumbernya. Jika hasil di atas tidak memuat jawabannya, katakan belum ketemu; jangan menebak.\n"
+              f"Pertanyaan: {text}")
+    try:
+        msg = local_llm.chat([{"role": "system", "content": _local_system_prompt(False)},
+                              {"role": "user", "content": prompt}], None, max_tokens=200)
+    except Exception:
+        return None
+    reply = EMOJI_RE.sub("", msg.get("content", "")).strip()
+    if reply:
+        _brain_used = "local"
+        _search_answers[key] = (time.time(), reply)
+        console.print("[dim]  ↪ dijawab otak lokal dari hasil pencarian web[/dim]")
+    return reply or None
+
+
 def _think(text: str) -> str | None:
     """Pick the brain for a request that isn't a simple fast command."""
     global _brain_used
     mode = config.BRAIN_MODE
+    cmd = _normalize(text)
+    if FRAGMENT_RE.fullmatch(cmd) and not (_dialog and _dialog[-1]["reply"].rstrip().endswith("?")):
+        _brain_used = "fast"
+        return f"Maaf {T}, sepertinya kepotong. Maksudnya apa?"
     reason = gemini_reason(text)
+    if mode == "hybrid" and reason in ("butuh internet", "data terbaru") and QUICK_FACT_RE.search(cmd) \
+            and len(cmd.split()) <= 12 and not ACTION_VERB_RE.search(cmd):
+        reply = _local_search_answer(text)             # "harga emas hari ini": searched + answered here, ~2.5 s
+        if reply and not NOT_FOUND_RE.search(reply):
+            return reply
     if mode != "gemini" and not reason:
         reply = ask_local(text)
         if reply:
@@ -765,6 +1110,12 @@ def _think(text: str) -> str | None:
     if reply:
         _brain_used = "gemini"
         return reply
+    if reason in ("butuh internet", "data terbaru"):
+        reply = _local_search_answer(text)          # current facts: from a real search, never made up
+        if reply:
+            return reply
+        return (f"Maaf {T}, AI online sedang lambat dan pencarian juga belum berhasil, jadi informasi terbarunya belum "
+                f"bisa saya cek. Coba tanya lagi sebentar lagi.")
     if mode != "gemini" or local_llm.available():
         reply = ask_local(text, offline=True)     # Gemini is down: the local model answers what it can
         if reply:
@@ -839,7 +1190,8 @@ def _open_many(target: str):
     names = []
     for part in parts:
         if _open_known(part, single=True):
-            names.append(part)
+            joined = part.replace(" ", "")
+            names.append(joined if joined in sc.WEBSITES else part)     # "tik tok" -> tiktok (not a Google search)
             continue
         words = part.split()            # commas are gone after _normalize: "terminal mousepad"
         if len(words) < 2 or not all(_open_known(w, single=True) for w in words):
@@ -858,7 +1210,7 @@ def _open_known(target: str, single: bool = False):
             return many
     site = re.fullmatch(r"(?:situs|website|web|laman|halaman) (.+)", target)
     if site:
-        target = site.group(1)          # "situs lms darmajaya" -> Gemini knows the address better
+        target = site.group(1)          # "situs lms kampus" -> Gemini knows the address better
         if not (target in sc.WEBSITES or re.fullmatch(r"[\w-]+(?:\.[\w-]+)+(?:/\S*)?", target)):
             return None
     drive = re.fullmatch(r"(?:drive|disk|local disk|partisi) ?([a-z])(?::)?|([a-z]):", target)
@@ -880,11 +1232,14 @@ def _open_known(target: str, single: bool = False):
         return "open_website", {"site": prefixed[0]}      # "buka tik" (cut off) -> tiktok
     if sc._start_apps_cache and len(target) >= 3 and sc._find_start_app(target):
         return "open_application", {"name": target}      # any installed app (list already loaded)
-    return None
+    # misheard / cut off ("termi", "mouse pa", "ig"): the resolver; inside a list ("x dan y") only a sure match counts
+    return _resolved("open", target, sure_only=single)
 
 
 def _close_known(target: str, single: bool = False):
     target = target.strip()
+    if re.match(r"semua (?!aplikasi|jendela|program|app|window|tab\b)\S", target):
+        target = target[6:]                      # "tutup semua tik to": every TikTok tab / window = close TikTok
     if re.fullmatch(r"(?:web |semua )?browser(?:nya)?|peramban", target):
         return "close_many", {"names": ["browser"]}
     if not single and OPEN_MANY_SPLIT.search(target):   # "tutup firefox dan mousepad"
@@ -897,23 +1252,135 @@ def _close_known(target: str, single: bool = False):
         return "close_application", {"name": target}
     if len(target) >= 3 and not re.search(r"\b(?:semua|tab|ini|itu|jendela)\b", target) and sc._matching_processes(target):
         return "close_application", {"name": target}      # a running app, e.g. "tutup teamviewer"
-    if len(target) >= 3 and not re.search(r"\b(?:semua|tab|ini|itu|jendela)\b", target):
-        import difflib
-        import window_manager
-        running = {w["process"].lower().removesuffix(".exe"): w["process"] for w in window_manager._windows()
-                   if not window_manager._is_digidaw(w)}
-        key = target.replace(" ", "")
-        close = difflib.get_close_matches(key, list(running), n=1, cutoff=0.6) or \
-            difflib.get_close_matches(key, [r for r in running if r[:2] == key[:2]], n=1, cutoff=0.5)
-        if close:                                          # misheard: "tutup nope" -> notepad
-            return "close_application", {"name": close[0]}
+    if len(target) >= 2 and not re.search(r"\b(?:semua|tab|ini|itu|jendela)\b", target):
+        # misheard: "tutup file" -> File manager (not Firefox), "tutup tito" -> the TikTok tab; only what is open
+        return _resolved("close", target, sure_only=single)
     return None
 
 
+# ── names the lists don't know: the resolver ("buka termi", "ke disco", "tutup tito") ──
+_pending_pick: dict = {}       # {"heard", "purpose", "options": [(label, key, (tool, kwargs))], "at"}: "Maksudnya X?"
+PICK_SECONDS = 40
+PICK_VERB = {"open": "buka", "close": "tutup", "focus": "pindah ke"}
+
+
+def _is_open(m) -> bool:
+    """For "tutup ...": is this candidate actually open right now?"""
+    if m.kind == "window":
+        return True
+    if m.kind == "site":
+        try:
+            import screen_context
+            return bool(screen_context._browser_windows())
+        except Exception:
+            return False
+    try:
+        import window_manager
+        if any(w["process"].lower() == m.target for w in window_manager.closable_windows()):
+            return True
+    except Exception:
+        pass
+    return bool(sc._matching_processes(m.key))
+
+
+def _action_for(m, purpose: str):
+    if purpose == "close":
+        return ("close_tab", {"name": m.key}) if m.kind == "site" else ("close_application", {"name": m.key})
+    if purpose == "focus" or m.kind == "window":          # already open: bring it to the front
+        if m.kind == "app":
+            return "open_application", {"name": m.key}     # "ke telegram" while it isn't open: open it
+        return "focus_window", {"name": m.key}
+    return ("open_website", {"site": m.key}) if m.kind == "site" else ("open_application", {"name": m.key})
+
+
+def _resolved(purpose: str, heard: str, sure_only: bool = False):
+    """(tool, kwargs) for a sure match, ("_ask", {...}) to ask "Maksudnya X?", or None (the AI decides)."""
+    import resolver
+    kinds = {"open": ("app", "site", "window"), "close": ("window", "app", "site"),
+             "focus": ("window", "site", "app")}[purpose]
+    verdict, matches = resolver.resolve(heard, kinds, keep=_is_open if purpose == "close" else None,
+                                        sure_only=sure_only)
+    if verdict == "sure":
+        return _action_for(matches[0], purpose)
+    if verdict == "ask":
+        return "_ask", {"heard": heard, "purpose": purpose,
+                        "options": [(m.label, m.key, _action_for(m, purpose)) for m in matches]}
+    return None
+
+
+def _ask_close(target: str):
+    import resolver
+    verdict, matches = resolver.resolve(target, ("window", "app", "site"), keep=_is_open, sure_only=True)
+    if verdict != "sure":
+        return None
+    m = matches[0]
+    return "_ask", {"heard": target, "purpose": "close", "options": [(m.label, m.key, _action_for(m, "close"))]}
+
+
+def _focus_known(target: str, raw_fallback: bool = True):
+    target = re.sub(r"^(?:jendela|aplikasi|app) ", "", target.strip())
+    found = _resolved("focus", target)
+    if found:
+        return found
+    return ("focus_window", {"name": target}) if raw_fallback else None
+
+
+def _ask_pick(info: dict) -> str:
+    _pending_pick.clear()
+    _pending_pick.update(info, at=time.time())
+    verb = PICK_VERB[info["purpose"]]
+    labels = [label for label, _, _ in info["options"]]
+    what = f"{labels[0]} atau {labels[1]}" if len(labels) > 1 else labels[0]
+    return f"Maksudnya {verb} {what}, {T}?"
+
+
+PICK_YES_RE = re.compile(r"(?:ya|iya|iyah|yap|yup|betul|benar|bener|oke|ok|okay|boleh|silakan|itu|yang itu|yang pertama|"
+                         r"pertama|nomor satu|yang satu|lanjut)(?: (?:dong|deh|benar|betul|itu|yang itu|tuh))?")
+PICK_SECOND_RE = re.compile(r"(?:yang )?(?:kedua|dua|nomor dua|terakhir|yang lain|yang satunya)")
+PICK_NO_RE = re.compile(r"(?:bukan|tidak|nggak|enggak|gak|ga|salah|batal|jangan)\b.*")
+
+
+def _answer_pick(cmd: str) -> str | None:
+    """The answer to "Maksudnya buka TikTok?": runs the choice and learns the mishearing for next time."""
+    if not _pending_pick:
+        return None
+    if time.time() - _pending_pick["at"] > PICK_SECONDS:
+        _pending_pick.clear()
+        return None
+    options = _pending_pick["options"]
+    choice = None
+    if PICK_YES_RE.fullmatch(cmd):
+        choice = options[0]
+    elif PICK_SECOND_RE.fullmatch(cmd) and len(options) > 1:
+        choice = options[1]
+    else:
+        for option in options:
+            if option[0].lower() in cmd or option[1] in cmd:
+                choice = option
+                break
+    heard = _pending_pick["heard"]
+    if choice is None:
+        _pending_pick.clear()
+        if PICK_NO_RE.fullmatch(cmd):
+            return f"Baik, {T}. Sebutkan lagi namanya."
+        return None                                  # the user moved on to something else
+    _pending_pick.clear()
+    label, key, (name, kwargs) = choice
+    result = str(TOOL_MAP[name](**kwargs))
+    try:
+        import resolver
+        if 3 <= len(heard) <= 30 and heard not in resolver.NOT_NAMES and heard != key and len(heard.split()) <= 3:
+            habits.learn_alias(heard, key)           # "tito" -> tiktok from now on, no question
+    except Exception:
+        pass
+    _system_notes.append(f"user memilih {label} untuk '{heard}': {result}")
+    return result
+
+
 # speech recognition often hears "workspace 4" as "word PS4" / "WordPress 4" / "works ps 2"
-WORKSPACE = r"(?:workspace|work space|workspes|wokspace|ruang kerja|desktop|words? ?ps|works? ?ps|for ps|wordpress|word press|work)"
+WORKSPACE = r"(?:workspace|work space|workspes|wokspace|ruang kerja|desktop|words? ?ps|works? ?ps|for ps|wordpress|word press|work|ws|sp|es pe|we es|(?:kurs|kursus|course|kers) ?ps)"
 WS_NUM = r"(?:ke-? ?|nomor |no )?(?:\d{1,2}|" + "|".join(NUMBER_WORDS) + ")"
-WS_GLUED = re.compile(r"\b(words?|works?|work|for) ?ps(\d{1,2})\b")      # "word ps4" -> "word ps 4"
+WS_GLUED = re.compile(r"\b(words?|works?|work|for|kurs|kursus|course|kers) ?ps(\d{1,2})\b")   # "word ps4" -> "word ps 4"
 
 
 def _ws(words: str) -> str:
@@ -925,246 +1392,92 @@ def _ws_route(name: str, kwargs: dict):
     return (name, kwargs) if name in TOOL_MAP else None      # workspaces exist on Linux (Hyprland) only
 
 
-FAST_ROUTES = [(re.compile(p), h) for p, h in [
-    # ── "cari ..." with a site: search on YouTube, or just open the site ("cari youtube" cut off by the mic) ──
-    (r"(?:cari|carikan|search)(?: di)? youtube (?!di$)(.+)|(?:cari|carikan|search) (.+) di youtube",
-     lambda m: ("search_youtube", {"query": m[1] or m[2]})),
-    (r"(?:cari|carikan|search)(?: di)? ([\w ]+?)(?: di| dong)?",
-     lambda m: ("open_website", {"site": m[1]}) if m[1] in sc.WEBSITES else None),
-    (r"(?:hubungkan|sambungkan|koneksikan|sinkronkan|sinkron|sync)(?: agenda| jadwal)?(?: (?:ke|dengan))? (?:google calendar|google kalender|kalender google|google)",
-     lambda m: ("connect_google_calendar", {})),
-    (r"(?:status|cek) (?:sinkron )?(?:google calendar|kalender google|google kalender)", lambda m: ("google_calendar_status", {})),
-    (r"(?:putuskan|hentikan|matikan) (?:sinkron )?(?:google calendar|kalender google|google kalender)",
-     lambda m: ("disconnect_google_calendar", {})),
-    (r"(?:alamat|qr|kode qr|link|buka|tampilkan|cara buka) (?:hud|digidaw|panel)(?: digidaw)? (?:di |untuk |lewat |dari )?(?:hp|handphone|ponsel|hape)",
-     lambda m: ("mobile_hud_info", {})),
-    (r"(?:nonton|tonton|menonton|lihat video|tampilkan video)(?: video)? (?!apa\b)(.{3,}?)(?: di youtube)?",
-     lambda m: _play(m[1])),
-    (r"(?:skip|lewati|lewatin|lompati) (?:iklan|ads|ad)(?:nya)?(?: youtube)?", lambda m: ("media_control", {"action": "skip_ad"})),
-    # ── is the AI working? (must work without the AI) ──
-    (r"(?:cek|tes|test|periksa|status)(?: koneksi)? (?:ai|a i|gemini|otak(?: ai)?)(?: (?:saya|digidaw|nya))?|"
-     r"(?:apakah|kenapa) ai(?: ?nya)? (?:berfungsi|jalan|normal|tidak (?:jalan|berfungsi|bisa)|error)",
-     lambda m: ("ai_status", {})),
-    # ── the HUD window ──
-    (r"(?:buka|tampilkan|munculkan|perlihatkan|lihat|open|show|keluarkan)(?: lagi)? (?:hud|h u d|hut|had|dashboard|"
-     r"tampilan(?: digidaw)?|panel digidaw|aplikasi digidaw|jendela digidaw|layar digidaw|digidaw)(?: nya| digidaw)?",
-     lambda m: ("show_hud", {})),
-    (r"(?:tutup|sembunyikan|minimize|minimalkan|kecilkan) (?:hud|h u d|hut|dashboard|tampilan digidaw|jendela digidaw)(?:nya)?",
-     lambda m: ("hide_hud", {})),
-    # ── open a built project by name ──
-    (r"(?:buka|jalankan|lihat|tampilkan) (?:project|proyek) (?!saya$|ku$)(.+)",
-     lambda m: ("open_last_project", {"project": "" if re.fullmatch(r"(?:yang )?(?:terakhir|terbaru)(?: (?:di)?buat)?", m[1]) else m[1]})),
-    # ── generate images / files with Antigravity ──
-    (r"(?:buat|buatkan|bikin|bikinkan|generate|gambarkan|lukiskan|desain|desainkan)(?: saya| aku| kan)?(?: sebuah| satu| (\d|dua|tiga|empat))?"
-     r" (?:gambar|foto|ilustrasi|logo|poster|wallpaper|ikon|icon|banner|lukisan|karikatur|stiker|sticker|thumbnail|avatar|"
-     r"desain gambar|image)\b.*", lambda m: ("generate_image", {"description": m[0], "count": _num(m[1]) or 1})),
-    (r"(?:buat|buatkan|bikin|bikinkan|generate|susun|susunkan|tulis|tuliskan)(?: saya| aku| kan)?(?: sebuah| satu)?"
-     r" (?:file|dokumen|document|word|excel|spreadsheet|tabel excel|presentasi|powerpoint|ppt|slide|pdf|laporan|surat|makalah|"
-     r"proposal|cv|resume|daftar riwayat hidup|invoice|faktur|template|rpp|esai|essay|artikel|modul|kuesioner)\b.*",
-     lambda m: ("create_file", {"description": m[0]})),
-    (r"(?:buka )?(?:hasil generate|gambar (?:tadi|terakhir|yang tadi)|file (?:yang )?(?:tadi|terakhir) (?:dibuat|di-?generate))",
-     lambda m: ("open_generated", {"which": "terakhir"})),
-    (r"buka folder (?:hasil )?(?:generate|gambar|hasil)", lambda m: ("open_generated", {"which": "folder"})),
-    (r"(?:status|progres) (?:pembuatan )?(?:gambar|file|generate)", lambda m: ("generate_status", {})),
-    (r"(?:batalkan|batal|hentikan) (?:pembuatan )?(?:gambar|file)(?: nya)?", lambda m: ("cancel_generate", {})),
-    # ── projects: where, versions ──
-    (r"(?:di ?mana|dimana) (?:lokasi |letak |folder )?(?:project|proyek)(?: saya| ku| yang (?:sudah )?dibuat)?"
-     r"(?: (?:disimpan|berada|ada|tersimpan))?|(?:lokasi|letak) (?:folder )?(?:project|proyek)(?: saya| ku)?",
-     lambda m: ("project_location", {})),
-    (r"(?:kembalikan|pulihkan|rollback|undo) (?:project|proyek) (.+?)(?: ke versi (?:sebelumnya|lama|(\w+)))?",
-     lambda m: ("restore_project_version", {"project": m[1], "version": _num(m[2])})),
-    (r"(?:kembalikan|pulihkan|rollback) (?:project|proyek)?(?: ?nya)? ?ke versi (?:sebelumnya|lama|(\w+))",
-     lambda m: ("restore_project_version", {"project": "", "version": _num(m[1])})),
-    (r"(?:batalkan|undo) perubahan (?:terakhir|tadi)(?: (?:di|pada|ke) (?:project|proyek) (.+))?",
-     lambda m: ("restore_project_version", {"project": m[1] or "", "version": 0})),
-    (r"(?:riwayat|history|daftar) versi(?: (?:project|proyek))?(?: (.+))?|riwayat (?:project|proyek)(?: (.+))?",
-     lambda m: ("project_history", {"project": m[1] or m[2] or ""})),
-    (r"apa (?:saja )?yang (?:di)?ubah (?:di|pada|dari) (?:project|proyek)(?: (.+))?|"
-     r"(?:perubahan|update) (?:terakhir )?(?:di |pada )?(?:project|proyek)(?: (.+))?",
-     lambda m: ("project_changes", {"project": m[1] or m[2] or ""})),
-    # ── security follow-ups ──
-    (r"(?:bersihkan|hapus) (?:entri |program )?startup(?: (?:yang )?yatim)?|bersihkan entri yatim",
-     lambda m: ("clean_orphan_startup", {})),
-    (r"(?:tutup|matikan|hentikan) (?:semua )?(?:aplikasi |app )?(?:remote(?: access)?|teamviewer|anydesk|rustdesk|ultraviewer)",
-     lambda m: ("close_remote_access_apps", {})),
-    (r"(?:jalankan|lakukan|mulai) (?:quick scan|scan cepat)(?: defender)?|scan virus(?: sekarang)?|quick scan(?: defender)?",
-     lambda m: ("defender_scan", {"kind": "quick"})),
-    (r"(?:jalankan|lakukan|mulai) (?:full scan|scan penuh|scan menyeluruh)(?: defender)?|full scan(?: defender)?",
-     lambda m: ("defender_scan", {"kind": "full"})),
-    (r"(?:scan|pindai|cek|periksa) file (?:itu|tadi|terakhir|yang tadi|yang baru)", lambda m: ("scan_file", {})),
-    (r"hapus file (?:itu|tadi|yang tadi)", lambda m: _flagged_delete()),
-    # ── sleep timer ──
-    (r"(?:matikan|hentikan|stop|pause) (?:musik|lagu)(?:nya)? (?:dalam|setelah|sesudah) (\d+) (menit|jam)|sleep timer (\d+) (menit|jam)",
-     lambda m: ("sleep_timer", {"minutes": int(m[1] or m[3]) * (60 if (m[2] or m[4]) == "jam" else 1), "target": "music"})),
-    (r"(?:matikan|shutdown) (?:laptop|komputer|pc)(?:nya)? (?:dalam|setelah|sesudah) (\d+) (menit|jam)",
-     lambda m: ("sleep_timer", {"minutes": int(m[1]) * (60 if m[2] == "jam" else 1), "target": "laptop"})),
-    # ── browser / window navigation ──
-    (r"(?:scroll|gulir|geser)(?: ke)? (?:bawah|turun)(?: (\d+) kali)?|(?:scroll|gulir)(?: aja)?(?: (?:instagram|halaman(?:nya)?|layar|terus))?",
-     lambda m: ("navigate", {"action": "scroll_down", "times": int(m[1] or 1)})),
-    (r"(?:scroll|gulir|geser)(?: ke)? (?:atas|naik)(?: (\d+) kali)?", lambda m: ("navigate", {"action": "scroll_up", "times": int(m[1] or 1)})),
-    (r"(?:kembali|balik|back)(?: lagi)?(?: ke halaman sebelumnya)?|halaman sebelumnya", lambda m: ("navigate", {"action": "back"})),
-    (r"(?:maju|forward)(?: ke halaman berikutnya)?|halaman berikutnya", lambda m: ("navigate", {"action": "forward"})),
-    (r"(?:refresh|reload|muat ulang)(?: (?:halaman|page|tab))?(?: ini)?", lambda m: ("navigate", {"action": "refresh"})),
-    (r"(?:buka )?tab baru", lambda m: ("navigate", {"action": "new_tab"})),
-    (r"(?:pindah ke )?tab (?:berikutnya|selanjutnya|sebelah)", lambda m: ("navigate", {"action": "next_tab"})),
-    (r"(?:pindah ke )?tab sebelumnya", lambda m: ("navigate", {"action": "previous_tab"})),
-    (r"buka (?:lagi )?tab yang (?:tadi|baru) (?:di)?tutup", lambda m: ("navigate", {"action": "reopen_tab"})),
-    (r"(?:ke )?paling (atas|bawah)(?: halaman)?", lambda m: ("navigate", {"action": "top" if m[1] == "atas" else "bottom"})),
-    # ── the document that is open ──
-    (r"(?:(?:analisis|analisa|cek|lihat) )?(?:(?:ini )?(?:file|dokumen|berkas) apa(?: ini)?|ini (?:file|dokumen|berkas) apa|info file(?: ini)?)",
-     lambda m: ("analisis_dokumen", {"pertanyaan": "file apa ini"})),
-    (r"(?:rangkum|ringkas|rangkumkan|ringkaskan|buat (?:ringkasan|rangkuman)|simpulkan|jelaskan|terjemahkan|analisis|analisa)"
-     r"(?: isi)? (?:dokumen|file|berkas|pdf|word|excel|presentasi|slide|tabel|laporan|makalah|skripsi|jurnal)(?: ini| yang (?:sedang )?(?:saya )?buka)?"
-     r"(?: (?:secara )?(?:lengkap|detail|singkat))?", lambda m: ("analisis_dokumen", {"pertanyaan": m[0]})),
-    (r"apa (?:isi|inti|kesimpulan|poin penting) (?:dari )?(?:dokumen|file|pdf|laporan|presentasi) ini",
-     lambda m: ("analisis_dokumen", {"pertanyaan": m[0]})),
-    (r"(?:simpan|catat) (?:hasil )?(?:analisis|rangkuman|ringkasan)(?: dokumen)?(?: tadi| itu| ini)?",
-     lambda m: ("simpan_hasil_analisis", {})),
-    (r"(?:diagnosa|diagnosis|cek masalah|periksa masalah) (?:sistem|komputer|laptop|pc|windows)(?: (?:minggu ini|seminggu))?",
-     lambda m: ("diagnosa_sistem", {"jam_terakhir": 168 if "minggu" in m[0] else 24})),
-    # ── what's on screen ──
-    (r"tutup tab(?: (?:ini|sekarang|yang ini|yang sedang dibuka))?", lambda m: ("close_current_tab", {})),
-    (r"(?:tutup|close) tab (.+?)(?: (?:di|pada) (?:chrome|firefox|browser|brave|edge))?", lambda m: ("close_tab", {"name": m[1]})),
-    (r"(?:pindah|beralih|switch|balik|kembali|buka|ke) ke tab (?!baru|berikutnya|selanjutnya|sebelah|sebelumnya)(.+)|"
-     r"(?:kembali|balik) ke tab (?!baru|berikutnya|selanjutnya|sebelah|sebelumnya)(.+)",
-     lambda m: ("switch_tab", {"name": m[1] or m[2]})),
-    (r"(?:ringkas|ringkaskan|rangkum|rangkumkan|jelaskan|simpulkan) (?:isi )?(?:halaman|artikel|berita|web|website|situs|page|tab)"
-     r"(?: web)? (?:ini|yang (?:sedang )?(?:saya )?(?:buka|baca))", lambda m: ("summarize_current_page", {})),
-    (r"(?:halaman|artikel|berita) ini (?:tentang|membahas) apa", lambda m: ("summarize_current_page", {})),
-    (r"(?:simpan|bookmark|tandai) (?:link|halaman|url|alamat|situs)(?: web)? ini", lambda m: ("save_current_link", {})),
-    (r"(?:salin|copy|kopi) (?:link|url|alamat)(?: (?:halaman|web))?(?: ini)?", lambda m: ("copy_current_link", {})),
-    (r"(?:saya )?(?:sedang )?(?:buka|lihat) (?:halaman |jendela |aplikasi )?apa(?: sekarang)?|ini (?:halaman|jendela|aplikasi) apa",
-     lambda m: ("active_window_info", {})),
-    # notifications that came in (WhatsApp etc.): who sent it and what it says
-    (r"(?:tolong )?(?:cek|lihat|baca|bacakan|bacain|periksa|tampilkan)(?: semua)? (?:pesan|chat)(?: yang)?(?: (?:masuk|baru|terbaru|tadi))?"
-     r"(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: (?:ada )?apa(?: saja)?)?|"
-     r"(?:apakah |apa )?ada (?:pesan|chat)(?: (?:baru|masuk|baru masuk))?(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: tidak| nggak| gak)?|"
-     r"(?:apakah |apa )?ada (?:pesan|chat) (whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram)(?: (?:baru|masuk))?",
-     lambda m: ("read_notifications", {"messages_only": True, "app": next((g for g in m.groups() if g), "")})),
-    (r"(?:tolong )?(?:cek|lihat|baca|bacakan|bacain|periksa|tampilkan)(?: semua)? (?:notifikasi|notif)(?: (?:yang )?(?:masuk|baru|tadi))?"
-     r"(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: (?:ada )?apa(?: saja)?)?|"
-     r"(?:apakah |apa )?ada (?:notifikasi|notif)(?: (?:baru|masuk))?(?: (?:di |dari )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?(?: tidak| nggak| gak)?|"
-     r"notifikasi apa(?: saja)?(?: yang masuk)?",
-     lambda m: ("read_notifications", {"app": next((g for g in m.groups() if g), "")})),
-    (r"(?=.*(?:ulang|lagi|tadi|itu))(?:baca|bacakan|bacain|ulangi)(?: ulang| lagi)?(?: (?:pesan|notifikasi|notif))?(?: (?:tadi|itu))?(?: lagi)?"
-     r"(?: (?:dari |di )?(whatsapp|wa|telegram|signal|discord|slack|gmail|email|instagram))?",
-     lambda m: ("read_notifications", {"include_read": True, "app": next((g for g in m.groups() if g), "")})),
-    (r"(?:sekarang )?(?:jam|pukul) berapa(?: sekarang)?", lambda m: ("get_time", {})),
-    (r"(?:(?:bagaimana|gimana|apa|cek|lihat)\s+)?cuaca(?: (?:hari ini|sekarang|saat ini|di luar|di sini|hari ini gimana|bagaimana))?",
-     lambda m: ("get_weather", {})),
-    (r"(?:(?:bagaimana|gimana|apa|cek|lihat)\s+)?cuaca (?:di )?(?!hari|sekarang|saat|luar|sini|bagaimana|besok|lusa|nanti|malam|pagi|sore|siang|minggu)([a-z]{3,}(?: [a-z]{3,})?)",
-     lambda m: ("get_weather", {"city": m[1].strip()})),
-    (r"(?:hari ini )?(?:tanggal|hari) (?:berapa|apa)(?: (?:hari ini|sekarang))?", lambda m: ("get_date", {})),
-    (r"(?:atur |set |ubah |setel |naikkan |turunkan |kecilkan |besarkan |keraskan |pelankan |kurangi |tambah )?"
-     r"(?:volume|suara)(?:nya)? (?:ke |jadi |menjadi |sampai |hingga |di |pada )?(\d{1,3})(?: ?(?:persen|%))?",
-     lambda m: ("set_volume", {"level": int(m[1])})),
-    (r"(?:naikkan|besarkan|keraskan|kencangkan|tambah(?:kan)?) (?:volume|suara)(?:nya)?"
-     r"|(?:volume|suara) (?:naik|lebih (?:keras|besar|kencang))", lambda m: ("volume_up", {})),
-    (r"(?:turunkan|kecilkan|pelankan|kurangi) (?:volume|suara)(?:nya)?"
-     r"|(?:volume|suara) (?:turun|lebih (?:pelan|kecil))", lambda m: ("volume_down", {})),
-    (r"mute|unmute|bisukan|matikan suara|nyalakan suara|hidupkan suara", lambda m: ("volume_mute", {})),
-    (r"(?:putar|putarkan|lanjut ke|ke) (?:lagu |musik |video )?(?:selanjutnya|berikutnya)|(?:musik|lagu) (?:selanjutnya|berikutnya)",
-     lambda m: ("media_control", {"action": "next"})),
-    (r"(?:pause|paus|pos|jeda|stop|setop|hentikan|berhenti|matikan)(?: dulu)?(?: (?:musik|musiknya|lagu|lagunya|video|videonya))?"
-     r"|(?:pause|paus|jeda|stop|matikan) (?:musik|lagu|video)(?:nya)?(?: dulu)?",
-     lambda m: ("media_control", {"action": "pause"})),
-    (r"(?:play|resume|lanjut|lanjutkan|putar lagi|putar kembali|putar|putarkan|nyalakan|setel)(?: (?:musik|musiknya|lagu|lagunya|video|videonya))?"
-     r"|(?:play|resume|lanjut|lanjutkan|putar lagi|putar kembali)(?: (?:musik|musiknya|lagu|lagunya|video|videonya))?",
-     lambda m: ("media_control", {"action": "play"})),
-    (r"next|skip|lewati|ganti lagu|(?:lagu|video) (?:selanjutnya|berikutnya)", lambda m: ("media_control", {"action": "next"})),
-    (r"previous|(?:lagu|video) sebelumnya", lambda m: ("media_control", {"action": "previous"})),
-    (r"(?:ini )?lagu apa(?: ini)?|judul lagu(?: ini|nya)?(?: apa)?|lagu apa yang (?:sedang )?(?:diputar|main)",
-     lambda m: ("now_playing", {})),
-    (r"(?:putar|putarkan|play|setel|mainkan) (?:playlist|lagu-lagu|mix) (.+)", lambda m: _play(m[1], mix=True)),
-    # "putar youtube / putar musik / lanjutkan musik": resume (or pick up the last music), not a search for "youtube"
-    (r"(?:putar|putarkan|play|setel|mainkan|lanjutkan|lanjut)(?: lagi)? (?:pemutaran )?(?:youtube|musik(?:nya)?|lagu(?:nya)?|video(?:nya)?)"
-     r"(?: (?:di )?youtube)?(?: lagi)?", lambda m: ("media_control", {"action": "play"})),
-    # "putar musik tradisional": "musik" stays in the search (a genre); "putar lagu X": X is the title
-    (r"(?:putar|putarkan|play|setel|mainkan) (lagu|musik|video) (.+?)(?: di youtube)?",
-     lambda m: _play(re.sub(r"^(?:dari|oleh|by) ", "", m[2]) if re.match(r"(?:dari|oleh|by) ", m[2])
-                     else f"musik {m[2]}" if m[1] == "musik" else m[2])),
-    (r"(?:putar|putarkan|setel|mainkan) (?!(?:lagu|musik|video|playlist)$)(.{3,}?)(?: di youtube)?", lambda m: _play(m[1])),
-    (r"(?:ambil |tangkap )?(?:screenshot|tangkapan layar|tangkap layar)(?: layar)?", lambda m: ("take_screenshot", {})),
-    (r"kunci (?:komputer|laptop|pc|layar)", lambda m: ("lock_workstation", {})),
-    # ── power: always the real skill (it asks "yakin?"), never an AI that might only SAY it is restarting ──
-    (r"(?:restart|reboot|mulai ulang|nyalakan ulang|hidupkan ulang) (?:komputer|laptop|pc|sistem)(?: (?:saya|ku|sekarang))?|restart",
-     lambda m: ("restart_pc", {})),
-    (r"(?:matikan|shutdown|shut down|matiin) (?:komputer|laptop|pc|sistem)(?: (?:saya|ku|sekarang))?|shutdown|shut down",
-     lambda m: ("shutdown_pc", {})),
-    (r"(?:sleep|tidurkan|sleepkan) (?:komputer|laptop|pc)(?: (?:saya|ku))?", lambda m: ("sleep_pc", {})),
-    (r"(?:batalkan|batal|cancel) (?:shutdown|restart|matikan komputer|mematikan komputer)", lambda m: ("cancel_shutdown", {})),
-    # ── keyboard ──
-    (r"(?:ketik|ketikkan|tuliskan di sini|type) (.+?)(?: (?:dan|lalu|terus|kemudian) (?:tekan |klik |pencet )?enter)?",
-     lambda m: ("type_text", {"text": m[1], "press_enter": bool(re.search(r" (?:dan|lalu|terus|kemudian) (?:tekan |klik |pencet )?enter$", m[0]))})),
-    (r"(?:klik|tekan|pencet|press) (?:tombol )?(enter|tab|escape|esc|spasi|space|backspace|delete|home|end|f\d{1,2}|"
-     r"page ?up|page ?down|atas|bawah|kiri|kanan)(?: (\d) ?kali)?",
-     lambda m: ("press_keys", {"keys": {"spasi": "space", "atas": "up", "bawah": "down", "kiri": "left", "kanan": "right",
-                                       "page up": "pageup", "page down": "pagedown"}.get(m[1], m[1])})),
-    # ── close everything (asks first) ──
-    (r"tutup semua(?: (?:aplikasi|jendela|program|app|window))?(?: yang (?:sedang )?(?:terbuka|ada|berjalan|jalan))?(?: sekarang)?",
-     lambda m: ("close_all_apps", {})),
-    # ── "katakan X": just say it ──
-    (r"(?:katakan|ucapkan|coba katakan|coba ucapkan) (?!apa\b|kenapa\b|ke\b|bahwa\b)(.{1,80})",
-     lambda m: ("say", {"text": m[1]})),
-    (r"(?:atur )?(?:kecerahan|brightness)(?: layar)? (?:ke |jadi )?(\d{1,3})(?: ?persen)?",
-     lambda m: ("set_brightness", {"level": int(m[1])})),
-    # ── Antigravity system analysis ──
-    (r"(?:lakukan |jalankan |tolong |minta |suruh )?(?:sambungkan ke )?(?:antigravity |antigrafity )?(?:untuk )?"
-     r"(?:analisis|analisa|analisi|periksa|cek) (?:seluruh |kondisi |kesehatan )?(?:sistem|laptop|komputer|pc)"
-     r"(?: (?:saya|ku))?(?: (?:secara )?(?:menyeluruh|lengkap|total))?(?: (?:dengan|menggunakan|lewat|pake|pakai) (?:antigravity|antigrafity))?|"
-     r"(?:minta |suruh )?(?:antigravity|antigrafity) (?:untuk )?(?:analisis|analisa|periksa|cek)(?: (?:seluruh |kondisi |kesehatan )?(?:sistem|laptop|komputer|pc))?",
-     lambda m: ("analisis_sistem", {})),
-    (r"(?:buka )?laporan (?:analisis sistem|antigravity)(?: terakhir)?",
-     lambda m: ("last_system_analysis", {})),
-    # ── Security scan ──
-    (r"(?:lakukan |jalankan |tolong )?(?:analisis|analisa|analisi|scan|pindai|periksa|cek) (?:keamanan|security|virus|malware|ancaman)"
-     r"(?: (?:sistem|laptop|komputer|pc))?(?: saya| ku)?(?: (?:secara )?(?:menyeluruh|lengkap|total))?|cek virus|apakah (?:laptop|komputer|pc|sistem) (?:saya |ku )?aman",
-     lambda m: ("security_scan", {})),
-    (r"(?:buka )?laporan (?:keamanan|analisis keamanan)(?: terakhir)?", lambda m: ("last_security_report", {})),
-    (r"(?:status sistem|diagnostik(?: sistem)?|cek baterai)", lambda m: ("get_system_status", {})),
-    (r"(?:cek |berapa )?(?:penggunaan|pemakaian|pakai|sisa|kapasitas)? ?(?:ram|memori|memory|cpu|prosesor|processor)"
-     r"(?: (?:saya|laptop|komputer|ku))?(?: (?:berapa|sekarang|sudah berapa|terpakai))*(?: persen)?",
-     lambda m: ("get_system_status", {})),
-    (r"(?:baterai|batre|batrai)(?: (?:saya|laptop|ku))?(?: (?:berapa|tinggal berapa|sisa berapa))?(?: persen)?(?: sekarang)?",
-     lambda m: ("get_system_status", {})),
-    (r"(?:cek |lihat |tampilkan |sebutkan |coba cek )?(?:ada )?(?:jendela|aplikasi|window) apa saja(?: yang)? (?:terbuka|sedang terbuka|dibuka|berjalan|jalan)(?: sekarang)?|"
-     r"(?:daftar|list) (?:jendela|window)(?: yang terbuka)?", lambda m: ("list_windows", {})),
-    (r"(?:buka|open) (?:folder )?(?:project|proyek)(?: saya| ku)?", lambda m: ("open_project", {})),
-    (r"(?:buat|bikin|buatkan|bikinkan)(?: saya| aku)?(?: sebuah| satu)? (?:project|proyek|aplikasi|app|website|web|situs|game|program)\b.*",
-     lambda m: ("create_project", {"description": m[0]})),
-    (r"(?:status|progres|progress) (?:project|proyek|pembuatan project)(?: (.+))?",
-     lambda m: ("project_build_status", {"project": m[1] or ""})),
-    (r"(?:batalkan|batal|hentikan|stop) (?:pembuatan|pengerjaan|antrean) (?:project|proyek)(?: (.+))?",
-     lambda m: ("cancel_project_build", {"project": m[1] or ""})),
-    (r"(?:hentikan|matikan|stop|tutup) (?:project|proyek)(?: (.+))?", lambda m: ("stop_project", {"project": m[1] or ""})),
-    (r"(?:daftar|list) (?:project|proyek)(?: saya)?|project apa saja(?: yang (?:sudah )?(?:dibuat|ada))?",
-     lambda m: ("list_projects", {})),
-    # ── workspaces (Hyprland) ──
-    (rf"(?:(?:pindah|beralih|switch|balik|kembali|pergi|buka|lompat)(?: ke)? |ke |\w{{3,8}}(?: ke)? )?{WORKSPACE} ({WS_NUM}|berikutnya|selanjutnya|sebelumnya)",
-     lambda m: _ws_route("switch_workspace", {"workspace": _ws(m[1])})),
-    (rf"(?:pindahkan|pindahin|kirim|kirimkan|lempar|taruh|move) (.+?) ke {WORKSPACE} ({WS_NUM}|berikutnya|selanjutnya|sebelumnya)"
-     r"( (?:dan|lalu|terus) (?:ikut(?: pindah)?|ikuti|ke sana|pindah ke sana))?",
-     lambda m: _ws_route("move_to_workspace", {"workspace": _ws(m[2]), "follow": bool(m[3]),
-                                               "name": "" if re.fullmatch(r"(?:jendela|aplikasi)? ?(?:ini|aktif|yang aktif|sekarang)|jendela|aplikasi", m[1]) else m[1]})),
-    (r"(?:pindah|beralih|switch|fokus|balik) ke (?:jendela |aplikasi )?(?!halaman|tab|versi|mode)(.+)",
-     lambda m: ("focus_window", {"name": m[1]})),
-    (r"(?:buka|open|jalankan) (.+)", lambda m: _open_known(m[1])),
-    (r"(?:tutup|close) (.+)", lambda m: _close_known(m[1])),
-]]
+FORECAST_WHEN = r"(?:besok|lusa|nanti(?: sore| malam| siang| pagi)?|hari ini|sore ini|malam ini|siang ini|sekarang)"
+
+
+def _forecast_when(said: str) -> str:
+    return next((w for w in ("lusa", "besok", "hari ini") if w in said), "nanti")
+
+
+def _read_offered():
+    """"ya" right after "Mau saya bacakan?": read what was offered. None = nothing was offered (a normal "ya")."""
+    senders = notifications.take_offer()
+    if senders is None:
+        return None
+    return "read_notifications", ({"messages_only": True, "sender": senders} if senders else {"messages_only": True})
+
+
+
+
+# said alone these are questions, even when an app has the same name (the clock app is "jam")
+QUESTION_WORDS = {"jam", "waktu", "tanggal", "cuaca", "berita", "hari", "jam sekarang", "sekarang jam"}
 
 
 def _bare_name(cmd: str):
-    """Just the name of a site or app the user often opens ("instagram", "youtube"): open it."""
+    """Just the name of a site or app the user often opens ("instagram", "youtube", "ig", "tik tok dan instagram"):
+    open it. Only exact names and short forms: a random word ("dingin") must never open something."""
+    import resolver
+    if cmd in QUESTION_WORDS:
+        return None                      # "jam" alone asks the time ("buka jam" still opens the clock)
+    cmd = resolver.SHORT.get(cmd, cmd)
+    if cmd.replace(" ", "") in sc.WEBSITES:
+        return "open_website", {"site": cmd.replace(" ", "")}
     if cmd in sc.WEBSITES:
         return "open_website", {"site": cmd}
     if cmd in sc.APPS:
         return "open_application", {"name": cmd}
+    if OPEN_MANY_SPLIT.search(cmd):
+        parts = [resolver.SHORT.get(p.strip(), p.strip()) for p in OPEN_MANY_SPLIT.split(cmd) if p.strip()]
+        if len(parts) >= 2 and all(p.replace(" ", "") in sc.WEBSITES or p in sc.APPS for p in parts):
+            return "open_many", {"names": [p.replace(" ", "") if p.replace(" ", "") in sc.WEBSITES else p for p in parts]}
+    if re.fullmatch(r"[a-z]{3,12}", cmd) and cmd not in resolver.NOT_NAMES:
+        ranked = resolver.rank(cmd, ("site", "app"))
+        # one cut-off word ("tik"): only a near-certain start of a name, nothing merely similar ("dingin")
+        if ranked and ranked[0].score >= 0.93 and (len(ranked) == 1 or ranked[1].score < ranked[0].score - 0.04):
+            m = ranked[0]
+            return ("open_website", {"site": m.key}) if m.kind == "site" else ("open_application", {"name": m.key})
     return None
+
+
+def _open_in_browser(target: str, browser: str):
+    """'buka github di firefox' -> that site in that browser."""
+    import resolver
+    target = resolver.SHORT.get(target.strip(), target.strip())
+    if target.replace(" ", "") in sc.WEBSITES:
+        return "open_website", {"site": target.replace(" ", ""), "browser": browser}
+    if re.fullmatch(r"[\w-]+(?:\.[\w-]+)+(?:/\S*)?", target):
+        return "open_website", {"site": target, "browser": browser}
+    verdict, matches = resolver.resolve(target, ("site",), sure_only=True)
+    return ("open_website", {"site": matches[0].key, "browser": browser}) if verdict == "sure" else None
+
+
+def _active_title() -> str:
+    try:
+        import window_manager
+        wins = window_manager.closable_windows()
+        return (wins[0]["title"] if wins else "").lower()
+    except Exception:
+        return ""
+
+
+def _search_route(query: str):
+    """'cari kepiting': YouTube when YouTube is in front (or it is music / a video), otherwise Google."""
+    query = re.sub(r"\s+(?:di google|di internet|di web|dong)$", "", query.strip())
+    if not query:
+        return None
+    if "youtube" in _active_title() or re.match(r"(?:video|musik|klip|lagu) ", query):
+        return "search_youtube", {"query": query}
+    return "google_search", {"query": query}
 
 
 def _route(text: str):
     """(tool name, kwargs) for a simple command, or None if Gemini should handle it."""
     cmd = WS_GLUED.sub(r"\1 ps \2", _normalize(text))
+    cmd = re.sub(r"\b(ws|sp)(\d{1,2})\b", r"\1 \2", cmd)                 # "sp1" -> "sp 1" (= workspace 1)
+    cmd = re.sub(r"\bke(merah|putih|biru|hijau|kuning|ungu|pink|oranye|jingga|toska)\b", r"ke \1", cmd)   # "keputih"
+    cmd = re.sub(r"^(.{3,40}?)(?: \1)+$", r"\1", cmd)     # "putar lagu. putar lagu. putar lagu": said once
+    cmd = re.sub(r"^(?:titik|tik|ketip|ketig|ketek) (?=.+ (?:dan|lalu|terus) (?:tekan |klik )?enter$)", "ketik ", cmd)
+    cmd = re.sub(rf"\bpindah keluar (?={WORKSPACE} )", "pindah ke ", cmd)   # "pindah keluar SP1" = "pindah ke ws 1"
     bare = _bare_name(cmd)
     if bare:
         return bare
@@ -1172,7 +1485,9 @@ def _route(text: str):
         match = pattern.fullmatch(cmd)
         if match:
             action = handler(match)
-            if action and action[0] in VERBATIM_ARGS:
+            if not action:
+                continue                 # this pattern declined ("cari kepiting" isn't a site): a later one may fit
+            if action[0] in VERBATIM_ARGS:
                 action = _with_original_text(text, *action)
             return action
     return None
@@ -1248,8 +1563,108 @@ def _alarm_route(cmd: str):
 _pending_alarm: dict = {}
 
 
+# "balas oke saya otw" (to the chat just heard about), "balas ke Rina bilang …", "kirim WhatsApp ke Budi isinya …":
+# matched on the original text, so the message keeps its own capitals and punctuation
+_REPLY_SEP = r"(?:\s+(?:isinya|bilang|bahwa|katakan)\b|\s*[:,])\s*"
+REPLY_TO_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:balas|bales|balasin|balaskan)(?:lah)?(?:\s+(?:pesan|chat|wa)(?:nya)?)?"
+                         r"\s+(?:ke|kepada|untuk|buat)\s+(?P<to>[^:,]{2,40}?)" + _REPLY_SEP + r"(?P<text>\S.*?)\s*$", re.I)
+SEND_TO_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:kirim|kirimkan|kirimin)(?:\s+pesan)?\s+(?:wa|whatsapp|pesan wa|"
+                        r"pesan whatsapp|pesan)\s+(?:ke|kepada|untuk|buat)\s+(?P<to>[^:,]{2,40}?)" + _REPLY_SEP +
+                        r"(?P<text>\S.*?)\s*$", re.I)
+REPLY_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:balas|bales|balasin|balaskan)(?:lah)?(?:\s+(?:pesan|chat|wa)(?:nya)?|"
+                      r"\s+dia)?(?:\s+(?:isinya|bilang|bahwa|dengan))?\s*[:,]?\s+(?P<text>\S.*?)\s*$", re.I)
+
+
+# "jawab oke", "bilang ke dia nanti saya telepon", "berikan jawaban oke": also a reply, but only right after a message
+# was announced or read out (otherwise "jawab pertanyaan ini" is meant for Digidaw)
+ANSWER_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:(?:jawab|jawabin|jawablah|jawabkan)(?:\s+(?:pesan|chat)(?:nya)?)?"
+                       r"(?:\s+(?:ke\s+)?dia)?|(?:bilang|bilangin|sampaikan|katakan)\s+(?:ke|kepada|sama)\s+(?:dia|nya)|"
+                       r"(?:berikan|beri|kasih|kirim|kirimkan)\s+(?:jawaban|balasan)(?:\s+(?:ke|kepada)\s+dia)?)"
+                       r"(?:\s+(?:isinya|bilang|bahwa|kalau|dengan))?\s*[:,]?\s+(?P<text>\S.*?)\s*$", re.I)
+# "bilang ke Rina kalau saya telat", "sampaikan ke Budi: oke"
+TELL_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:bilang|bilangin|sampaikan|kabari|kabarin|kasih tahu|beri tahu|beritahu)"
+                     r"\s+(?:ke|kepada|sama)\s+(?!(?:dia|saya|aku|gue)\b)(?P<to>[^:,]{2,40}?)"
+                     r"(?:\s+(?:kalau|bahwa|isinya)\b\s*|\s*[:,]\s*)(?P<text>\S.*?)\s*$", re.I)
+# "kirim pesan ke bisnis rar": no "isinya" between the name and the message — split at a chat name Digidaw knows
+SEND_LOOSE_RE = re.compile(r"^\s*(?:tolong\s+|coba\s+)?(?:kirim|kirimkan|kirimin)(?:\s+(?:pesan|chat))?(?:\s+(?:wa|whatsapp))?"
+                           r"\s+(?:ke|kepada|untuk|buat)\s+(?P<rest>\S.*?)[\s.!?]*$", re.I)
+# "kirim pesan WhatsApp" / "balas pesannya" with nothing else: Digidaw asks for what is missing
+COMPOSE_RE = re.compile(r"(?:kirim|kirimkan|kirimin|bikin|buat|tulis) (?:pesan |chat )?(?:wa|whatsapp)|"
+                        r"(?:kirim|kirimkan|kirimin) (?:pesan|chat)|(?:balas|bales|balasin|balaskan|jawab)(?: (?:pesan|chat)(?:nya)?| dia)?")
+
+
+def _reply_route(text: str):
+    """(to, message) for a spoken reply to a chat, or None."""
+    for pattern in (REPLY_TO_RE, SEND_TO_RE, TELL_RE, REPLY_RE, ANSWER_RE):
+        m = pattern.match(text)
+        if m:
+            to = (m.groupdict().get("to") or "").strip()
+            message = m["text"].strip().rstrip(".")
+            if pattern is REPLY_RE and re.match(r"(?:email|surel|komentar|chat ini|pesan ini|ke\b)", message, re.I):
+                return None              # "balas email …": not a WhatsApp reply
+            if pattern is ANSWER_RE and not notifications.last_chat(max_age=10 * 60):
+                return None              # no message just came in: "jawab …" is for Digidaw itself
+            return to, message
+    m = SEND_LOOSE_RE.match(text)
+    if m:
+        rest = m["rest"].strip()
+        for name in sorted(notifications.known_chats(), key=len, reverse=True):
+            if rest.lower().startswith(name.lower() + " ") and len(rest) > len(name) + 1:
+                return name, rest[len(name):].strip(" ,:")
+    return None
+
+
+def _message_route(text: str) -> str | None:
+    """Messages by voice: a reply / "bilang ke Rina kalau …" (asks "yakin?" before anything is sent), or a message
+    built up step by step when a part is missing ("Ke siapa?", "Pesannya apa?")."""
+    if whatsapp.composing():
+        return _combine([whatsapp.compose_answer(text)])
+    reply_to = _reply_route(text)
+    if reply_to:
+        return _combine([str(TOOL_MAP["reply_message"](text=reply_to[1], to=reply_to[0]))])
+    cmd = _normalize(text)
+    if COMPOSE_RE.fullmatch(cmd):
+        last = notifications.last_chat(max_age=10 * 60) if cmd.startswith(("balas", "bales", "jawab")) else None
+        if cmd.startswith(("balas", "bales", "jawab")) and not last:
+            return None
+        return whatsapp.compose(last["name"] if last else "")
+    m = SEND_LOOSE_RE.match(text)
+    if m and len(m["rest"].split()) <= 3 and not re.search(r"\b(?:workspace|ws|layar|monitor|desktop)\b", m["rest"], re.I):
+        return whatsapp.compose(m["rest"].strip())        # "kirim pesan ke Bisnis": the text is still missing
+    return None
+
+
+# "lagi", "dikit lagi", "sekali lagi": the last adjustment once more (volume, lamp, screen, next song)
+_last_action: dict = {"tool": "", "kwargs": {}, "at": 0.0}
+REPEAT_SECONDS = 90
+REPEATABLE = {"volume_up", "volume_down", "lamp_brightness", "media_control", "scroll", "zoom"}
+
+
+def _repeat_last(said: str):
+    """The last fast command again ("lagi"), a little less of it ("dikit lagi": half the step), or None when there
+    is nothing sensible to repeat (then the AI hears "lagi" as it is)."""
+    tool, kwargs = _last_action["tool"], dict(_last_action["kwargs"])
+    if time.time() - _last_action["at"] > REPEAT_SECONDS or tool not in REPEATABLE:
+        return None
+    if tool == "lamp_brightness" and not kwargs.get("relative"):
+        return None                      # "lampu 50%" again changes nothing
+    if tool == "media_control" and kwargs.get("action") not in ("next", "previous", "skip_ad"):
+        return None
+    if re.search(r"\b(?:dikit|sedikit)\b", said):
+        for key in ("amount", "percent"):
+            if isinstance(kwargs.get(key), (int, float)):
+                kwargs[key] = int(kwargs[key] / 2) or (1 if kwargs[key] > 0 else -1)
+    return tool, kwargs
+
+
 def fast_route(text: str) -> str | None:
     """Run a simple command locally. Returns the reply, or None if Gemini should handle it."""
+    message = _message_route(text)               # "balas oke saya otw", "kirim pesan ke Bisnis" … (always "yakin?")
+    if message:
+        return message
+    watch = watchers.parse(text)                 # "kabari saya kalau …" (before the alarms: "ingatkan saya kalau …")
+    if watch:
+        return _combine([str(TOOL_MAP["watch_for"](*watch))])
     if not alarms.is_ringing():
         try:
             reply = agenda.handle(text)          # dated events ("ulang tahun ibu tanggal 20 Oktober") before alarms
@@ -1285,7 +1700,11 @@ def fast_route(text: str) -> str | None:
     action = _route(text)
     if action:
         name, kwargs = action
+        if name == "_ask":                       # a name heard only half-right: "Maksudnya buka TikTok?"
+            return _ask_pick(kwargs)
         result = str(TOOL_MAP[name](**kwargs))
+        if name != "_repeat":
+            _last_action.update(tool=name, kwargs=dict(kwargs), at=time.time())
         _system_notes.append(f"perintah '{text}' langsung dijalankan: {result}")
         del _system_notes[:-6]
         return _combine([result])
@@ -1339,6 +1758,8 @@ def local_route(text: str) -> str:
     # Diagnostics / info
     if has("analisis sistem", "analisa sistem", "analisis seluruh sistem"):
         return antigravity_analysis.analisis_sistem()
+    if has("suhu laptop", "suhu cpu", "suhu prosesor", "suhu komputer", "laptop panas", "laptop kepanasan"):
+        return sc.get_temperature()
     if has("status", "diagnostik", "diagnostic", "cek sistem", "baterai", "battery", "cpu", "ram"):
         return sc.get_system_status()
     if has("jam berapa", "pukul berapa", "what time"):
@@ -1451,15 +1872,21 @@ def _is_exit(cmd: str) -> bool:
     return cleaned in EXIT_PHRASES
 
 
+WAKE_PREFIX_RE = re.compile(r"^\s*(?:(?:hei|hai|halo|oke|ok|hey)\s+)?(?:digidaw|digi daw|didaw|digidau)\b[\s,.!?]*",
+                            re.IGNORECASE)
+
+
 def process_command(text: str) -> tuple[str, bool]:
     """
     Process incoming user text / speech.
     Returns: (response_text, should_exit)
     """
-    global _brain_used
+    global _brain_used, _current_command
+    _command_local.id = _current_command = next(_command_ids)
     _tools_used.clear()
     _calls_this_turn.clear()
     _brain_used = ""
+    text = WAKE_PREFIX_RE.sub("", text, count=1).strip() or text     # "Digidaw, buka Firefox." from the phone
     fixed = text if DICTATION_RE.match(text) else habits.apply_aliases(text)
     if fixed != text:
         console.print(f"[dim]  ↪ dikoreksi: {escape(fixed)}[/dim]")
@@ -1467,6 +1894,8 @@ def process_command(text: str) -> tuple[str, bool]:
     should_exit = False
     if reply is None:
         reply, should_exit = _process_command(fixed)
+    if _command_local.id in _cancelled:
+        return "", False                 # timed out: its late answer and actions must not land in the next command
     if _calls_this_turn:
         _last_action.update(text=fixed, calls=list(_calls_this_turn), at=time.time())
     if reply and not should_exit:
@@ -1524,6 +1953,10 @@ def _process_command(text: str) -> tuple[str, bool]:
         _restart_requested = True
         return f"Baik, {T}. Saya mulai ulang sekarang, sekitar sepuluh detik.", True
 
+    picked = _answer_pick(_normalize(text))
+    if picked is not None:
+        return picked, False
+
     # Answer to a pending "are you sure?" question
     if safety.has_pending():
         answer = safety.classify_answer(cmd)
@@ -1554,3 +1987,7 @@ def _process_command(text: str) -> tuple[str, bool]:
     if offline.startswith("Maaf") and "offline" in offline:
         return llm.explain(T), False
     return offline, False
+
+
+# the fast routes themselves live in routes.py, grouped by subject (they use the helpers above)
+from routes import FAST_ROUTES  # noqa: E402

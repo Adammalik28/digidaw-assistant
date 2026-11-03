@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import config
+import storage
 import events
 
 SUBS_FILE = Path(config.LOG_DIR) / "push_subscriptions.json"
@@ -66,7 +67,7 @@ def _load():
 
 def _save():
     try:
-        SUBS_FILE.write_text(json.dumps(_subs), encoding="utf-8")
+        storage.save_json(SUBS_FILE, _subs, mode=storage.PRIVATE)
         SUBS_FILE.chmod(0o600)
     except OSError:
         pass
@@ -186,7 +187,7 @@ def _watch():
         event = q.get()
         try:
             kind = event.get("type")
-            if kind == "alert" and event.get("text"):
+            if kind == "alert" and event.get("text") and event.get("push", True):   # (not what was only for the PC)
                 title, text = LEVEL_TITLE.get(event.get("level"), "Digidaw"), event["text"]
                 head, sep, rest = text.partition(":")
                 if sep and rest.strip() and len(head) <= 24:     # "Pengingat: rapat …" -> title + the rest

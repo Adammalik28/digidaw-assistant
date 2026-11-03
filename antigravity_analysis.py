@@ -25,6 +25,7 @@ import shutil
 import datetime
 import threading
 import subprocess
+import tempfile
 import webbrowser
 from pathlib import Path
 
@@ -248,13 +249,18 @@ Tulis respons Anda dengan tepat memuat 2 bagian berikut:
 - **Rekomendasi Tindakan**: ...)
 """
 
-    cmd = [exe, "-p", prompt, "--output-format", "stream-json", "--dangerously-skip-permissions"]
+    cmd = [exe, "-p", prompt, "--output-format", "stream-json"]
+    if config.AGENT_SKIP_PERMISSIONS:            # the Control Panel setting, as for Project Builder
+        cmd.append("--dangerously-skip-permissions")
+    # an empty folder of its own: Digidaw's folder holds .env (API key) and settings.json (the phone PIN)
+    work = Path(tempfile.gettempdir()) / "digidaw-analisis"
+    work.mkdir(exist_ok=True)
     response_text = ""
-    
+
     try:
         proc = subprocess.Popen(
             cmd,
-            cwd=str(config.BASE_DIR),
+            cwd=str(work),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

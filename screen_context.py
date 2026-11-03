@@ -85,6 +85,14 @@ def start():
     threading.Thread(target=_poll, daemon=True, name="screen-context").start()
 
 
+def foreground() -> dict | None:
+    """The window in front right now, Digidaw's own HUD included (on Linux also its class and fullscreen state)."""
+    try:
+        return _foreground()
+    except Exception:
+        return None
+
+
 def current() -> dict | None:
     """The window the user is working in (the last non-Digidaw foreground window that still exists)."""
     with _lock:

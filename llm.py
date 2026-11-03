@@ -6,6 +6,10 @@ switch to the next model before hitting the limit, rests a model that answered 4
 long as Google asks, drops models that no longer exist (404), and always starts again from the
 fastest model — so one busy minute never leaves Digidaw stuck on a slower model.
 
+Several API keys may be given (Control Panel → AI, separated by commas). The first is always preferred; when every
+model is at its limit on it, requests move to the next key with room, and come back as soon as the first has room
+again. A key Google rejects is skipped. Each key has its own count, rests and retired models.
+
 It also keeps an honest health status for the HUD and for error messages: every failure is classified
 (quota, server busy, no internet, API key rejected, a bad request or an error inside Digidaw itself), so
 "the AI doesn't work" is never reported as "quota full" when the real cause is something else.
@@ -17,16 +21,20 @@ import threading
 from collections import deque
 
 import config
+import metrics
 
 logging.getLogger("google").setLevel(logging.ERROR)
 logging.getLogger("google_genai").setLevel(logging.ERROR)
 
-_client = None
 _lock = threading.RLock()
+# the bookkeeping of the key in use (the dicts of _states[_active], swapped by _use)
 _calls: dict[str, deque] = {}          # model -> timestamps of recent requests
 _resting_until: dict[str, float] = {}  # model -> time it may be used again
 _rest_reason: dict[str, str] = {}      # model -> "quota" / "busy" (why it rests)
 _retired: set[str] = set()             # models Google no longer serves to this key
+_keys: list[str] = []                  # the API keys, in the order given
+_states: list[dict] = []               # per key: client, calls, resting_until, rest_reason, retired, bad
+_active = 0
 _last_error: dict = {}                 # kind, detail, model, at, per_day
 _health = {"state": "unknown", "detail": "", "model": "", "since": 0.0, "last_ok": 0.0}
 # failures that are the same for every model: trying the next model would only fail again
@@ -38,16 +46,78 @@ _NETWORK_TEXT = re.compile(r"getaddrinfo|Name or service not known|No address as
                            r"Failed to establish|forcibly closed", re.IGNORECASE)
 
 
-def get_client():
-    global _client
-    if _client is None and config.GEMINI_API_KEY:
+def configured_keys() -> list[str]:
+    """The API keys from the Control Panel / .env: one, or several separated by commas, spaces or new lines."""
+    return [k for k in re.split(r"[\s,;]+", config.GEMINI_API_KEY or "") if k]
+
+
+def _use(i: int):
+    global _active, _calls, _resting_until, _rest_reason, _retired
+    _active = i
+    s = _states[i]
+    _calls, _resting_until, _rest_reason, _retired = s["calls"], s["resting_until"], s["rest_reason"], s["retired"]
+
+
+def _sync():
+    """Start fresh bookkeeping when the keys were changed (Control Panel)."""
+    global _keys, _states
+    keys = configured_keys()
+    if keys != _keys:
+        _keys = keys
+        _states = [{"client": None, "calls": {}, "resting_until": {}, "rest_reason": {}, "retired": set(), "bad": False}
+                   for _ in keys]
+        if _states:
+            _use(0)
+
+
+def reset_keys():
+    """The keys were edited: reconnect with the new ones."""
+    global _keys
+    with _lock:
+        _keys = []
+        _sync()
+
+
+def key_count() -> int:
+    return len(_keys)
+
+
+def active_key() -> int:
+    """Which key is in use, counted from 1."""
+    return _active + 1
+
+
+def _real_client(i: int):
+    s = _states[i]
+    if s["client"] is None:
+        import httpx
         from google import genai
         from google.genai import types
-        _client = genai.Client(
-            api_key=config.GEMINI_API_KEY,
-            http_options=types.HttpOptions(timeout=int(config.AI_TIMEOUT_SECONDS * 1000)),
+        # the connection is kept open between requests (httpx drops an idle one after 5 s, so every request paid a
+        # new lookup + TCP + TLS handshake: a few hundred ms on a mobile network, 5 s when a DNS packet got lost)
+        s["client"] = genai.Client(
+            api_key=_keys[i],
+            http_options=types.HttpOptions(timeout=int(config.AI_TIMEOUT_SECONDS * 1000), client_args={
+                "limits": httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=240)}),
         )
-    return _client
+    return s["client"]
+
+
+class _ActiveClient:
+    """Looks like a genai.Client, but every call goes to the key in use at that moment: a caller that got the client
+    before candidates() moved to another key still sends its next request with the right key."""
+
+    def __getattr__(self, name):
+        return getattr(_real_client(_active), name)
+
+
+_ACTIVE_CLIENT = _ActiveClient()
+
+
+def get_client():
+    with _lock:
+        _sync()
+        return _ACTIVE_CLIENT if _states else None
 
 
 def thinking_config(model: str):
@@ -66,20 +136,32 @@ def clean(text: str) -> str:
 
 # ───────────────────────────── model router ─────────────────────────────
 
-def _used_last_minute(model: str) -> int:
-    q = _calls.setdefault(model, deque())
+def _used_last_minute(model: str, calls: dict | None = None) -> int:
+    q = (_calls if calls is None else calls).setdefault(model, deque())
     while q and time.time() - q[0] > 60:
         q.popleft()
     return len(q)
 
 
+def _ready(s: dict, now: float) -> list[str]:
+    return [m for m in config.FALLBACK_MODELS if m not in s["retired"] and s["resting_until"].get(m, 0) <= now
+            and _used_last_minute(m, s["calls"]) < config.MODEL_RPM]
+
+
 def candidates() -> list[str]:
-    """Models to try, fastest first, skipping ones that are resting or at their per-minute budget."""
+    """Models to try, fastest first, skipping ones that are resting or at their per-minute budget. With several keys:
+    those of the first key that has room (the first key whenever it can)."""
     with _lock:
+        _sync()
         now = time.time()
-        ready = [m for m in config.FALLBACK_MODELS
-                 if m not in _retired and _resting_until.get(m, 0) <= now and _used_last_minute(m) < config.MODEL_RPM]
-    return ready
+        for i, s in enumerate(_states):
+            ready = [] if s["bad"] else _ready(s, now)
+            if ready:
+                if i != _active:
+                    print(f"[AI] {'kembali ke' if i < _active else 'pindah ke'} API key #{i + 1} dari {len(_states)}")
+                    _use(i)
+                return ready
+    return []
 
 
 def seconds_until_available() -> int:
@@ -87,12 +169,15 @@ def seconds_until_available() -> int:
     with _lock:
         now = time.time()
         waits = []
-        for m in config.FALLBACK_MODELS:
-            if m in _retired:
+        for s in _states:
+            if s["bad"]:
                 continue
-            q = _calls.get(m) or deque()
-            budget_free = (q[0] + 60 - now) if len(q) >= config.MODEL_RPM and q else 0
-            waits.append(max(_resting_until.get(m, 0) - now, budget_free, 0))
+            for m in config.FALLBACK_MODELS:
+                if m in s["retired"]:
+                    continue
+                q = s["calls"].get(m) or deque()
+                budget_free = (q[0] + 60 - now) if len(q) >= config.MODEL_RPM and q else 0
+                waits.append(max(s["resting_until"].get(m, 0) - now, budget_free, 0))
     return int(min(waits)) + 1 if waits else 60
 
 
@@ -139,6 +224,8 @@ def report_error(model: str, error: Exception) -> str:
     """Remember what went wrong with a model. Returns a short label for the log."""
     kind = classify(error)
     text = str(error)
+    if kind == "busy":
+        metrics.count("gemini_sibuk")
     with _lock:
         _last_error.update(kind=kind, detail=_short(error), model=model, at=time.time(), per_day=False)
         if kind == "quota":
@@ -156,6 +243,9 @@ def report_error(model: str, error: Exception) -> str:
             _resting_until[model] = time.time() + 15     # timeouts / 5xx: skip it briefly
             _rest_reason[model] = "busy"
             return f"server sibuk: {_last_error['detail'][:80]}"
+        if kind == "key" and len(_states) > 1:
+            _states[_active]["bad"] = True       # this key is refused: the others are used from now on
+            return f"API key #{_active + 1} ditolak Google, dilewati: {_last_error['detail'][:80]}"
         # network / key / request / internal: not this model's fault, so it doesn't rest
         label = {"network": "tidak ada koneksi", "key": "API key ditolak", "request": "permintaan ditolak Google",
                  "internal": "error di dalam Digidaw"}[kind]
@@ -219,6 +309,7 @@ def health() -> dict:
                 retry_at = now + seconds_until_available()
         model = _health.get("model") or ""
         return {"state": state, "detail": detail, "model": model, "used": _used_last_minute(model) if model else 0,
+                "key": _active + 1, "keys": len(_keys),
                 "limit": config.MODEL_RPM, "retry_at": retry_at, "last_ok": _health["last_ok"],
                 "per_day": bool(_last_error.get("per_day")) and state == "quota"}
 

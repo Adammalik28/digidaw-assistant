@@ -117,7 +117,8 @@ def check_ai():
             client = llm.get_client()
             started = time.time()
             client.models.generate_content(model=config.FALLBACK_MODELS[0], contents="Jawab: ok")
-            report(OK, "Gemini", f"API key valid, menjawab dalam {time.time() - started:.1f} dtk")
+            many = f" (key 1 dari {llm.key_count()}; yang lain cadangan)" if llm.key_count() > 1 else ""
+            report(OK, "Gemini", f"API key valid, menjawab dalam {time.time() - started:.1f} dtk{many}")
         except Exception as e:
             kind = llm.classify(e)
             hint = {"key": "API key ditolak — periksa kembali isinya di .env.",

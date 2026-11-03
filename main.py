@@ -1,4 +1,14 @@
 import os
+# Settings for Digidaw itself, made before any library starts (programs Digidaw opens don't get them: oscompat.user_env):
+# - OMP_NUM_THREADS: OpenMP's extra threads only spin while waiting (measured: Whisper used 1.1 s of CPU per heard
+#   phrase on the GPU, 0.09 s with this; on the CPU 1.8 s -> 0.6 s at almost the same speed).
+# - RES_OPTIONS: on a lossy network a lost DNS packet made the resolver wait 5 s before asking again (measured: half
+#   of the lookups); now it gives up after 1 s and asks the next server. Lookups are cached as well (dnscache.py).
+_OWN_ENV = {k: v for k, v in (("OMP_NUM_THREADS", "1"), ("RES_OPTIONS", "timeout:1 attempts:3 rotate"))
+            if k not in os.environ}
+os.environ.update(_OWN_ENV)
+import dnscache
+dnscache.install()
 import sys
 import json
 import time
@@ -17,7 +27,15 @@ if NO_CONSOLE:
     log_path = os.path.join(log_dir, "digidaw.log")
     if os.path.exists(log_path) and os.path.getsize(log_path) > 2_000_000:
         os.replace(log_path, log_path + ".old")
-    sys.stdout = sys.stderr = open(log_path, "a", encoding="utf-8", buffering=1)
+    _OWN_ENV["COLUMNS"] = os.environ["COLUMNS"] = "160"     # rich: one line per message, not wrapped at 80
+    _log = open(log_path, "a", encoding="utf-8", buffering=1)
+    for _path, _mode in ((log_dir, 0o700), (log_path, 0o600)):
+        try:
+            os.chmod(_path, _mode)                          # what was said and heard: for this user only
+        except OSError:
+            pass
+    import logfile
+    sys.stdout = sys.stderr = logfile.TimestampedLog(_log)
     print(f"\n===== Digidaw start {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
 else:
     # Configure UTF-8 encoding for standard Windows consoles
@@ -43,8 +61,13 @@ if os.name == "nt":
                 pass
 
 import config
+import storage
 import hud_server
 import oscompat
+oscompat.OWN_ENV.update(_OWN_ENV)
+# a coding agent once found GEMINI_API_KEY in its environment, printed it into its log and spent it on its own
+# API calls: the keys from .env are Digidaw's alone
+oscompat.OWN_ENV.update(config.ENV_FILE_KEYS)
 
 
 def _parse_args():
@@ -102,6 +125,7 @@ _wait_for_audio()
 try:
     import settings as _settings
     _settings.ensure_keep_apps()        # restarting Digidaw must never close the apps it opened
+    _settings.install_service()         # digidaw.service: systemd brings Digidaw back after a crash or a hang
 except Exception:
     pass
 import tts
@@ -128,6 +152,12 @@ import generator
 import alarms
 import agenda
 import antigravity_analysis
+import presence
+import smarthome
+import home_auto
+import watchers
+import daily
+import weather
 from core import DigidawCore, FILLERS
 
 console = Console()
@@ -252,6 +282,10 @@ def _startup_ai_check(core):
                       f"({', '.join(result['dropped'][:3])}). Detailnya di log.", "warning")
     if result["ok"]:
         console.print(f"[dim]   AI siap: {result['model']} ({result['ms']} ms)[/dim]")
+    elif result["kind"] in ("busy", "quota"):
+        # Google busy / a full minute: it passes by itself and the local brain still answers, so no spoken warning
+        # at every start (the HUD's AI indicator shows it, and a real command explains it if it still fails)
+        console.print(f"[dim]   AI sementara tidak tersedia: {result['reason']} (tidak diumumkan)[/dim]")
     else:
         core.announce(f"Peringatan, {config.USER_TITLE}: AI tidak bisa dipakai, {result['reason']}. "
                       f"Perintah dasar tetap jalan.", "warning")
@@ -270,7 +304,7 @@ def _first_start_today() -> bool:
         return False
     try:
         config.LOG_DIR.mkdir(exist_ok=True)
-        state_file.write_text(json.dumps({"last_briefing": today}), encoding="utf-8")
+        storage.save_json(state_file, {"last_briefing": today})
     except OSError:
         pass
     return True
@@ -291,15 +325,44 @@ def _speak_startup_briefing():
     tts.speak(text)
 
 
+def _later(seconds: float, fn):
+    """Run fn once after a while, on a daemon thread (a plain Timer would keep a stopping Digidaw waiting for it)."""
+    timer = threading.Timer(seconds, fn)
+    timer.daemon = True
+    timer.start()
+
+
+def _systemd_unit(cgroup: str | None = None) -> str:
+    """Digidaw's OWN systemd user unit (autostart via uwsm: app-digidaw@autostart.service), or "".
+    Only a unit named after Digidaw counts: started from the app menu Digidaw runs inside the compositor's unit
+    (wayland-wm@hyprland.desktop.service), and restarting THAT logged the user out of the whole desktop."""
+    if cgroup is None:
+        if not os.environ.get("INVOCATION_ID"):
+            return ""
+        try:
+            with open("/proc/self/cgroup", encoding="utf-8") as f:
+                cgroup = f.read()
+        except OSError:
+            return ""
+    unit = next((p for p in reversed(cgroup.strip().split("/")) if p.endswith(".service")), "")
+    return unit if "digidaw" in unit.lower() else ""
+
+
 def _relaunch():
     """Start a fresh copy of Digidaw (used by "Restart" in the Control Panel)."""
     exe = sys.executable
     if NO_CONSOLE and exe.lower().endswith("python.exe"):
         exe = exe[:-len("python.exe")] + "pythonw.exe"
     args = [a for a in sys.argv[1:] if a not in ("--restarted", "--background")] + ["--restarted"]
+    # (the new copy sets its own OMP_NUM_THREADS / RES_OPTIONS again: inherited, it would take them for the user's
+    # own and pass them on to every program it opens)
     if oscompat.IS_WINDOWS:
-        subprocess.Popen([exe, os.path.join(BASE, "main.py"), *args], cwd=BASE,
+        subprocess.Popen([exe, os.path.join(BASE, "main.py"), *args], cwd=BASE, env=oscompat.user_env(),
                          creationflags=subprocess.DETACHED_PROCESS if NO_CONSOLE else subprocess.CREATE_NEW_CONSOLE)
+        return
+    unit = _systemd_unit()
+    if unit:                # started by systemd (autostart): let it restart the unit, so a later crash is restarted too
+        subprocess.Popen(["systemctl", "--user", "restart", unit], **oscompat.detached())
         return
     import shlex
     import linux_desktop
@@ -309,10 +372,11 @@ def _relaunch():
         subprocess.Popen(argv, cwd=BASE, **oscompat.detached())
     else:
         subprocess.Popen([exe, os.path.join(BASE, "main.py"), *args], cwd=BASE,
-                         env=dict(os.environ, DIGIDAW_NO_CONSOLE="1"), **oscompat.detached())
+                         **{**oscompat.detached(), "env": dict(oscompat.user_env(), DIGIDAW_NO_CONSOLE="1")})
 
 
 def main(args=ARGS):
+    dnscache.warm()         # the hosts every command needs (speech, voice, AI) looked up before the first one
     voice_enabled = not args.text and stt.is_mic_working()
     media.start_monitor()   # keeps the "what's playing" snapshot fresh without ever blocking
     core = DigidawCore(voice_enabled)
@@ -321,11 +385,27 @@ def main(args=ARGS):
     project_builder.BRIEF_HOOK = core.start_brief
     security_scan.ANNOUNCE = core.announce
     generator.ANNOUNCE = core.announce
+    _later(15, generator.recover)       # a job cut off by the restart: said, not waited for forever
     alarms.ANNOUNCE = core.announce
     agenda.ANNOUNCE = core.announce
     antigravity_analysis.ANNOUNCE = core.announce
+    notifications.ANNOUNCE = core.announce
+    weather.ANNOUNCE = core.announce
+    presence.on_return(core.welcome_back)
     alarms.start()
     agenda.start()
+    presence.start()            # away / back: news waits for the user, then a welcome back
+    weather.start()             # a warning shortly before rain
+    smarthome.start()           # lamps: a connection kept open, so commands are instant
+    home_auto.ANNOUNCE = core.announce
+    smarthome.ANNOUNCE = core.announce
+    home_auto.start()           # the lamp follows the sun and the user
+    watchers.ANNOUNCE = core.announce
+    watchers.start()            # "kabari saya kalau …"
+    daily.ANNOUNCE = core.announce
+    daily.start()               # screen time + the evening recap
+    import metrics
+    metrics.start()             # how well Digidaw hears and answers, per day ("laporan kinerja")
     security_scan.start_background()
     screen_context.start()
     if config.STT_PRIVACY_MODE or config.OFFLINE_STT:
@@ -340,12 +420,16 @@ def main(args=ARGS):
         import signal
 
         def _terminate(signum, frame):
+            if core.shutdown.is_set():
+                return              # already stopping: a second signal must not break off the clean-up half-way
             core.shutdown.set()
             raise KeyboardInterrupt
 
         signal.signal(signal.SIGTERM, _terminate)
         signal.signal(signal.SIGHUP, _terminate)
     core.start()
+    import service
+    threading.Thread(target=service.heartbeat, args=(core.alive,), daemon=True, name="systemd-heartbeat").start()
 
     hud_ok = False
     if config.HUD_ENABLED and not args.no_hud:
@@ -389,7 +473,7 @@ def main(args=ARGS):
     # frequent replies (favourite apps, workspaces, volume...) get their voice cached so they play instantly
     import persona
     persona.is_cached = tts.is_cached
-    threading.Timer(20, lambda: tts.warm_cache(persona.warm_phrases())).start()
+    _later(20, lambda: tts.warm_cache(persona.warm_phrases()))
     tts.preload_fallback()          # the local fallback voice ready before it is ever needed
     # the day's summary now comes with the first "Digidaw" (core._morning_briefing), not at boot
     if not args.background and not args.restarted:
@@ -421,6 +505,11 @@ def main(args=ARGS):
         core.shutdown.set()
         media.unduck(force=True)
         hotkeys.stop()
+        daily.save()            # today's screen time so far
+        import metrics
+        metrics.save()
+        import aec
+        aec.stop()              # the echo-cancel devices go away with Digidaw
         if core.restart_requested:
             _relaunch()
         time.sleep(0.3)
@@ -429,6 +518,8 @@ def main(args=ARGS):
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        pass            # stopped (Ctrl+C / SIGTERM): still leave right away below, never wait for helper threads
     except Exception as e:
         import traceback
         traceback.print_exc()

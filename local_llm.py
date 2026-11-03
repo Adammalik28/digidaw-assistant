@@ -53,16 +53,35 @@ def mark_down(reason: str):
         _status.update(ok=False, checked=time.time(), reason=reason)
 
 
+_full_gpu_failed = 0.0          # when putting every layer on the GPU last failed (out of GPU memory)
+FULL_GPU_RETRY = 1800           # then try again after this many seconds (a game / another model may be gone by then)
+GPU_ERROR_RE = re.compile(r"out of memory|cuda|cudamalloc|unable to allocate|runner process has terminated|"
+                          r"exit status|failed to load model", re.IGNORECASE)
+
+
+def _options(max_tokens: int) -> dict:
+    # Qwen3-Instruct's recommended sampling (temperature 0.7, top_p 0.8, top_k 20): steadier tool calls than 0.8
+    opts = {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "num_ctx": config.LOCAL_CONTEXT, "num_predict": max_tokens}
+    if getattr(config, "LOCAL_FULL_GPU", False) and time.time() - _full_gpu_failed > FULL_GPU_RETRY:
+        opts["num_gpu"] = 999      # every layer on the GPU (Ollama would leave a few on the CPU: ~25% slower)
+    return opts
+
+
 def chat(messages: list[dict], tools: list[dict] | None = None, max_tokens: int = 400) -> dict:
     """One /api/chat request. Returns the assistant message ({'content', 'tool_calls'?})."""
-    body = {
-        "model": config.LOCAL_MODEL, "messages": messages, "stream": False,
-        "keep_alive": config.LOCAL_KEEP_ALIVE,
-        "options": {"temperature": 0.8, "num_ctx": config.LOCAL_CONTEXT, "num_predict": max_tokens},
-    }
+    global _full_gpu_failed
+    body = {"model": config.LOCAL_MODEL, "messages": messages, "stream": False,
+            "keep_alive": config.LOCAL_KEEP_ALIVE, "options": _options(max_tokens)}
     if tools:
         body["tools"] = tools
-    r = requests.post(_url("/api/chat"), json=body, timeout=config.LOCAL_TIMEOUT_SECONDS if max_tokens > 1 else 120)
+    timeout = config.LOCAL_TIMEOUT_SECONDS if max_tokens > 1 else 120
+    r = requests.post(_url("/api/chat"), json=body, timeout=timeout)
+    if r.status_code >= 500 and "num_gpu" in body["options"] and GPU_ERROR_RE.search(r.text):
+        # the GPU is busy (a game, another model): load the model the way Ollama itself decides, and keep it so
+        _full_gpu_failed = time.time()
+        print(f"[lokal] GPU penuh, model dimuat sebagian di CPU ({r.text[:80]})")
+        body["options"].pop("num_gpu")
+        r = requests.post(_url("/api/chat"), json=body, timeout=timeout)
     r.raise_for_status()
     message = r.json().get("message") or {}
     message["content"] = strip_thinking(message.get("content", ""))

@@ -9,6 +9,8 @@ import time
 import difflib
 
 import config
+import storage
+import smarthome
 
 T = config.USER_TITLE
 PROTOCOLS_FILE = config.BASE_DIR / "protocols.json"
@@ -22,6 +24,7 @@ DEFAULT_PROTOCOLS = {
             {"tool": "open_application", "args": {"name": "vs code"}},
             {"tool": "open_website", "args": {"site": "github"}},
             {"tool": "set_volume", "args": {"level": 30}},
+            {"tool": "lamp_scene", "args": {"scene": "kerja"}},
         ],
     },
     "santai": {
@@ -31,6 +34,7 @@ DEFAULT_PROTOCOLS = {
             {"tool": "play_youtube", "args": {"query": "lofi hip hop chill beats", "mix": True}},
             {"tool": "set_volume", "args": {"level": 35}},
             {"tool": "set_brightness", "args": {"level": 60}},
+            {"tool": "lamp_scene", "args": {"scene": "santai"}},
         ],
     },
     "fokus": {
@@ -40,6 +44,7 @@ DEFAULT_PROTOCOLS = {
             {"tool": "window_action", "args": {"action": "minimize_all"}},
             {"tool": "play_youtube", "args": {"query": "deep focus music for studying", "mix": True}},
             {"tool": "set_volume", "args": {"level": 25}},
+            {"tool": "lamp_scene", "args": {"scene": "fokus"}},
             {"tool": "set_timer", "args": {"minutes": 25, "message": "Sesi fokus 25 menit selesai. Saatnya istirahat 5 menit."}},
         ],
     },
@@ -50,6 +55,7 @@ DEFAULT_PROTOCOLS = {
             {"tool": "media_control", "args": {"action": "pause"}},
             {"tool": "set_brightness", "args": {"level": 10}},
             {"tool": "set_volume", "args": {"level": 10}},
+            {"tool": "lamp_power", "args": {"on": False}},
             {"tool": "sleep_pc", "args": {}},
         ],
     },
@@ -66,23 +72,50 @@ DEFAULT_PROTOCOLS = {
         "steps": [
             {"tool": "play_youtube", "args": {"query": "party hits mix", "mix": True}},
             {"tool": "set_volume", "args": {"level": 70}},
+            {"tool": "lamp_scene", "args": {"scene": "pesta"}},
         ],
     },
 }
+# the lamp joined the built-in protocols later (1 Nov 2026): protocols.json files made before get the step once
+# (where to put it: "end", or before the step with that tool)
+LAMP_STEPS = {"kerja": ({"tool": "lamp_scene", "args": {"scene": "kerja"}}, "end"),
+              "santai": ({"tool": "lamp_scene", "args": {"scene": "santai"}}, "end"),
+              "fokus": ({"tool": "lamp_scene", "args": {"scene": "fokus"}}, "set_timer"),
+              "tidur": ({"tool": "lamp_power", "args": {"on": False}}, "sleep_pc"),
+              "pesta": ({"tool": "lamp_scene", "args": {"scene": "pesta"}}, "end")}
+LAMP_TOOLS = ("lamp_power", "lamp_brightness", "lamp_color", "lamp_scene")
 
 
 def load() -> dict:
     if not PROTOCOLS_FILE.exists():
         save(DEFAULT_PROTOCOLS)
         return json.loads(json.dumps(DEFAULT_PROTOCOLS))
-    try:
-        return json.loads(PROTOCOLS_FILE.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
+    protocols = storage.load_json(PROTOCOLS_FILE)
+    if not isinstance(protocols, dict):
         return json.loads(json.dumps(DEFAULT_PROTOCOLS))
+    if _add_lamp_steps(protocols):
+        save(protocols)
+    return protocols
+
+
+def _add_lamp_steps(protocols: dict) -> bool:
+    """Give the built-in protocols their lamp step, once (a step the user removes later stays removed)."""
+    changed = False
+    for key, (step, before) in LAMP_STEPS.items():
+        p = protocols.get(key)
+        if not isinstance(p, dict) or p.get("lamp_added"):
+            continue
+        steps = p.setdefault("steps", [])
+        if not any(isinstance(s, dict) and s.get("tool") in LAMP_TOOLS for s in steps):
+            at = next((i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("tool") == before), len(steps))
+            steps.insert(at, json.loads(json.dumps(step)))
+        p["lamp_added"] = True
+        changed = True
+    return changed
 
 
 def save(protocols: dict):
-    PROTOCOLS_FILE.write_text(json.dumps(protocols, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(PROTOCOLS_FILE, protocols, backup=True, indent=2)
 
 
 def _resolve(name: str, protocols: dict) -> str | None:
@@ -116,6 +149,8 @@ def run_protocol(name: str) -> str:
         if not fn or tool in ("run_protocol", "create_protocol", "delete_protocol"):
             results.append(f"langkah '{tool}' dilewati")
             continue
+        if tool in LAMP_TOOLS and not smarthome.has_lamps():
+            continue                         # no lamp connected: the step is simply not there
         try:
             results.append(str(fn(**args)))
         except Exception as e:
