@@ -326,6 +326,30 @@ SOUND = [
 ]
 
 
+# the PC's settings and jobs on the screen (pc_control.py, screen_agent.py, file_tools.py)
+CONTROL = [
+    (r"(?:matikan|nonaktifkan|off(?:kan)?) (?:koneksi )?wi ?fi", lambda m: ("wifi_power", {"on": False})),
+    (r"(?:nyalakan|hidupkan|aktifkan|on(?:kan)?) (?:koneksi )?wi ?fi", lambda m: ("wifi_power", {"on": True})),
+    (r"(?:sambungkan|hubungkan|konek\w*|connect)(?: ke)? wi ?fi(?: ke)? (.{2,40})", lambda m: ("wifi_connect", {"name": m[1]})),
+    (r"(?:matikan|nonaktifkan) bluetooth", lambda m: ("bluetooth", {"action": "off"})),
+    (r"(?:nyalakan|hidupkan|aktifkan) bluetooth", lambda m: ("bluetooth", {"action": "on"})),
+    (r"(?:sambungkan|hubungkan|konek\w*|connect) (?:bluetooth (?:ke )?|ke )?((?:headset|earphone|earbuds|tws|speaker bluetooth|.{2,30} bluetooth).*)|"
+     r"(?:sambungkan|hubungkan|konek\w*|connect) bluetooth (?:ke )?(.{2,40})",
+     lambda m: ("bluetooth", {"action": "connect", "device": re.sub(r"\s*bluetooth\s*", " ", m[1] or m[2]).strip()})),
+    (r"putuskan bluetooth(?: (.{2,40}))?", lambda m: ("bluetooth", {"action": "disconnect", "device": m[1] or ""})),
+    (r"(?:pakai |aktifkan |ubah ke |ganti ke |set )?mode (hemat(?: daya| baterai| batre)?|seimbang|performa(?: tinggi)?|gaming|game)",
+     lambda m: ("power_mode", {"mode": m[1]})),
+    (r"(?:matikan|nonaktifkan)(?: mode)? jangan ganggu", lambda m: ("do_not_disturb", {"on": False})),
+    (r"(?:aktifkan |nyalakan |pakai )?(?:mode )?jangan ganggu", lambda m: ("do_not_disturb", {"on": True})),
+    (r"(?:pindahkan |pindah |alihkan |ubah |ganti )?(?:suara|audio|keluaran suara)(?:nya)? ke (.{2,30})",
+     lambda m: ("audio_output", {"name": m[1]})),
+    (r"(?:matikan|padamkan|offkan) (?:layar|monitor)(?: laptop)?", lambda m: ("screen_power", {"on": False})),
+    (r"(?:hentikan|batalkan|stop|setop) tugas(?:nya)?(?: (?:di )?layar)?", lambda m: ("stop_task", {})),
+    (r"lanjutkan tugas(?:nya)?", lambda m: ("resume_task", {})),
+    (r"(?:apa )?isi folder (.{2,40}?)(?: apa saja| apa aja)?", lambda m: ("list_folder", {"path": m[1]})),
+]
+
+
 # power, keyboard, closing everything, "katakan", analysis, security scan, temperature, …
 SYSTEM = [
     # ── power: always the real skill (it asks "yakin?"), never an AI that might only SAY it is restarting ──
@@ -338,10 +362,15 @@ SYSTEM = [
     # ── keyboard ──
     (r"(?:ketik|ketikkan|tuliskan di sini|type) (.+?)(?: (?:dan|lalu|terus|kemudian) (?:tekan |klik |pencet )?enter)?",
      lambda m: ("type_text", {"text": m[1], "press_enter": bool(re.search(r" (?:dan|lalu|terus|kemudian) (?:tekan |klik |pencet )?enter$", m[0]))})),
-    (r"(?:klik|tekan|pencet|press) (?:tombol )?(enter|tab|escape|esc|spasi|space|backspace|delete|home|end|f\d{1,2}|"
+    (r"(?:klik (?!kanan\b|kiri\b|atas\b|bawah\b)|tekan |pencet |press )(?:tombol )?(enter|tab|escape|esc|spasi|space|backspace|delete|home|end|f\d{1,2}|"
      r"page ?up|page ?down|atas|bawah|kiri|kanan)(?: (\d) ?kali)?",
      lambda m: ("press_keys", {"keys": {"spasi": "space", "atas": "up", "bawah": "down", "kiri": "left", "kanan": "right",
                                        "page up": "pageup", "page down": "pagedown"}.get(m[1], m[1])})),
+    # ── the mouse: where the pointer is, or something described in words (the AI looks for it) ──
+    (r"klik(?: kiri)?(?: di ?sini)?", lambda m: ("click_here", {})),
+    (r"klik kanan(?: di ?sini)?", lambda m: ("click_here", {"button": "right"})),
+    (r"klik (?:dua kali|dobel|double)(?: di ?sini)?", lambda m: ("click_here", {"double": True})),
+    (r"klik (.{2,60})", lambda m: ("click_on_screen", {"target": m[1]})),
     # ── close everything (asks first) ──
     (r"tutup semua(?: (?:aplikasi|jendela|program|app|window))?(?: yang (?:sedang )?(?:terbuka|ada|berjalan|jalan))?(?: sekarang)?",
      lambda m: ("close_all_apps", {})),
@@ -421,5 +450,5 @@ WINDOWS = [
 ]
 
 
-ORDER = [SITE_SEARCH, ASSISTANT, PROJECTS, SECURITY, SCREEN, DAY, LAMPS, MESSAGES, WEATHER, SOUND, SYSTEM, WINDOWS]
+ORDER = [SITE_SEARCH, ASSISTANT, PROJECTS, SECURITY, SCREEN, DAY, LAMPS, MESSAGES, WEATHER, SOUND, CONTROL, SYSTEM, WINDOWS]
 FAST_ROUTES = [(re.compile(p), h) for group in ORDER for p, h in group]

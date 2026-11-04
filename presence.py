@@ -246,7 +246,7 @@ def input_devices(listing: str | None = None) -> list[str]:
         bits = re.search(r"^B: EV=([0-9a-f]+)\s*$", block, re.M)
         names = handlers[1].split() if handlers else []
         event = next((n for n in names if re.fullmatch(r"event\d+", n)), None)
-        if not event:
+        if not event or "digidaw-agent" in block:      # Digidaw's own clicks (screen_agent.py) aren't the user being back
             continue
         repeats = bool(int(bits[1], 16) & EV_REP) if bits else False
         if any(n.startswith("mouse") for n in names) or ("kbd" in names and repeats):

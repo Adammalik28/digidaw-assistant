@@ -399,6 +399,8 @@ def main(args=ARGS):
     smarthome.start()           # lamps: a connection kept open, so commands are instant
     home_auto.ANNOUNCE = core.announce
     smarthome.ANNOUNCE = core.announce
+    import screen_agent
+    screen_agent.ANNOUNCE = core.announce
     home_auto.start()           # the lamp follows the sun and the user
     watchers.ANNOUNCE = core.announce
     watchers.start()            # "kabari saya kalau …"

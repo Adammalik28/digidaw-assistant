@@ -31,7 +31,7 @@ def _setup():
 def decide(text: str):
     """(tool, args) or None, like fast_route() would choose (without running anything)."""
     _setup()
-    brain._last_action.update(tool="", kwargs={}, at=0.0)
+    brain._last_fast.update(tool="", kwargs={}, at=0.0)
     notifications._last_chat.update(at=0.0)
     if brain._reply_route(text):
         return "reply_message", {}

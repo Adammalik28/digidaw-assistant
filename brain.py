@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.markup import escape
 
 import config
+import diag
 import metrics
 import events
 import llm
@@ -39,6 +40,11 @@ import antigravity_analysis
 import habits
 import persona
 import local_llm
+import local_router
+import experience
+import file_tools
+import pc_control
+import screen_agent
 
 console = Console()
 T = config.USER_TITLE
@@ -122,7 +128,7 @@ _tools_used: list[str] = []
 _calls_this_turn: list[tuple[str, dict, str]] = []     # (tool, kwargs, result) of the current command
 # tools that start work in the background: no open "follow-up" window afterwards, so a stray word
 # ("Star") isn't taken as a second image / file / scan
-BACKGROUND_TOOLS = {"generate_image", "create_file", "security_scan", "defender_scan", "improve_project",
+BACKGROUND_TOOLS = {"do_on_screen", "click_on_screen", "generate_image", "create_file", "security_scan", "defender_scan", "improve_project",
                     "restore_project_version", "scan_file", "analisis_sistem"}
 
 
@@ -207,7 +213,7 @@ def forget_correction(word: str) -> str:
 
 
 ALL_SKILLS = (sc.AI_TOOLS + media.AI_TOOLS + window_manager.AI_TOOLS + ai_skills.AI_TOOLS
-              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + notifications.AI_TOOLS + weather.AI_TOOLS + smarthome.AI_TOOLS + home_auto.AI_TOOLS + watchers.AI_TOOLS + daily.AI_TOOLS + whatsapp.AI_TOOLS + metrics.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
+              + protocols.AI_TOOLS + hud_server.AI_TOOLS + project_builder.AI_TOOLS + security_scan.AI_TOOLS + antigravity_analysis.AI_TOOLS + screen_context.AI_TOOLS + generator.AI_TOOLS + alarms.AI_TOOLS + agenda.AI_TOOLS + mobile_server.AI_TOOLS + gcal_sync.AI_TOOLS + notifications.AI_TOOLS + weather.AI_TOOLS + smarthome.AI_TOOLS + home_auto.AI_TOOLS + watchers.AI_TOOLS + daily.AI_TOOLS + whatsapp.AI_TOOLS + metrics.AI_TOOLS + pc_control.AI_TOOLS + file_tools.AI_TOOLS + screen_agent.AI_TOOLS + [ai_status, learned_habits, forget_correction, say])
 def _usable(fn) -> bool:
     """Gemini must be able to build a schema from the function signature; one bad tool would make every
     AI request fail, so such a tool is left out (and reported) instead."""
@@ -958,6 +964,8 @@ def ask_local(text: str, offline: bool = False) -> str | None:
     global _brain_used
     if not local_llm.available():
         return None
+    if config.LOCAL_ROUTER:
+        return _ask_routed(text, offline)
     messages = [{"role": "system", "content": _local_system_prompt(offline)}]
     for turn in _dialog[-DIALOG_TURNS:]:
         messages += [{"role": "user", "content": turn["user"][:300]}, {"role": "assistant", "content": turn["reply"][:300]}]
@@ -1033,6 +1041,83 @@ def ask_local(text: str, offline: bool = False) -> str | None:
         if "Connection" in type(e).__name__ or "connect" in str(e).lower():
             local_llm.mark_down("Ollama tidak berjalan")
         return _combine(ran[-1:]) if ran else None     # a skill already ran: never run it twice via Gemini
+
+
+RESUME_RE = re.compile(r"(?:oke |ok |ya |baik )?(?:sudah|udah|beres|selesai|lanjut|lanjutkan|terus|teruskan|terusin)"
+                       r"(?: ya| dong| tugasnya| sekarang)?")
+TALK_RULES = """Di giliran ini kamu hanya berbicara: tidak ada yang kamu lakukan di komputer, jadi jangan pernah mengaku \
+sudah atau sedang melakukan sesuatu. Kalau tidak tahu, bilang tidak tahu; jangan mengarang fakta, angka, atau nama."""
+
+
+def _talk_prompt(offline: bool) -> str:
+    """The character without the tool rules: for answering in words."""
+    return _local_system_prompt(offline).split("Aturan kerja:")[0].rstrip() + "\n\n" + TALK_RULES
+
+
+def _local_talk(text: str, offline: bool) -> str | None:
+    """Small talk with the local model; None when it claims a deed anyway (the online AI takes over)."""
+    global _brain_used
+    history = [(t["user"][:300], t["reply"][:300]) for t in _dialog[-DIALOG_TURNS:]]
+    reply = local_llm.generate(_talk_prompt(offline), f"{_dynamic_context(text, active=False)}\n{text}", history=history,
+                               max_tokens=160, temperature=0.7)
+    if not reply or (not offline and (ACTION_CLAIM_RE.search(reply) or DONE_CLAIM_RE.search(reply))):
+        return None
+    _brain_used = "local"
+    return EMOJI_RE.sub("", reply).strip()
+
+
+def _routed_tool(tool: str, text: str, context: str, offline: bool) -> str | None:
+    """The chosen skill: its arguments, the run, the answer. None = the online AI takes over."""
+    global _brain_used
+    fn = TOOL_MAP.get(tool)
+    if not fn:
+        return None
+    shots = [(i["text"], i["args"]) for i in experience.similar(text, tool=tool, limit=2)]
+    args = local_router.fill_args(fn, text, context, shots)
+    if args is None:
+        console.print(f"[dim]  ↪ argumen {tool} belum jelas, diteruskan ke Gemini[/dim]")
+        return None
+    _check_cancel()
+    result = str(fn(**_coerce_args(fn, args)))
+    _brain_used = "local"
+    if safety.has_pending():
+        return safety.question()
+    if tool in NEEDS_REPLY_TOOLS or QUESTION_RE.search(text):     # asked something: the answer, not the whole report
+        try:
+            answer = local_llm.generate(_talk_prompt(offline), f"Pertanyaan user: {text}\nHasil dari sistem: {result[:1500]}\n"
+                                        "Jawab singkat berdasarkan hasil itu saja, jangan menambah apa pun.", max_tokens=120)
+            if answer:
+                return EMOJI_RE.sub("", answer).strip()
+        except Exception as e:
+            diag.warn_once("local.phrase", "otak lokal gagal merangkai hasil alat", e)
+    return _combine([result])
+
+
+def _ask_routed(text: str, offline: bool) -> str | None:
+    """The local brain: one choice from a fixed list (local_router.py), then that choice carried out. None = the
+    online AI takes the request (it needs the internet, or the local model failed)."""
+    global _brain_used
+    turn = _dialog[-1] if _dialog and time.time() - _dialog[-1].get("at", 0) < 120 else None
+    try:
+        similar = [(i["text"], i["tool"]) for i in experience.similar(text)]
+        choice = local_router.pick(text, (turn["user"], turn["reply"]) if turn else None, similar)
+        console.print(f"[dim]  🧭 pilihan otak lokal: {choice}[/dim]")
+        if choice == local_router.ASK:
+            _brain_used = "local"
+            return f"Maaf {T}, kurang jelas. Maksudnya apa?"
+        if choice == local_router.CHAT or (offline and choice in (local_router.AI, local_router.KNOW)):
+            return _local_talk(text, offline)
+        if choice in (local_router.AI, local_router.KNOW):
+            console.print("[dim]  ↪ diteruskan ke Gemini[/dim]")
+            return None
+        return _routed_tool(choice, text, _dynamic_context(text, active=False), offline)
+    except Cancelled:
+        return None
+    except Exception as e:
+        console.print(f"[dim red]  [lokal {config.LOCAL_MODEL}] {escape(str(e)[:120])}[/dim red]")
+        if "Connection" in type(e).__name__ or "connect" in str(e).lower():
+            local_llm.mark_down("Ollama tidak berjalan")
+        return _combine([r for _, _, r in _calls_this_turn[-1:]]) if _calls_this_turn else None   # never run a skill twice
 
 
 # a scrap of speech with no request in it ("dan tik", "this", "yang itu tadi") — misheard; ask instead of guessing
@@ -1124,7 +1209,7 @@ def _think(text: str) -> str | None:
 
 
 def _remember_turn(user: str, reply: str):
-    turn = {"user": user, "reply": reply, "brain": _brain_used or "fast"}
+    turn = {"user": user, "reply": reply, "brain": _brain_used or "fast", "at": time.time()}
     _dialog.append(turn)
     del _dialog[:-DIALOG_TURNS * 2]
     if turn["brain"] != "gemini":
@@ -1635,7 +1720,7 @@ def _message_route(text: str) -> str | None:
 
 
 # "lagi", "dikit lagi", "sekali lagi": the last adjustment once more (volume, lamp, screen, next song)
-_last_action: dict = {"tool": "", "kwargs": {}, "at": 0.0}
+_last_fast: dict = {"tool": "", "kwargs": {}, "at": 0.0}
 REPEAT_SECONDS = 90
 REPEATABLE = {"volume_up", "volume_down", "lamp_brightness", "media_control", "scroll", "zoom"}
 
@@ -1643,8 +1728,8 @@ REPEATABLE = {"volume_up", "volume_down", "lamp_brightness", "media_control", "s
 def _repeat_last(said: str):
     """The last fast command again ("lagi"), a little less of it ("dikit lagi": half the step), or None when there
     is nothing sensible to repeat (then the AI hears "lagi" as it is)."""
-    tool, kwargs = _last_action["tool"], dict(_last_action["kwargs"])
-    if time.time() - _last_action["at"] > REPEAT_SECONDS or tool not in REPEATABLE:
+    tool, kwargs = _last_fast["tool"], dict(_last_fast["kwargs"])
+    if time.time() - _last_fast["at"] > REPEAT_SECONDS or tool not in REPEATABLE:
         return None
     if tool == "lamp_brightness" and not kwargs.get("relative"):
         return None                      # "lampu 50%" again changes nothing
@@ -1704,7 +1789,7 @@ def fast_route(text: str) -> str | None:
             return _ask_pick(kwargs)
         result = str(TOOL_MAP[name](**kwargs))
         if name != "_repeat":
-            _last_action.update(tool=name, kwargs=dict(kwargs), at=time.time())
+            _last_fast.update(tool=name, kwargs=dict(kwargs), at=time.time())
         _system_notes.append(f"perintah '{text}' langsung dijalankan: {result}")
         del _system_notes[:-6]
         return _combine([result])
@@ -1898,6 +1983,8 @@ def process_command(text: str) -> tuple[str, bool]:
         return "", False                 # timed out: its late answer and actions must not land in the next command
     if _calls_this_turn:
         _last_action.update(text=fixed, calls=list(_calls_this_turn), at=time.time())
+        if _brain_used == "gemini" and len(_calls_this_turn) == 1 and not habits.FAILED_RESULT.search(_calls_this_turn[0][2]):
+            experience.note(fixed, _calls_this_turn[0][0], _calls_this_turn[0][1])   # the teacher showed how: learned
     if reply and not should_exit:
         _remember_turn(fixed, reply)
         if _brain_used:
@@ -1932,6 +2019,7 @@ def _correction(text: str) -> str | None:
         return None                              # can't tell what to replace: let Gemini handle it
     retry = re.sub(rf"(?<!\w){re.escape(wrong)}(?!\w)", right, before, count=1)
     tools = {name for name, _, _ in _last_action["calls"]}
+    experience.forget(_last_action["text"])          # it did the wrong thing: not an example to learn from
     _last_action.clear()
     reply, _ = _process_command(retry)
     worked = bool(reply) and not habits.FAILED_RESULT.search(reply)     # only a correction that worked is learned
@@ -1956,6 +2044,10 @@ def _process_command(text: str) -> tuple[str, bool]:
     picked = _answer_pick(_normalize(text))
     if picked is not None:
         return picked, False
+
+    # The screen job asked the user to do something ("isi kata sandinya"): "sudah" goes on
+    if screen_agent.waiting() and RESUME_RE.fullmatch(cmd):
+        return screen_agent.resume_task(), False
 
     # Answer to a pending "are you sure?" question
     if safety.has_pending():

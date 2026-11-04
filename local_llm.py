@@ -88,6 +88,48 @@ def chat(messages: list[dict], tools: list[dict] | None = None, max_tokens: int 
     return message
 
 
+def _no_think_model() -> bool:
+    """Qwen 3 models: `think: false` does nothing with these tags (measured 4 Nov 2026: it still "thought" up to 200
+    tokens before answering, often the whole budget, leaving an empty answer). An empty thinking block written in
+    the prompt itself is the way that works: what Qwen's own chat template does for enable_thinking=False."""
+    return "qwen" in config.LOCAL_MODEL.lower()
+
+
+def generate(system: str, user: str, schema: dict | None = None, max_tokens: int = 200,
+             temperature: float = 0.2, history: list[tuple[str, str]] | None = None) -> str:
+    """One answer without thinking first. schema: a JSON schema the answer must follow (Ollama enforces it token by
+    token, so the model can't answer anything else). history: earlier (user, assistant) turns. Returns the text."""
+    global _full_gpu_failed
+    options = {**_options(max_tokens), "temperature": temperature}
+    if _no_think_model():
+        turns = "".join(f"<|im_start|>user\n{u}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n{a}<|im_end|>\n"
+                        for u, a in history or [])
+        path = "/api/generate"
+        body = {"model": config.LOCAL_MODEL, "raw": True, "stream": False, "keep_alive": config.LOCAL_KEEP_ALIVE,
+                "options": options,
+                "prompt": f"<|im_start|>system\n{system}<|im_end|>\n{turns}<|im_start|>user\n{user}<|im_end|>\n"
+                          f"<|im_start|>assistant\n<think>\n\n</think>\n\n"}
+    else:
+        messages = [{"role": "system", "content": system}]
+        for u, a in history or []:
+            messages += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+        path = "/api/chat"
+        body = {"model": config.LOCAL_MODEL, "stream": False, "keep_alive": config.LOCAL_KEEP_ALIVE, "options": options,
+                "messages": messages + [{"role": "user", "content": user}], "think": False}
+    if schema:
+        body["format"] = schema
+    r = requests.post(_url(path), json=body, timeout=config.LOCAL_TIMEOUT_SECONDS)
+    if r.status_code >= 500 and "num_gpu" in options and GPU_ERROR_RE.search(r.text):
+        _full_gpu_failed = time.time()
+        print(f"[lokal] GPU penuh, model dimuat sebagian di CPU ({r.text[:80]})")
+        options.pop("num_gpu")
+        r = requests.post(_url(path), json=body, timeout=config.LOCAL_TIMEOUT_SECONDS)
+    r.raise_for_status()
+    data = r.json()
+    text = data.get("response") if path == "/api/generate" else (data.get("message") or {}).get("content")
+    return strip_thinking(text or "") if not schema else (text or "")
+
+
 def strip_thinking(text: str) -> str:
     """Drop a <think>...</think> block some models still write into the answer."""
     text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)

@@ -160,16 +160,28 @@ def test_router_fixes_from_the_log():
     assert brain._route("buka ho") == ("show_hud", {}) and brain._route("buka hood") == ("show_hud", {})
     assert brain._route("atur kecerahan di 10%") == ("set_brightness", {"level": 10})
     assert brain._route("bukan itu") is None                                  # "no", an answer: not "buka itu"
-    brain._last_action.update(tool="", kwargs={}, at=0)
+    brain._last_fast.update(tool="", kwargs={}, at=0)
     assert brain._route("lagi") is None                                       # nothing to repeat
-    brain._last_action.update(tool="volume_up", kwargs={"amount": 10}, at=time.time())
+    brain._last_fast.update(tool="volume_up", kwargs={"amount": 10}, at=time.time())
     assert brain._route("lagi") == ("volume_up", {"amount": 10})
     assert brain._route("dikit lagi") == ("volume_up", {"amount": 5})
     assert brain._route("dikit dong") == ("volume_up", {"amount": 5})
-    brain._last_action.update(tool="open_application", kwargs={"name": "firefox"}, at=time.time())
+    brain._last_fast.update(tool="open_application", kwargs={"name": "firefox"}, at=time.time())
     assert brain._route("lagi") is None                                       # opening Firefox again: no
-    brain._last_action.update(tool="volume_up", kwargs={"amount": 10}, at=time.time() - 600)
+    brain._last_fast.update(tool="volume_up", kwargs={"amount": 10}, at=time.time() - 600)
     assert brain._route("lagi") is None                                       # long ago
+
+
+def test_repeat_and_corrections_keep_separate_memories():
+    """"lagi" (the last fast command) and the correction memory ("bukan, maksudnya …") must not share one variable:
+    a fast command then broke the local AI's tool choice and corrections with a KeyError."""
+    brain._last_action.clear()
+    brain._last_fast.update(tool="volume_up", kwargs={"amount": 10}, at=time.time())
+    assert brain._local_tools("kecilkan suara") is not None           # (read the correction memory: must not crash)
+    assert not brain._last_action                                     # a fast command doesn't touch that memory
+    brain._last_action.update(text="buka firefox", calls=[("open_application", {"name": "firefox"}, "ok")], at=time.time())
+    brain._last_action.clear()                                        # a correction used it up
+    assert brain._route("lagi") == ("volume_up", {"amount": 10})      # "lagi" still works
 
 
 def test_metrics_report():
@@ -200,7 +212,8 @@ if __name__ == "__main__":
     ok = True
     for test in (test_storage_survives_damage, test_log_has_times_and_no_messages, test_alarm_keeps_laptop_awake,
                  test_alarm_loud_enough_and_next_ring, test_service_and_heartbeat, test_core_alive,
-                 test_router_fixes_from_the_log, test_metrics_report):
+                 test_router_fixes_from_the_log, test_repeat_and_corrections_keep_separate_memories,
+                 test_metrics_report):
         try:
             test()
             print(f"✓ {test.__name__}")

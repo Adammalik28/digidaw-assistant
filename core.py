@@ -38,6 +38,7 @@ import notifications
 import persona
 import presence
 import aec
+import screen_agent
 
 console = Console()
 T = config.USER_TITLE
@@ -426,7 +427,10 @@ class DigidawCore:
 
     def escape_key(self):
         """Esc anywhere: if Digidaw is listening / talking / thinking, cancel that; otherwise start
-        listening right away (no need to say "Digidaw")."""
+        listening right away (no need to say "Digidaw"). A job running on the screen stops first of all."""
+        if screen_agent.cancel():
+            console.print("[bold]⏹ tugas di layar dihentikan (Esc)[/bold]")
+            return
         if not self.voice_enabled:
             return
         now = time.time()
@@ -1233,7 +1237,7 @@ class DigidawCore:
             self._armed_loose = loose
             return
         self._armed_loose = False
-        if CLOSING_RE.fullmatch(command.strip(" .,!?")) and not safety.has_pending():
+        if CLOSING_RE.fullmatch(command.strip(" .,!?")) and not safety.has_pending() and not screen_agent.waiting():
             self.close_conversation()   # "terima kasih" / "sudah": end the conversation
             reply = f"Sama-sama, {T}."
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {reply}")

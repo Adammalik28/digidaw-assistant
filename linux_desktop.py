@@ -45,6 +45,15 @@ def run(args: list[str], timeout: float = 5, input: bytes | str | None = None) -
         return None
 
 
+def run_bytes(args: list[str], timeout: float = 5) -> bytes:
+    """A tool's raw output (a picture from grim); b"" when it fails."""
+    try:
+        r = subprocess.run(args, capture_output=True, timeout=timeout)
+        return r.stdout if r.returncode == 0 else b""
+    except (OSError, subprocess.TimeoutExpired):
+        return b""
+
+
 def out(args: list[str], timeout: float = 5) -> str:
     r = run(args, timeout)
     return r.stdout.strip() if r and r.returncode == 0 else ""

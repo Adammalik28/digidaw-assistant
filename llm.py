@@ -371,8 +371,9 @@ def status() -> dict:
                     "retired": m in _retired} for m in config.FALLBACK_MODELS}
 
 
-def generate(contents, system_instruction: str | None = None, max_tokens: int = 600) -> str:
-    """One-shot generation without tools, using the router."""
+def generate(contents, system_instruction: str | None = None, max_tokens: int = 600, response_schema: dict | None = None,
+             temperature: float = 0.4) -> str:
+    """One-shot generation without tools, using the router. response_schema: the answer is JSON following it."""
     from google.genai import types
     client = get_client()
     if not client:
@@ -389,14 +390,16 @@ def generate(contents, system_instruction: str | None = None, max_tokens: int = 
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     max_output_tokens=max_tokens,
-                    temperature=0.4,
+                    temperature=temperature,
                     thinking_config=thinking_config(model),
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                    **({"response_mime_type": "application/json", "response_schema": response_schema}
+                       if response_schema else {}),
                 ),
             )
             if response.text:
                 mark_ok(model)
-                return clean(response.text)
+                return response.text if response_schema else clean(response.text)
         except Exception as e:
             print(f"[AI] {model}: {report_error(model, e)}")
             kind = classify(e)

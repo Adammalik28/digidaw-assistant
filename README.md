@@ -90,7 +90,7 @@ Sertakan hasilnya (dan potongan `logs/digidaw.log`) saat membuat *issue*.
 | Permintaan | Ditangani oleh |
 | :--- | :--- |
 | Perintah jelas: *buka/tutup aplikasi, workspace, volume, alarm, ketik, putar lagu* | Langsung dijalankan, tanpa AI (instan) |
-| Obrolan, pertanyaan ringan, hitungan, perintah yang perlu dipahami | **Qwen** lokal (±1 dtk) |
+| Obrolan, pertanyaan ringan, perintah yang perlu dipahami | **Qwen** lokal: memilih satu tindakan dari daftar tetap (±0,6 dtk) |
 | Butuh internet / data terbaru (berita, harga, skor, *"hari ini"*, *"terbaru"*) | **Gemini** |
 | Kompleks (analisis, bandingkan, kode, penjelasan detail), layar, dokumen, project | **Gemini** |
 | Qwen ragu, tidak punya tool yang cocok, atau mengaku beraksi tanpa benar-benar beraksi | Otomatis diteruskan ke **Gemini** |
@@ -100,6 +100,17 @@ Atur di **Control Panel → AI**: *Otak utama* (gabungan / selalu Gemini / utama
 *Gaya bicara* (saya/Anda atau aku/kamu). Log mencatat otak yang menjawab (`🧠 lokal` / `🧠 gemini`).
 Model lain bisa dipakai: `ollama pull <model>` lalu isi namanya di Control Panel. Hindari model *thinking*
 karena 10–50 detik per jawaban.
+
+**Bagaimana Qwen memilih** (`local_router.py`): model kecil tidak dibiarkan menulis bebas. Ollama memaksa jawabannya
+menjadi salah satu nama di daftar (skema JSON), lalu argumennya diisi terpisah; kata yang tidak Anda ucapkan tidak
+dipakai, dan kalau ragu Gemini yang mengambil alih. **Belajar dari Gemini** (`experience.py`): setiap perintah yang
+berhasil lewat Gemini dicatat di `logs/experience.json` dan dipakai sebagai contoh untuk kalimat serupa, jadi Qwen
+makin jarang perlu bantuan; *"bukan, maksudnya …"* menghapus contoh yang salah.
+
+**Mengukur kecerdasannya:** `tests/exam_brain.py [model] [holdout]` memberi nilai pada soal kalimat alami tanpa
+menjalankan alat apa pun. Dengan ini model baru bisa dibandingkan secara adil sebelum dipakai. Hasil terakhir
+(4 Nov 2026) pada soal yang belum pernah dipakai untuk menyetel (`holdout`): 32 dari 40 benar, 7 diserahkan ke Gemini,
+1 salah alat; cara lama pada soal yang sama: 19 benar, 11 diserahkan, 10 salah.
 
 ---
 
@@ -453,6 +464,31 @@ Kalau AI gagal, jawaban suaranya menyebut penyebab yang sebenarnya.
 
 ---
 
+## 🖐️ Kendali Penuh PC
+
+| Kemampuan | Contoh |
+| :--- | :--- |
+| **Mengerjakan tugas di layar** | *"Buka Firefox, cari harga RTX 4060, buka hasil pertama"*, *"Ubah tema VS Code jadi gelap"* |
+| **Klik** | *"Klik tombol Download"*, *"Klik dua kali ikon Steam"*, *"Klik kanan folder ini"*, *"Klik"* (di posisi penunjuk) |
+| **Pengaturan** | *"Matikan wifi"*, *"Sambungkan wifi ke Kantor"*, *"Sambungkan bluetooth ke Sony"*, *"Mode hemat baterai"*, *"Jangan ganggu"*, *"Suara ke HDMI"*, *"Matikan layar"* |
+| **File** | *"Isi folder Unduhan"*, *"Baca file catatan.txt di Dokumen"*, *"Pindahkan foto.jpg ke Dokumen"*, *"Salin ..."*, *"Ganti nama ..."* |
+
+Tugas di layar berjalan di latar: lihat layar → satu langkah → lihat lagi (`screen_agent.py`). Sebelum setiap klik ada
+"lihat dekat": potongan di sekitar sasaran diperbesar lalu diperiksa lagi, dan tulisan di titik itu ikut dinilai.
+
+- **Esc** atau *"hentikan tugas"* menghentikannya kapan saja.
+- Langkah yang tidak bisa dibatalkan (mengirim, membayar, menghapus, memasang, masuk akun …) menunggu *"ya"* Anda.
+- Kata sandi, PIN, dan OTP tidak pernah diketik Digidaw: ia meminta Anda mengisinya, lalu lanjut setelah Anda bilang *"sudah"*.
+- Tulisan di layar dianggap data, bukan perintah.
+- Berhenti sendiri kalau macet, layar terkunci, atau melewati 30 langkah / 7 menit.
+- File: tidak pernah menimpa; `.env`, `.ssh`, dan kunci tidak dibaca; folder sistem dan folder Digidaw tidak diubah.
+- **Privasi:** setiap langkah mengirim gambar layar dan judul jendela yang terbuka ke Google (Gemini), hanya saat tugas berjalan.
+
+`tests/e2e_hands.py` memeriksa tangannya di desktop sungguhan (jendela uji kecil, tanpa AI). Jalankan setelah Hyprland
+diperbarui.
+
+---
+
 ## 🖥️ HUD Holografik
 
 Panel tambahan: **Keamanan** (skor, scan terakhir/berikutnya, penjaga unduhan, tombol SCAN / LAPORAN / DEFENDER),
@@ -491,6 +527,7 @@ DIGIDAW berjalan dalam **Agent Mode**: Gemini AI memahami maksud Anda lalu menja
 | **Catatan & Dikte** | *"Buka notepad dan catat berikut: rapat jam 3"*, *"Tambahkan ke catatan tadi: bawa laptop"*, *"Mulai dikte"* → semua ucapan diketik ke aplikasi aktif, *"Selesai dikte"* |
 | **Aplikasi & Jendela** | *"Buka Steam"*, *"Tutup Chrome"* (ditutup normal, seperti klik X), *"Paksa tutup Spotify"*, *"Pindah ke WhatsApp"*, *"Maksimalkan jendela ini"*, *"Taruh Chrome di kiri layar"*, *"Jendela apa saja yang terbuka?"* |
 | **Website** | *"Buka Instagram"*, *"Buka detik.com"*, *"Googling resep nasi goreng"* |
+| **Kendali PC** | *"Klik tombol Download"*, *"Buka Firefox lalu cari harga RTX 4060"*, *"Matikan wifi"*, *"Mode hemat baterai"* — lihat [Kendali Penuh PC](#️-kendali-penuh-pc) |
 | **File & Folder** | *"Buka folder Downloads"*, *"Cari file skripsi"*, *"Buat folder Proyek di desktop"*, *"Hapus file X"* (masuk Recycle Bin) |
 | **Pembersihan** | *"Hapus sampah di Recycle Bin"*, *"Bersihkan file temp"* |
 | **Volume & Layar** | *"Volume 40"*, *"Keraskan suara"*, *"Mute"*, *"Kecerahan 70"*, *"Screenshot"* (tersimpan + disalin ke clipboard) |
@@ -556,6 +593,8 @@ catatan di folder Documents/Digidaw Notes, screenshot di Pictures/Screenshots.
 | `core.py` | Orkestrator: antrean perintah, wake word, follow-up, dikte, push-to-talk |
 | `brain.py` | Router perintah cepat, otak hybrid (Qwen lokal + Gemini agent), koreksi & penjaga klaim palsu |
 | `local_llm.py` · `llm.py` | Klien Ollama · klien & rotasi model Gemini |
+| `local_router.py` · `experience.py` | Pilihan paksa otak lokal (daftar alat, argumen) · belajar dari Gemini |
+| `screen_agent.py` · `pc_control.py` · `file_tools.py` | Tugas di layar · mouse, tangkapan layar, Wi-Fi/Bluetooth/daya/audio · file |
 | `persona.py` · `habits.py` · `memory.py` | Gaya bicara natural · kebiasaan & koreksi salah dengar · memori jangka panjang |
 | `system_control.py` | Skill sistem: aplikasi, file, volume, catatan, timer, power, dll |
 | `media.py` · `firefox_player.py` | Pemutar YouTube (DevTools / WebDriver BiDi), media session, ducking |
@@ -576,8 +615,8 @@ catatan di folder Documents/Digidaw Notes, screenshot di Pictures/Screenshots.
 
 Menambah skill: tulis fungsi Python (dengan type hint + docstring yang jelas) di modul yang sesuai,
 lalu masukkan ke daftar `AI_TOOLS` modul itu. Gemini otomatis bisa memakainya, dan skill itu juga
-bisa dipakai di dalam protokol. Agar Qwen juga bisa memakainya, tambahkan namanya ke `LOCAL_TOOL_NAMES`
-dan kelompok kata kuncinya di `LOCAL_TOOL_GROUPS` (`brain.py`).
+bisa dipakai di dalam protokol. Agar Qwen juga bisa memakainya, tambahkan nama dan keterangannya ke `CATALOG`
+(`local_router.py`).
 
 ---
 

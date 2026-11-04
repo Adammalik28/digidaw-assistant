@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import golden  # noqa: E402
 
-KEEP_TOOLS = {"open_application", "close_application", "focus_window", "open_website", "close_tab", "media_control",
+KEEP_TOOLS = {"wifi_power", "wifi_connect", "bluetooth", "power_mode", "do_not_disturb", "audio_output", "screen_power",
+              "click_here", "click_on_screen", "stop_task", "resume_task", "list_folder", "open_application", "close_application", "focus_window", "open_website", "close_tab", "media_control",
               "play_youtube", "set_volume", "volume_up", "volume_down", "volume_mute", "set_brightness", "lamp_power",
               "lamp_brightness", "lamp_color", "lamp_scene", "lamp_status", "get_time", "get_date", "switch_workspace",
               "move_to_workspace", "show_hud", "open_many", "close_many", "screen_time", "daily_recap", "now_playing",

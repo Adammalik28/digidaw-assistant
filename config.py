@@ -174,11 +174,12 @@ MODEL_THINKING = {
 BRAIN_MODE = "hybrid"
 ADDRESS_STYLE = "anda"              # how Digidaw speaks to you: "anda" (saya/Anda, sopan santai) | "kamu" (aku/kamu, akrab)
 OLLAMA_URL = "http://127.0.0.1:11434"
-LOCAL_MODEL = "qwen3:4b-instruct"   # a non-thinking model: a "thinking" one takes 10-50 s per answer
+LOCAL_MODEL = "qwen3:4b-instruct"   # (it does think, despite the name: local_llm.generate() skips that, 10-50 s otherwise)
 LOCAL_TIMEOUT_SECONDS = 25
 LOCAL_CONTEXT = 4096                # tokens: system prompt (~1.4k) + tools + 6 turns of dialogue fit without cutting
 LOCAL_FULL_GPU = True               # all layers on the GPU (Ollama's own estimate leaves ~8% on the CPU): 43 -> 55 tok/s
                                     # on a 4 GB RTX 3050; falls back by itself when the GPU memory is taken
+LOCAL_ROUTER = True                 # the local model picks one action from a fixed list (local_router.py), never free text
 LOCAL_KEEP_ALIVE = "60m"            # keep the model in (V)RAM between commands
 
 # Safety: ask "ya/tidak" before shutdown, emptying Recycle Bin, running commands, etc.

@@ -1315,6 +1315,9 @@ def delete_file(path: str) -> str:
     """Move a file or folder to the Recycle Bin / Trash (recoverable). Needs a full path;
     use find_files first if the user only gives a name."""
     p = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+    if not IS_WINDOWS and not os.path.isabs(os.path.expanduser(path)):
+        import file_tools
+        p = str(file_tools._path(path))     # "downloads/x.txt": the user's folders, never where Digidaw happens to run
     if not os.path.exists(p):
         return f"File {path} tidak ditemukan, {T}."
     if not IS_WINDOWS:
@@ -1693,9 +1696,40 @@ def _run_command_elevated(command: str) -> str:
 
 
 def run_command(command: str) -> str:
-    """Run a PowerShell command on the PC and return its output (asks confirmation).
-    Use only when no other specific tool can do the job."""
+    """Run a command on the PC (PowerShell on Windows, the shell on Linux) and return its output. A command that only
+    looks (df -h, ls, pacman -Qi ...) runs right away; anything else asks confirmation. Use only when no other specific
+    tool can do the job."""
+    if _read_only_command(command):
+        return _do_run_command(command)
     return safety.guard(f"jalankan perintah {SHELL_NAME}: {command}", _do_run_command, command=command)
+
+
+# commands that only look: no "yakin?" for these. One plain command only: anything that chains, redirects or
+# substitutes (; | & > < ` $) asks, and so do files that hold secrets.
+READ_ONLY_COMMANDS = {"ls", "df", "du", "free", "uptime", "ps", "ip", "lsblk", "lscpu", "lsusb", "lspci", "whoami", "date",
+                      "hostname", "uname", "nvidia-smi", "sensors", "which", "pwd", "wc", "head", "tail", "cat", "stat",
+                      "file", "ping", "iwgetid", "pactl", "wpctl", "hyprctl"}
+READ_ONLY_SUBCOMMANDS = {"pacman": r"-Q\w*", "systemctl": r"(?:--user )?(?:status|is-active|is-enabled|list-units)",
+                         "journalctl": r"(?:-\S+ ?\S* ?)+", "nmcli": r"(?:-\S+ \S+ )*(?:dev|device|con|connection|radio|general)(?: (?:show|status|wifi))?(?: list)?",
+                         "git": r"(?:status|log|diff|branch)", "bluetoothctl": r"(?:devices|show|info)", "pactl": r"(?:list|info|get-)\S*",
+                         "wpctl": r"(?:status|get-volume|inspect)", "hyprctl": r"(?:monitors|clients|workspaces|activewindow|version)"}
+
+
+def _read_only_command(command: str) -> bool:
+    if IS_WINDOWS or re.search(r"[;|&><`$\n]", command):
+        return False
+    words = command.split()
+    if not words:
+        return False
+    tool = words[0]
+    rest = " ".join(words[1:])
+    if tool in ("cat", "head", "tail", "ls", "stat", "file", "wc"):
+        import file_tools
+        if file_tools.SECRET_RE.search(rest):
+            return False
+    if tool in READ_ONLY_SUBCOMMANDS:
+        return bool(re.match(READ_ONLY_SUBCOMMANDS[tool], rest))
+    return tool in READ_ONLY_COMMANDS
 
 
 if not IS_WINDOWS:   # these docstrings are what Gemini reads about the tools

@@ -10,6 +10,7 @@ alarms.json
 agenda.json
 media_state.json
 project_versions.json
+*.json.bak
 
 # ── runtime / caches / downloads ──
 logs/
