@@ -124,6 +124,91 @@ def test_memory():
     assert memory.all_facts() == []
 
 
+def test_memory_is_learned_by_asking():
+    """Said in passing: the local model writes the fact, Digidaw asks, "ya" saves it, silence or "tidak" doesn't."""
+    import local_llm
+    import safety
+    folder = Path(tempfile.mkdtemp())
+    memory.SEMANTIC_FILE, memory.MEMORY_FILE = folder / "memory_semantic.json", folder / "memory.json"
+    memory._get_embedding = _fake_embedding
+    asked = []
+    real = (local_llm.generate, local_llm.available)
+    local_llm.available = lambda refresh=False: True
+
+    def answering(fact):
+        def fake(system, user, schema=None, max_tokens=200, temperature=0.2, history=None):
+            asked.append(user)
+            return json.dumps({"ada": bool(fact), "fakta": fact})
+        local_llm.generate = fake
+    try:
+        # the words alone rule most out, without asking the model at all
+        answering("saya x")
+        for sentence in ("buka firefox", "jam berapa sekarang", "aku capek banget hari ini", "kamu suka apa", "apa hobi saya",
+                         "aku mau makan", "tadi aku kerja", "password saya rahasia123", "pin kartu saya 1234",
+                         "saya lagi suka lagu ini", "tolong ingetin aku kerja"):
+            assert memory.learnable(sentence) == "", sentence
+        assert not asked
+        # the model's answer is checked too
+        answering("")
+        assert memory.learnable("aku suka ini") == "" and asked
+        answering("saya suka kopi hitam dari aceh")
+        assert memory.learnable("aku suka teh") == ""                  # invented: not what was said
+        answering("saya alergi kacang")
+        assert memory.learnable("aku alergi kacang") == "saya alergi kacang"
+        # the whole way, with the question
+        brain._calls_this_turn.clear()
+        safety.cancel()
+        question = brain.memory_question("aku alergi kacang")
+        assert "ingat" in question and "alergi kacang" in question and safety.has_pending() and config.USER_TITLE in question
+        assert "Tersimpan" in safety.confirm() and memory.all_facts() == ["saya alergi kacang"]
+        assert memory.learnable("aku alergi kacang") == ""             # known already: not asked again
+        answering("saya kuliah di kota")
+        assert brain.memory_question("aku kuliah di kota") and safety.classify_answer("tidak") == "no"
+        safety.cancel()
+        assert memory.all_facts() == ["saya alergi kacang"]            # "tidak": not saved
+        # a command that did something isn't a fact, and a question already waiting comes first
+        brain._calls_this_turn.append(("set_timer", {}, "ok"))
+        assert brain.memory_question("aku kuliah di kota") == ""
+        brain._calls_this_turn.clear()
+        safety.guard("hapus file", lambda: "x", always=True)
+        assert brain.memory_question("aku kuliah di kota") == ""
+        safety.cancel()
+        # the local brain uses what it knows when it talks
+        assert "alergi kacang" in brain._talk_prompt(False)
+        # forgetting, by voice
+        assert "Yang mana" in memory.remove("saya") and memory.all_facts()     # not everything at once
+        memory.add("saya suka kopi")
+        assert "sudah saya lupakan: saya suka kopi" in memory.forget_latest() and memory.all_facts() == ["saya alergi kacang"]
+        assert "sudah saya hapus" in memory.remove("kalau kacang") and memory.all_facts() == []
+    finally:
+        local_llm.generate, local_llm.available = real
+        safety.cancel()
+
+
+def test_memory_and_favourite_routes():
+    import media
+    import habits
+    import system_control as sc
+    assert brain._route("lupakan yang tadi") == ("forget_latest", {}) and brain._route("hapus yang itu") == ("forget_latest", {})
+    assert brain._route("lupakan kopi") == ("forget", {"keyword": "kopi"})
+    assert brain._route("lupakan percakapan") != ("forget", {"keyword": "percakapan"})
+    for said in ("apa yang kamu ingat tentang aku", "apa saja yang kamu tahu", "kamu tahu apa tentang saya"):
+        assert brain._route(said) == ("recall_memories", {}), said
+    for said in ("putar lagu kesukaanku", "putar lagu favorit saya", "setel yang biasa", "putar musik favoritku"):
+        assert brain._route(said) == ("play_favourite", {}), said
+    played = []
+    real = (media.play_youtube, habits.favourites)
+    media.play_youtube = lambda query, mix=False: played.append(query) or "ok"
+    try:
+        habits.favourites = lambda kind, n=6: ["do i wanna know", "be my baby"]
+        assert media.play_favourite() == "ok" and played[0] in ("do i wanna know", "be my baby")
+        habits.favourites = lambda kind, n=6: []
+        assert "belum tahu" in media.play_favourite()
+    finally:
+        media.play_youtube, habits.favourites = real
+    assert "Yang saya ingat" in sc.recall_memories() or "kosong" in sc.recall_memories()
+
+
 def test_local_ai_claims():
     """The local AI saying it did something without doing it is caught (then Gemini acts)."""
     for claim in ("Membuka Firefox untuk Anda.", "Baik, saya sudah mematikan lampunya.", "Sudah saya kirim, Tuan."):
@@ -153,6 +238,7 @@ def test_push_subscriptions():
 if __name__ == "__main__":
     ok = True
     for test in (test_timer_and_alarm, test_alarms_survive_a_restart, test_snooze_and_stop, test_memory,
+                 test_memory_is_learned_by_asking, test_memory_and_favourite_routes,
                  test_local_ai_claims, test_push_subscriptions):
         try:
             test()

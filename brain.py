@@ -101,6 +101,10 @@ def _logged(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         _check_cancel()                  # the user was already told this command took too long: do nothing more
+        if fn.__name__ in SCREEN_TOOLS and screen_agent.running():
+            screen_agent.cancel()        # the user moved on: a job must not go on clicking in what they do now
+            _job_stopped_now.append(True)
+            console.print("[dim]  ⏹ tugas di layar dihentikan: ada perintah baru[/dim]")
         arg_str = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
         console.print(f"[dim cyan]  ⚙ {fn.__name__}({arg_str})[/dim cyan]")
         events.emit("tool", name=fn.__name__, args={k: str(v)[:80] for k, v in kwargs.items()})
@@ -126,6 +130,13 @@ def _logged(fn):
 
 _tools_used: list[str] = []
 _calls_this_turn: list[tuple[str, dict, str]] = []     # (tool, kwargs, result) of the current command
+_job_stopped_now: list[bool] = []                      # this command stopped a job on the screen: the reply says so
+# skills that change what is on the screen or send input: the user is doing something else now
+SCREEN_TOOLS = {"open_application", "open_many", "open_website", "open_folder", "open_file", "open_generated",
+                "close_application", "close_many", "close_all_apps", "close_tab", "close_current_tab", "switch_tab",
+                "focus_window", "window_action", "switch_workspace", "move_to_workspace", "navigate", "google_search",
+                "search_youtube", "play_youtube", "play_favourite", "play_spotify", "type_text", "press_keys", "show_hud", "hide_hud",
+                "lock_workstation", "click_here", "run_protocol", "open_script_manager", "run_script", "close_script_window"}
 # tools that start work in the background: no open "follow-up" window afterwards, so a stray word
 # ("Star") isn't taken as a second image / file / scan
 BACKGROUND_TOOLS = {"do_on_screen", "click_on_screen", "generate_image", "create_file", "security_scan", "defender_scan", "improve_project",
@@ -801,6 +812,10 @@ MULTI_ACTION_RE = re.compile(r"(?:^|\b(?:dan|lalu|terus|kemudian|habis itu|setel
                              r"atur|matikan|nyalakan|pindah|pindahkan|simpan|ingatkan)\b")
 
 
+TWO_SETTINGS_RE = re.compile(r"\b(?:volume|suara|kecerahan|lampu|layar)\b.*\b(?:dan|lalu|terus|sambil)\b.*"
+                             r"\b(?:volume|suara|kecerahan|lampu|layar)\b")      # "atur volume 10 dan kecerahan 20"
+
+
 def gemini_reason(text: str) -> str:
     """Why this request should skip the local model ('' = Qwen answers it). Instant keyword check."""
     cmd = _normalize(text)
@@ -812,7 +827,7 @@ def gemini_reason(text: str) -> str:
         return "data terbaru"   # "siapa juara liga sekarang" — but "jam berapa sekarang" is local
     if COMPLEX_RE.search(cmd):
         return "pertanyaan kompleks"
-    if len(MULTI_ACTION_RE.findall(cmd)) >= 2:
+    if len(MULTI_ACTION_RE.findall(cmd)) >= 2 or TWO_SETTINGS_RE.search(cmd):
         return "beberapa perintah sekaligus"
     words = len(cmd.split())
     if words > 30 or (words > 14 and len(ASKING_RE.findall(cmd)) >= 3):
@@ -1043,6 +1058,8 @@ def ask_local(text: str, offline: bool = False) -> str | None:
         return _combine(ran[-1:]) if ran else None     # a skill already ran: never run it twice via Gemini
 
 
+RETRY_RE = re.compile(r"coba(?: (?P<verb>\w+))? lagi|coba ulang(?:i)?|ulangi(?: lagi| yang tadi)?|sekali lagi")
+RETRY_WINDOW = 180
 RESUME_RE = re.compile(r"(?:oke |ok |ya |baik )?(?:sudah|udah|beres|selesai|lanjut|lanjutkan|terus|teruskan|terusin)"
                        r"(?: ya| dong| tugasnya| sekarang)?")
 TALK_RULES = """Di giliran ini kamu hanya berbicara: tidak ada yang kamu lakukan di komputer, jadi jangan pernah mengaku \
@@ -1050,8 +1067,19 @@ sudah atau sedang melakukan sesuatu. Kalau tidak tahu, bilang tidak tahu; jangan
 
 
 def _talk_prompt(offline: bool) -> str:
-    """The character without the tool rules: for answering in words."""
-    return _local_system_prompt(offline).split("Aturan kerja:")[0].rstrip() + "\n\n" + TALK_RULES
+    """The character without the tool rules, and what it knows about the user: for answering in words."""
+    prompt = _local_system_prompt(offline).split("Aturan kerja:")[0].rstrip() + "\n\n" + TALK_RULES
+    if offline:
+        prompt += "\nAI online sedang tidak bisa dipakai: untuk informasi terbaru, katakan singkat bahwa itu butuh internet."
+    facts = memory.all_facts()
+    if facts:
+        prompt += ("\n\nYang kamu ingat tentang user (pakai kalau berkaitan, jangan disebut kalau tidak perlu):\n"
+                   + "\n".join(f"- {f}" for f in facts[:memory.ALL_IN_PROMPT]))
+    try:
+        prompt += habits.prompt_hint()
+    except Exception:
+        pass
+    return prompt
 
 
 def _local_talk(text: str, offline: bool) -> str | None:
@@ -1093,6 +1121,12 @@ def _routed_tool(tool: str, text: str, context: str, offline: bool) -> str | Non
     return _combine([result])
 
 
+LONG_SENTENCE = 5
+# do_on_screen: a job clicks around and sends pictures of the screen, too much to start on the small model's word (a
+# garbled "perbaiki lagi tidak bisa diklik" started one). The online AI decides; it can choose a simpler skill too.
+NOT_LOCAL_CHOICES = (local_router.AI, local_router.KNOW, "do_on_screen")
+
+
 def _ask_routed(text: str, offline: bool) -> str | None:
     """The local brain: one choice from a fixed list (local_router.py), then that choice carried out. None = the
     online AI takes the request (it needs the internet, or the local model failed)."""
@@ -1103,11 +1137,14 @@ def _ask_routed(text: str, offline: bool) -> str | None:
         choice = local_router.pick(text, (turn["user"], turn["reply"]) if turn else None, similar)
         console.print(f"[dim]  🧭 pilihan otak lokal: {choice}[/dim]")
         if choice == local_router.ASK:
+            if len(text.split()) >= LONG_SENTENCE and not offline:
+                console.print("[dim]  ↪ kalimat panjang: diteruskan ke Gemini[/dim]")
+                return None              # someone explaining something isn't answered with "kurang jelas"
             _brain_used = "local"
             return f"Maaf {T}, kurang jelas. Maksudnya apa?"
-        if choice == local_router.CHAT or (offline and choice in (local_router.AI, local_router.KNOW)):
+        if choice == local_router.CHAT or (offline and choice in NOT_LOCAL_CHOICES):
             return _local_talk(text, offline)
-        if choice in (local_router.AI, local_router.KNOW):
+        if choice in NOT_LOCAL_CHOICES:
             console.print("[dim]  ↪ diteruskan ke Gemini[/dim]")
             return None
         return _routed_tool(choice, text, _dynamic_context(text, active=False), offline)
@@ -1463,9 +1500,9 @@ def _answer_pick(cmd: str) -> str | None:
 
 
 # speech recognition often hears "workspace 4" as "word PS4" / "WordPress 4" / "works ps 2"
-WORKSPACE = r"(?:workspace|work space|workspes|wokspace|ruang kerja|desktop|words? ?ps|works? ?ps|for ps|wordpress|word press|work|ws|sp|es pe|we es|(?:kurs|kursus|course|kers) ?ps)"
+WORKSPACE = r"(?:workspace|work space|workspes|wokspace|ruang kerja|desktop|words? ?ps|world ?ps|works? ?ps|quotes ?ps|for ps|wordpress|word press|work|ws|sp|es pe|we es|(?:kurs|kursus|course|kers) ?ps)"
 WS_NUM = r"(?:ke-? ?|nomor |no )?(?:\d{1,2}|" + "|".join(NUMBER_WORDS) + ")"
-WS_GLUED = re.compile(r"\b(words?|works?|work|for|kurs|kursus|course|kers) ?ps(\d{1,2})\b")   # "word ps4" -> "word ps 4"
+WS_GLUED = re.compile(r"\b(words?|world|works?|work|quotes|for|kurs|kursus|course|kers) ?ps(\d{1,2})\b")   # "word ps4" -> "word ps 4"
 
 
 def _ws(words: str) -> str:
@@ -1550,6 +1587,8 @@ def _search_route(query: str):
     query = re.sub(r"\s+(?:di google|di internet|di web|dong)$", "", query.strip())
     if not query:
         return None
+    if re.match(r"berita\b", query):
+        return None                      # "carikan berita X" is a question about the news (get_news), not a page of results
     if "youtube" in _active_title() or re.match(r"(?:video|musik|klip|lagu) ", query):
         return "search_youtube", {"query": query}
     return "google_search", {"query": query}
@@ -1985,11 +2024,32 @@ def process_command(text: str) -> tuple[str, bool]:
         _last_action.update(text=fixed, calls=list(_calls_this_turn), at=time.time())
         if _brain_used == "gemini" and len(_calls_this_turn) == 1 and not habits.FAILED_RESULT.search(_calls_this_turn[0][2]):
             experience.note(fixed, _calls_this_turn[0][0], _calls_this_turn[0][1])   # the teacher showed how: learned
+    if _job_stopped_now:
+        _job_stopped_now.clear()
+        reply = f"Tugas tadi saya hentikan. {reply}"
     if reply and not should_exit:
         _remember_turn(fixed, reply)
         if _brain_used:
             console.print(f"[dim]   🧠 {'lokal · ' + config.LOCAL_MODEL if _brain_used == 'local' else _brain_used}[/dim]")
     return persona.speak(fix_title(reply)) if reply else reply, should_exit
+
+
+def memory_question(text: str) -> str:
+    """Something worth keeping in what the user just said? Parks "boleh saya ingat?" (answered like any "yakin?") and
+    returns the question; core says it after the reply. Not when the sentence was a command that did something."""
+    if not config.LEARN_FACTS or _calls_this_turn or safety.has_pending():
+        return ""
+    try:
+        fact = memory.learnable(text)
+    except Exception as e:
+        diag.warn_once("memory.learn", "otak lokal gagal membaca fakta dari kalimat", e)
+        return ""
+    if not fact:
+        return ""
+    you = memory.about_you(fact)
+    safety.guard(f"mengingat bahwa {you}", memory.add, always=True, asking=f"Boleh saya ingat: {you}?", fact=fact)
+    console.print(f"[dim]  🧩 fakta baru: {escape(fact)}[/dim]")
+    return persona.speak(fix_title(safety.question()))
 
 
 def _correction(text: str) -> str | None:
@@ -2042,6 +2102,10 @@ def _process_command(text: str) -> tuple[str, bool]:
         return f"Baik, {T}. Saya mulai ulang sekarang, sekitar sepuluh detik.", True
 
     picked = _answer_pick(_normalize(text))
+    if picked is None:
+        picked = pc_control.answer_which_script(cmd)     # "Ada beberapa skrip ... Yang mana?"
+    if picked is None and _dialog and time.time() - _dialog[-1].get("at", 0) < 30:
+        picked = pc_control.answer_about_script(cmd, _dialog[-1]["reply"])
     if picked is not None:
         return picked, False
 
@@ -2063,6 +2127,15 @@ def _process_command(text: str) -> tuple[str, bool]:
             _system_notes.append(f"user membatalkan '{desc}'")
             return result, False
         safety.cancel()  # user moved on to something else
+
+    # "coba lagi" after something that failed: the same command once more ("coba sambungkan lagi" too)
+    retry = RETRY_RE.fullmatch(re.sub(r"[.,!?]", "", cmd).strip())
+    if retry and _last_action and time.time() - _last_action["at"] < RETRY_WINDOW:
+        again = _last_action["text"]
+        verb = retry["verb"]
+        if not verb or any(w[:5] == verb[:5] for w in again.lower().split()):
+            console.print(f"[dim]  ↪ diulang: {escape(again)}[/dim]")
+            return _process_command(again)
 
     if cmd in ("reset", "lupakan percakapan", "mulai percakapan baru"):
         reset_conversation()

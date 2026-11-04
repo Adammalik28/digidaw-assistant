@@ -179,6 +179,11 @@ LOCAL_TIMEOUT_SECONDS = 25
 LOCAL_CONTEXT = 4096                # tokens: system prompt (~1.4k) + tools + 6 turns of dialogue fit without cutting
 LOCAL_FULL_GPU = True               # all layers on the GPU (Ollama's own estimate leaves ~8% on the CPU): 43 -> 55 tok/s
                                     # on a 4 GB RTX 3050; falls back by itself when the GPU memory is taken
+SCRIPTS_DIR = Path.home() / "myskrip"      # the user's own scripts: "jalankan skrip X", "buka skrip"
+SCRIPT_MANAGER = "atur.sh"                 # their fzf list (Super+S)
+SCRIPTS_NOT_RUN = ("lib.sh",)              # a library for the others, as in atur.sh
+SCRIPTS_WITHOUT_WINDOW = ("modeon.sh",)    # only starts apps, which would close along with a terminal
+LEARN_FACTS = True                  # "aku alergi kacang" said in passing: asks "boleh saya ingat?" (memory.learnable)
 LOCAL_ROUTER = True                 # the local model picks one action from a fixed list (local_router.py), never free text
 LOCAL_KEEP_ALIVE = "60m"            # keep the model in (V)RAM between commands
 

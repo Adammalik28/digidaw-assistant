@@ -23,13 +23,13 @@ PENDING_SECONDS = 60          # an unanswered question expires: much later, "ya"
 _pending = None  # dict(description=str, fn=callable, kwargs=dict, at=float)
 
 
-def guard(description: str, fn, always: bool = False, **kwargs) -> str:
+def guard(description: str, fn, always: bool = False, asking: str = "", **kwargs) -> str:
     """Park an action until the user confirms it (or run it now if confirmations are off). always: ask even then
-    (sending a message in the user's name)."""
+    (sending a message in the user's name). asking: the question, when "Yakin ...?" isn't what is meant."""
     global _pending
     if not config.CONFIRM_DANGEROUS_ACTIONS and not always:
         return fn(**kwargs)
-    _pending = {"description": description, "fn": fn, "kwargs": kwargs, "at": time.time()}
+    _pending = {"description": description, "fn": fn, "kwargs": kwargs, "at": time.time(), "asking": asking}
     return (f"{CONFIRMATION_TOKEN}: Aksi '{description}' butuh konfirmasi. "
             f"Tanyakan ke user apakah yakin, minta jawab 'ya' atau 'tidak'.")
 
@@ -52,7 +52,9 @@ def question() -> str:
     """The yes / no question for the action that waits for an answer, short, as a person asks it: 'Yakin mengirim
     WhatsApp ke Rina: "oke", Tuan?' (it used to be 'Apakah Anda yakin ingin …, Tuan? Jawab ya atau tidak.': twice as
     long to say, and "Anda" even when Digidaw speaks with "kamu")."""
-    return f"{QUESTION_START}{pending_description()}, {config.USER_TITLE}?" if _pending else ""
+    if not _pending:
+        return ""
+    return _pending.get("asking") or f"{QUESTION_START}{pending_description()}, {config.USER_TITLE}?"
 
 
 def classify_answer(text: str) -> str:

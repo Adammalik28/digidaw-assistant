@@ -17,13 +17,29 @@ sys.path.insert(0, os.path.dirname(__file__))
 import config  # noqa: E402
 import brain   # noqa: E402
 import golden  # noqa: E402
-from exam_cases import CASES, HOLDOUT  # noqa: E402
+from exam_cases import CASES, HOLDOUT, MEMORY_FACTS, MEMORY_NONE, REAL  # noqa: E402
 
-# tests/exam_brain.py [model] [holdout]: the second exam is the one never tuned for
-if len(sys.argv) > 1 and sys.argv[1] != "holdout":
+# tests/exam_brain.py [model] [holdout|real|memory]: holdout = never tuned for when written; real = sentences as really
+# heard; memory = facts said in passing (memory.learnable)
+if len(sys.argv) > 1 and sys.argv[1] not in ("holdout", "real", "memory"):
     config.LOCAL_MODEL = sys.argv[1]
+if sys.argv[-1] == "memory":
+    import memory
+    memory.all_facts = lambda: []
+    missed = [(t, memory.learnable(t)) for t, word in MEMORY_FACTS]
+    missed = [(t, f) for (t, f), (_, word) in zip(missed, MEMORY_FACTS) if word not in f.lower()]
+    invented = [(t, f) for t, f in ((t, memory.learnable(t)) for t in MEMORY_NONE) if f]
+    print(f"== fakta tertangkap {len(MEMORY_FACTS) - len(missed)}/{len(MEMORY_FACTS)}, salah tangkap {len(invented)}/{len(MEMORY_NONE)}")
+    for t, f in missed:
+        print(f"  terlewat {t!r} -> {f!r}")
+    for t, f in invented:
+        print(f"  salah    {t!r} -> {f!r}")
+    sys.stdout.flush()
+    os._exit(0)
 if sys.argv[-1] == "holdout":
     CASES = HOLDOUT
+if sys.argv[-1] == "real":
+    CASES = REAL
 ran: list[tuple[str, dict]] = []
 
 

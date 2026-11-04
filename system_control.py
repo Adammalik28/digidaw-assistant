@@ -1587,6 +1587,18 @@ def lock_workstation() -> str:
     return f"Mengunci komputer sekarang, {T}."
 
 
+def unlock_screen() -> str:
+    """Asked to UNLOCK the screen ("buka kunci layar"): Digidaw can't, and never locks it instead."""
+    return f"Kunci layar hanya bisa dibuka dengan kata sandi {T}, dan saya sengaja tidak memegangnya."
+
+
+def calculate(sum_said: str) -> str:
+    """A sum: "20 * 30", "15 ditambah 8", "25 persen dari 80", "akar 144", "2 pangkat 10"."""
+    import calculator
+    result = calculator.solve(sum_said)
+    return f"Hasilnya {result}, {T}." if result else f"Hitungan itu tidak bisa saya selesaikan, {T}."
+
+
 POWER_UNIT = "digidaw-power"      # Linux: the delayed shutdown/restart is a cancellable systemd user timer
 
 
@@ -1829,13 +1841,20 @@ def remember(fact: str) -> str:
 
 
 def forget(keyword: str) -> str:
-    """Delete memories containing the keyword."""
+    """Delete memories containing the keyword ("lupakan kopi")."""
     return memory.remove(keyword)
 
 
+def forget_latest() -> str:
+    """Delete the memory saved last ("lupakan yang tadi")."""
+    return memory.forget_latest()
+
+
 def recall_memories() -> str:
-    """List everything stored in long-term memory."""
-    return memory.as_text()
+    """Everything Digidaw knows about the user: facts it was told and what it learned from what they do."""
+    import habits
+    learned = habits.summary()
+    return memory.as_text() + ("" if learned.startswith("Saya belum") else " " + learned)
 
 
 # Skills exposed to Gemini function calling (media/window/AI skills live in their own modules)
@@ -1847,8 +1866,8 @@ AI_TOOLS = [
     write_note, append_to_last_note, read_last_note,
     open_folder, create_folder, find_files, open_file, delete_file, open_project,
     empty_recycle_bin, recycle_bin_status, clean_temp_files, system_cleanup,
-    get_system_status, get_temperature, get_network_info, get_time, get_date, lock_workstation,
+    get_system_status, get_temperature, get_network_info, get_time, get_date, lock_workstation, unlock_screen, calculate,
     shutdown_pc, restart_pc, sleep_pc, log_off, cancel_shutdown, run_command,
     get_weather, sleep_timer,
-    remember, forget, recall_memories,
+    remember, forget, forget_latest, recall_memories,
 ]

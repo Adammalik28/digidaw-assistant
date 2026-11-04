@@ -88,6 +88,38 @@ def test_aec_reads_pipewire():
     assert config.BARGE_IN is False or "BARGE_IN" in settings.load()         # off unless the user turned it on
 
 
+def test_call_google_did_not_hear():
+    """The laptop heard "Digidaw" (chime), Google didn't: the next phrase still works if it sounds like a command, so
+    the user doesn't have to call again. Noise and chatter don't, and the phrase itself isn't a command."""
+    c, heard = _core()
+    assert c.wake_hint("Digidaw")
+    c.wake_unconfirmed()
+    now = time.time()
+    c.on_heard("buka", now - 2, now - 1)                                # the phrase Whisper took for the name
+    assert not heard and time.time() < c.armed_until
+    assert c._ting_undone
+    c.on_heard("telusuri Doraemon", now + 1, now + 1.1)                 # a known command, not only a command word
+    assert heard == ["telusuri Doraemon"] and not c._ting_undone, heard
+
+    heard.clear()
+    c.close_conversation()
+    assert c.wake_hint("Digidaw")
+    c.wake_unconfirmed()
+    now = time.time()
+    c.on_heard("tulang lunak itu", now + 1, now + 1.1)                  # a song, or a command badly heard: forgiven once
+    assert not heard and time.time() < c.armed_until, heard
+    c.on_heard("kok bisa begitu", now + 2, now + 2.1)                   # still not a command: the wait ends
+    assert not heard and c.armed_until == 0.0, heard
+
+    c.close_conversation()
+    assert c.wake_hint("Digidaw")
+    c.wake_unconfirmed()
+    assert c.wake_hint("Digidaw")                                       # called again: answered again
+    c.wake_unconfirmed()
+    c.on_heard("gigi buka Firefox", time.time() + 1, time.time() + 1.1)  # the name misheard, then the command
+    assert heard == ["buka Firefox"], heard
+
+
 def test_alias_after_early_chime():
     """The laptop heard "Digidaw" (chime), Google wrote "digital": the next phrase is the command, whatever it is."""
     c, heard = _core()
@@ -248,12 +280,16 @@ def test_misheard_routes():
 
 
 def test_lamp_question():
-    """"ubah lampu kamera" (kamar merah misheard): Digidaw asks, and the answer finishes the command."""
+    """"ganti lampu": Digidaw asks, and the answer finishes the command. "ubah lampu kamera" ("ke merah" misheard, the
+    log shows the answer each time) doesn't need the question."""
     smarthome.has_lamps = lambda: True
     c, _ = _core()
     ran = []
     c._run_with_deadline = lambda text: (ran.append(text), ("ok", False))[1]
     c._handle("ubah lampu kamera", "hud")
+    assert ran == ["ubah lampu kamera"] and not c._pending_lamp, ran
+    ran.clear()
+    c._handle("ubah lampu", "hud")
     assert not ran and c._pending_lamp
     c._handle("merah", "hud")
     assert ran == ["lampu merah"], ran
@@ -321,7 +357,7 @@ def test_close_menu_app():
 
 if __name__ == "__main__":
     ok = True
-    for test in (test_aec_reads_pipewire, test_alias_after_early_chime, test_alias_alone_then_request,
+    for test in (test_call_google_did_not_hear, test_aec_reads_pipewire, test_alias_after_early_chime, test_alias_alone_then_request,
                  test_google_alias_confirmed_by_laptop, test_gate_hears_name_like_words, test_unfinished_phrase, test_own_echo, test_busy_reason,
                  test_announce_when_busy, test_messages_named_once, test_reading_prepared, test_short_question,
                  test_messages_by_voice, test_misheard_routes, test_lamp_question, test_agenda_past_and_since,

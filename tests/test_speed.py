@@ -135,8 +135,9 @@ def test_wake_hint():
         assert chimes == [True] and c._awaiting_command
         c.close_conversation()
         assert c.wake_hint("Hei Digidaw!")
-        c.wake_unconfirmed()                                         # Google heard something else
-        assert c.armed_until == 0.0
+        c.wake_unconfirmed()                                         # Google heard something else: only doubted
+        assert time.time() < c.armed_until and c._armed_loose
+        c.close_conversation()
         c.voice_enabled, speak = True, tts.speak
         tts.speak = lambda text: None
         c.announce("Tuan, ada pesan WhatsApp dari Rina. Mau saya bacakan?", "message", listen=10)

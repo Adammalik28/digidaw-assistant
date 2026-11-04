@@ -252,11 +252,22 @@ def active_window_info() -> str:
     return f"Jendela aktif: {w['title']} ({w['process'].removesuffix('.exe')})"
 
 
+def _browser_nearby() -> dict | None:
+    """The browser window used most recently, when another window has the focus."""
+    try:
+        import window_manager
+        return next((w for w in window_manager.closable_windows() if is_browser(w)), None)
+    except Exception:
+        return None
+
+
 def summarize_current_page(question: str = "") -> str:
     """Summarise (or answer a question about) the web page / article the user has open in the browser:
     'ringkas halaman ini', 'artikel ini tentang apa', 'poin penting dari halaman ini'. question = what
     they want to know (empty = a short summary)."""
     w = current()
+    if not is_browser(w):
+        w = _browser_nearby() or w     # "situs apa ini" said with the terminal in front: it was read out as a website
     if not is_browser(w):
         import ai_skills
         return ai_skills.analyze_screen(question or "Ringkas isi jendela yang sedang dibuka di layar.")

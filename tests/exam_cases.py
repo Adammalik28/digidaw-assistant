@@ -72,3 +72,49 @@ HOLDOUT = [
     ("file apa aja yang ada di folder gambar", "list_folder"), ("salin laporan.pdf ke folder dokumen", "copy_file", "laporan"),
     ("batalin kerjaan yang lagi jalan di layar", "stop_task"), ("ganti nama file draft.txt jadi final.txt", "rename_file", "final"),
 ]
+
+# real sentences from use, as the speech recognition wrote them (private ones reworded): the exam clean sentences can't be
+REAL = [
+    # words, not a tool
+    ("Siapa anda", "CHAT|AI"), ("Siapa kamu", "CHAT|AI"), ("apa saja yang bisa anda bantu", "CHAT|AI"), ("buatkan pantun", "CHAT|AI"),
+    ("Buatkan saya cerita singkat", "CHAT|AI"), ("Buatkan saya puisi", "CHAT|AI"), ("buat lelucon", "CHAT|AI"),
+    ("kenapa langit biru", "CHAT|AI"), ("berapa 7 + 5", "CHAT|AI"), ("apa itu fotosintesis", "CHAT|AI"), ("manfaat kopi", "CHAT|AI"),
+    ("kenapa temanku selama empat tahun selalu merasa cemburu terus", "CHAT|AI"), ("berikan saya urutan film Iron Man", "CHAT|AI"),
+    # more than one thing at once: not half of it, and never the wrong number
+    ("atur volume 10% dan kecerahan 20%", "AI"), ("atur kecerahan di 50% dan volume 50%", "AI"),
+    # a program is a big job
+    ("buatkan kalkulator dengan tema rgb", "create_project|AI"),
+    # too broken for a name: nothing is opened
+    ("langsung buka", "ASK|AI"), ("buka dikit dong", "ASK|AI"), ("Buka aplikasi", "ASK|AI"), ("buka di", "ASK|AI"),
+    # garbled: asking or handing over is right, acting is wrong
+    ("perbaiki lagi tidak bisa diklik", "ASK|AI"), ("dredown", "ASK|AI"), ("YouTube Dan Kita", "ASK|AI"), ("Bilakah Firefox", "ASK|AI"),
+    ("Ingatkan Firefox ke WordPress 2", "ASK|AI"), ("pigi chord Digi Buka terminal", "open_application|ASK|AI"),
+    ("sibuk Sayang chord", "ASK|AI"), ("gigi daun buka wasit lost", "ASK|AI|open_application"), ("dalam buku warna", "ASK|AI"),
+    ("Kirim pesan ke bisnis", "ASK|AI"), ("book", "ASK|AI"), ("Rang", "ASK|AI"), ("kapal chord ps3", "ASK|AI"),
+    # plain requests said as they were
+    ("buka BeeTalk", "open_application|AI"), ("Apakah ada notifikasi dari WhatsApp", "read_notifications"),
+    ("cuaca di Lampung hari ini", "get_weather"), ("cek aplikasi apa saja yang terbuka", "list_running_apps|list_windows"),
+    ("Matikan komputer 30 menit lagi", "sleep_timer", "30"), ("olahraga di jam 15 besok", "add_event|set_reminder_at", "15"),
+    ("berapa menit lagi pengingat", "list_timers"), ("Cek alarm", "list_timers"), ("bersihkan sampah", "clean_temp_files|empty_recycle_bin"),
+    ("reboot system", "restart_pc"), ("Buka situs gitar", "open_website|AI"), ("cek jadwal", "list_events"), ("apa saja jadwal saya", "list_events"),
+    ("cek limit Gemini", "ai_status"), ("Putar lagu yang tenang untuk tidur", "play_youtube", "tidur"), ("kapan acara tes digidaw", "list_events|AI"),
+    ("tolong ingat ya tanggal 2 november ada pameran buku", "add_event|remember|set_reminder_at", "buku"),
+    ("Apakah perangkat saya masih menyala", "get_system_status|CHAT|AI"), ("baca", "ASK|AI|read_last_note"),
+]
+
+# memory.learnable: facts said in passing (the sentence, a word the fact must hold) and sentences that hold none
+MEMORY_FACTS = [
+    ("aku alergi kacang", "kacang"), ("saya alergi makanan laut", "laut"), ("kopi favoritku americano", "americano"),
+    ("warna favorit saya biru", "biru"), ("aku suka lagu arctic monkeys", "arctic"), ("saya nggak suka kopi manis", "kopi"),
+    ("rina itu adikku", "rina"), ("ibu saya namanya sari", "sari"), ("aku kuliah jurusan teknik informatika", "informatika"),
+    ("saya kerja di bengkel", "bengkel"), ("aku tinggal di bandung", "bandung"), ("panggil aku bos", "bos"), ("hobiku main gitar", "gitar"),
+    ("aku biasanya bangun jam lima", "bangun"), ("ulang tahunku tanggal 3 maret", "maret"), ("tim favoritku persib", "persib"),
+    ("aku takut ketinggian", "ketinggian"), ("gue doyan nasi padang", "padang"), ("saya punya kucing namanya mochi", "mochi"),
+    ("makanan kesukaanku sate", "sate"),
+]
+MEMORY_NONE = [
+    "aku suka ini", "saya kerja dulu ya", "kamu suka aku nggak", "aku suka banget", "saya punya pertanyaan", "aku selalu salah",
+    "temanku bilang kamu bagus", "bapak kamu sibuk chord", "saya punya ide", "gue benci ini", "aku suka kamu", "ibu saya menelepon",
+    "teman saya datang", "saya takut", "aku sering lupa", "cewek saya datang hari minggu", "saya tinggal dulu ya", "aku punya banyak",
+    "anak saya", "aku kerja",
+]

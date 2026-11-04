@@ -33,6 +33,7 @@ CATALOG = {
     "close_tab": "tutup tab browser tertentu", "switch_tab": "pindah ke tab browser tertentu",
     "close_current_tab": "tutup tab yang sedang dilihat", "navigate": "gulir, kembali, maju, muat ulang halaman",
     "play_youtube": "putar lagu / musik / video apa pun (pilihan utama untuk memutar)",
+    "play_favourite": "putar lagu kesukaan user, tanpa judul",
     "play_spotify": "putar di Spotify (hanya kalau Spotify disebut)",
     "media_control": "jeda, lanjutkan, lagu berikutnya / sebelumnya", "now_playing": "judul lagu yang sedang diputar",
     "set_volume": "volume ke angka tertentu", "volume_up": "volume naik", "volume_down": "volume turun",
@@ -65,7 +66,9 @@ CATALOG = {
     "ai_status": "status / limit AI (Gemini)", "get_selected_text": "baca teks yang sedang dipilih",
     "wifi_power": "nyalakan / matikan Wi-Fi", "wifi_connect": "sambung ke jaringan Wi-Fi tertentu",
     "bluetooth": "nyalakan / matikan Bluetooth, sambung / putuskan perangkat", "power_mode": "mode daya: hemat, seimbang, performa",
-    "do_not_disturb": "mode jangan ganggu", "audio_output": "pindahkan keluaran suara: speaker, HDMI, USB, headset",
+    "fan_speed": "atur kecepatan kipas laptop, atau tanya kecepatannya", "open_script_manager": "buka pengelola / daftar skrip saya",
+    "run_script": "jalankan skrip buatan saya di folder myskrip menurut namanya", "close_script_window": "tutup jendela skrip",
+    "do_not_disturb": "mode jangan ganggu, senyapkan notifikasi", "audio_output": "pindahkan keluaran suara: speaker, HDMI, USB, headset",
     "screen_power": "matikan / nyalakan layar", "list_folder": "lihat isi sebuah folder",
     "read_text_file": "baca isi file teks", "move_file": "pindahkan file", "copy_file": "salin file ke folder lain",
     "rename_file": "ganti nama file", "click_on_screen": "klik satu benda yang terlihat di layar",
@@ -87,8 +90,12 @@ EXAMPLES = [
     ("isi folder dokumen apa aja", "list_folder"), ("pindahin foto.jpg ke dokumen", "move_file"), ("klik tombol simpan", "click_on_screen"),
     ("buka chrome terus cari tiket kereta lalu buka hasil pertama", "do_on_screen"), ("ganti tema vs code jadi terang", "do_on_screen"),
     ("kurs yen hari ini", AI), ("siapa menteri keuangan sekarang", AI), ("ringkas halaman ini", AI), ("nyalakan hotspot", AI),
-    ("apa yang ada di layarku", AI), ("selamat pagi", CHAT), ("aku lagi sedih", CHAT), ("makasih banyak", CHAT),
-    ("kenapa air laut asin", KNOW), ("ibu kota jepang apa", KNOW), ("berapa 15 ditambah 8", KNOW),
+    ("apa yang ada di layarku", AI), ("selamat pagi", CHAT), ("aku lagi sedih", CHAT), ("makasih banyak", CHAT), ("kamu siapa", CHAT),
+    ("kamu bisa apa aja", CHAT), ("kenapa air laut asin", KNOW), ("ibu kota jepang apa", KNOW), ("berapa 15 ditambah 8", KNOW),
+    ("buatkan puisi tentang hujan", KNOW), ("ceritain dongeng", KNOW), ("bikin lelucon", KNOW),
+    ("apa yang kamu ingat tentang aku", "recall_memories"), ("buatkan aplikasi kasir", AI),
+    ("kipasnya bikin 60 persen", "fan_speed"), ("tolong jalanin skripku yang cek cpu", "run_script"),
+    ("mana daftar skrip buatanku", "open_script_manager"),
     ("daun meja piring", ASK), ("gigi chord buku", ASK), ("itu dari sini kok", ASK),
 ]
 
@@ -106,9 +113,9 @@ Alat yang ada:
 {tools}
 
 Pilihan lain:
-- {AI}: butuh internet atau informasi terbaru (berita, harga, kurs, skor, siapa yang menjabat sekarang), melihat isi layar, merangkum halaman, tugas rumit, atau permintaan di komputer yang tidak ada alatnya.
-- {CHAT}: sapaan, terima kasih, obrolan, perasaan.
-- {KNOW}: pengetahuan umum yang tidak berubah, hitungan.
+- {AI}: butuh internet atau informasi terbaru (berita, harga, kurs, skor, siapa yang menjabat sekarang), melihat isi layar, merangkum halaman, tugas rumit, membuat program, beberapa perintah sekaligus, atau permintaan di komputer yang tidak ada alatnya.
+- {CHAT}: sapaan, terima kasih, obrolan, perasaan, pertanyaan tentang dirimu.
+- {KNOW}: pengetahuan umum yang tidak berubah, hitungan, minta dibuatkan pantun, puisi, cerita, atau lelucon.
 - {ASK}: kalimatnya kacau, terpotong, atau tidak jelas maksudnya. Jangan menebak.
 
 Kalau user minta MELAKUKAN sesuatu di komputer atau menanyakan keadaan komputer, pilih alatnya.
@@ -173,6 +180,11 @@ NUMBER_RE = re.compile(r"\d|\b(?:nol|satu|dua|tiga|empat|lima|enam|tujuh|delapan
 REPEAT_RE = re.compile(r"setiap|tiap|hari kerja|akhir pekan|senin|selasa|rabu|kamis|jumat|sabtu|minggu")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 FREE_TEXT_ARGS = {"query", "text", "content", "fact", "message", "target", "task", "title", "description", "new_name", "command"}
+GROUNDED_NAMES = {("wifi_connect", "name"), ("audio_output", "name"), ("run_script", "name"), ("power_mode", "mode")}      # a network or an output: never a guess
+NAME_ARGS = {"name", "site"}
+NOT_A_NAME = {"buka", "tutup", "pindah", "langsung", "aplikasi", "situs", "website", "jendela", "dikit", "dong", "di", "ke"}
+TIME_SAID_RE = re.compile(r"\b(?:jam|pukul|pagi|siang|sore|malam)\b|\d[:.]\d", re.IGNORECASE)
+QUERY_VERB_RE = re.compile(r"^(?:putar(?:kan)?|mainkan|setel|cari(?:kan)?|telusuri)\s+", re.IGNORECASE)
 GENERIC_WORDS = {"lagu", "musik", "video", "putar", "mainkan", "yang", "dan", "di", "ke", "untuk", "buat", "saya", "aku", "the"}
 
 
@@ -204,6 +216,34 @@ def _grounded(value, sentence: str) -> bool:
     return found * 2 >= len(words)
 
 
+def _makes_sense(tool: str, name: str, value, text: str, params) -> bool:
+    """Is this value for a required argument what the user meant? All of these were real answers to real sentences:
+    "atur kecerahan di 50%" became brightness 0, "coba sambungkan lagi" Wi-Fi "connect_wifi_reconnect", "buatkan pantun"
+    a note saying "buatkan pantun", "buka dikit dong" an app of that name."""
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        if "relative" in params:
+            return True
+        digits = re.findall(r"\d+", text)
+        return (float(value) == int(value) and str(int(value)) in digits) if digits else bool(NUMBER_RE.search(text))
+    if not isinstance(value, str):
+        return True
+    low = value.strip().lower()
+    words, said = _words(low), _words(text)
+    if low == tool.lower() or ("_" in low and low not in text.lower()):
+        return False                       # its own name, or some identifier: it didn't understand
+    if name == "time_hhmm" and not TIME_SAID_RE.search(text):
+        return False                       # no time was said ("ingatkan firefox ke workspace 2": not 21:00)
+    if name in NAME_ARGS and set(words) & NOT_A_NAME:
+        return False
+    if name != "task" and len(said) >= 2 and words == said:
+        return False                       # the whole sentence is no value ("task" is meant to be)
+    if (name in FREE_TEXT_ARGS or (tool, name) in GROUNDED_NAMES) and not _grounded(value, text):
+        return False                       # words the user never said
+    return True
+
+
 def fill_args(fn, text: str, context: str = "", examples: list[tuple[str, dict]] | None = None) -> dict | None:
     """The arguments for this one skill from the sentence; None when a required one is missing or makes no sense (the
     online AI takes over). Optional ones only count when actually said; otherwise the skill's own default is right."""
@@ -224,13 +264,10 @@ def fill_args(fn, text: str, context: str = "", examples: list[tuple[str, dict]]
         if name not in params or value in ("", None, []):
             continue
         if name in required:
-            if isinstance(value, str) and value.strip().lower() == fn.__name__.lower():
-                return None                 # it repeated the skill's name: it didn't understand
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and not NUMBER_RE.search(text) \
-                    and "relative" not in params:
-                return None                 # "turunin layarnya" says no number: brightness 1 would be a guess
-            if name in FREE_TEXT_ARGS and not _grounded(value, text):
-                return None                 # words the user never said
+            if name == "query" and isinstance(value, str):
+                value = QUERY_VERB_RE.sub("", value.strip()) or value    # "putar lagu tenang" -> "lagu tenang"
+            if not _makes_sense(fn.__name__, name, value, text, params):
+                return None
             filled[name] = value
         elif (name in KEEP_FLAGS and isinstance(value, bool)) or name in CHOICES.get(fn.__name__, {}) or _said(value, text):
             filled[name] = value

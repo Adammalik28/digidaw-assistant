@@ -67,10 +67,10 @@ BRIEF_CANCEL_RE = re.compile(r"(?:batal|batalkan|tidak jadi|gak jadi|nggak jadi|
                              r"(?: digidaw)?", re.IGNORECASE)
 # a command verb said on its own: Digidaw asks what, and the answer completes the command
 BARE_VERB_RE = re.compile(r"(lebih|agak|buka|bukain|bukakan|tutup|tutupin|pindah ke|beralih ke|fokus ke|putar|putarkan|setel|mainkan|"
-                          r"cari|carikan|matikan|nyalakan|hidupkan|kecilkan|besarkan|hapus|ketik|tulis|catat)", re.IGNORECASE)
+                          r"cari|carikan|telusuri|cari di (?:kolom )?pencarian(?: youtube| google)?|matikan|nyalakan|hidupkan|kecilkan|besarkan|hapus|ketik|tulis|catat)", re.IGNORECASE)
 BARE_QUESTIONS = {"pindah ke": "Pindah ke mana", "beralih ke": "Beralih ke mana", "fokus ke": "Fokus ke mana",
                   "putar": "Putar lagu apa", "putarkan": "Putar lagu apa", "setel": "Setel lagu apa",
-                  "mainkan": "Mainkan lagu apa", "cari": "Cari apa", "carikan": "Cari apa",
+                  "mainkan": "Mainkan lagu apa", "cari": "Cari apa", "carikan": "Cari apa", "telusuri": "Telusuri apa",
                   "ketik": "Ketik apa", "tulis": "Tulis apa", "catat": "Catat apa"}
 # pausing Digidaw itself ("stop listening") vs. waking it up again
 _DURATION = r"(?: (?:selama |untuk )?(\d+|satu|dua|tiga|lima|sepuluh|lima belas|tiga puluh|setengah) (menit|jam))?"
@@ -104,7 +104,8 @@ COMMAND_START_RE = re.compile(
 ARMED_COMMAND_RE = re.compile(
     COMMAND_START_RE.pattern + r"|^(?:tolong |coba |bisa |dong )?(?:ada|mau|minta|pengen|ingin|saya|aku|gue|kamu|lampu|"
     r"mode|suasana|pesan|chat|notifikasi|notif|musik|lagu|video|youtube|agenda|jadwal|acara|rangkuman|alarm|timer|"
-    r"pengingat|layar|wifi|bluetooth|baterai|suhu|matahari|kasih|beri|berikan|info|lanjut|sekarang|besok|nanti)\b",
+    r"pengingat|layar|wifi|bluetooth|baterai|suhu|matahari|kasih|beri|berikan|info|lanjut|sekarang|besok|nanti|"
+    r"buatkan|bikinin|ceritakan|ceritain|tingkatkan|turunkan|naikkan|situs|halaman|reboot)\b",
     re.IGNORECASE)
 # "ubah lampu kamera" ("kamar merah" misheard), "ganti lampu": the lamp, but not what it should become — Digidaw asks
 LAMP_BARE_RE = re.compile(r"(?:(?:tolong|coba) )?(?:\w+ )?(?:warna )?lampu(?:nya)?(?: \w+)?")
@@ -203,6 +204,20 @@ def detect_wake(text: str) -> tuple[bool, str, bool]:
     after = text[last.end():].strip(" ,.!?")
     before = WAKE_RE.sub(" ", text[:last.start()]).strip(" ,.!?")
     return True, re.sub(r"\s+", " ", after or before), loose
+
+
+def after_misheard_name(text: str) -> str:
+    """"gigi buka Fire", "pigi chord Digi Buka terminal": the name misheard, then a command. Only what follows the name;
+    the text unchanged when it doesn't look like that. Doesn't make a phrase a call: it's used on a phrase already taken."""
+    if COMMAND_START_RE.match(text):
+        return text
+    words = text.split()
+    for n in range(1, min(4, len(words))):
+        rest = " ".join(words[n:])
+        if COMMAND_START_RE.match(rest):
+            import stt
+            return rest if stt.sounds_like_name(" ".join(words[:n])) else text
+    return text
 
 
 def sounds_like_call(text: str) -> bool:
@@ -332,7 +347,10 @@ class DigidawCore:
         self._armed_loose = False     # armed by an alias ("digital"), not by "Digidaw" itself
         self._pending_verb = None     # ("buka", asked_at): "Buka apa?" was asked
         self._pending_lamp = 0.0      # "Lampunya mau diubah jadi apa?" was asked at
-        self._ting_undone = False     # the last chime was taken back (counted once, not also as "no command")
+        self._ting_undone = False     # Google didn't hear the name in the last chime's phrase (a chime "taken back" if
+                                      # no command follows; counted once, not also as "no command")
+        self._doubted_at = 0.0        # when that was
+        self._loose_rejected = False  # one phrase that isn't a command was heard since a call that wasn't sure
         self._briefing_waiting = False   # today's summary waits for the conversation to end
         self.paused_until = 0.0       # Digidaw told to stop listening (inf = until woken up)
         self._ducked = False
@@ -428,7 +446,7 @@ class DigidawCore:
     def escape_key(self):
         """Esc anywhere: if Digidaw is listening / talking / thinking, cancel that; otherwise start
         listening right away (no need to say "Digidaw"). A job running on the screen stops first of all."""
-        if screen_agent.cancel():
+        if screen_agent.cancel(say=True):
             console.print("[bold]⏹ tugas di layar dihentikan (Esc)[/bold]")
             return
         if not self.voice_enabled:
@@ -562,8 +580,9 @@ class DigidawCore:
         if aec.active() and tts.is_speaking() and WAKE_RE.fullmatch(heard_here.strip()):
             tts.stop()                   # "Digidaw" while it talks: it stops at once (Google's text then decides)
             console.print("[bold]⏹ disela[/bold]")
-        if not WAKE_RE.fullmatch(heard_here.strip()) or time.time() < self.armed_until or self.in_followup() \
-                or self.is_paused() or self.brief is not None or events.state.get("dictation") \
+        called_again = self._armed_loose and time.time() < self.armed_until     # not a sure call yet: answer again
+        if not WAKE_RE.fullmatch(heard_here.strip()) or (time.time() < self.armed_until and not called_again) \
+                or self.in_followup() or self.is_paused() or self.brief is not None or events.state.get("dictation") \
                 or safety.has_pending():
             return False
         self.arm()
@@ -571,19 +590,37 @@ class DigidawCore:
         return True
 
     def wake_unconfirmed(self):
-        """Google heard the phrase the early chime answered, and it wasn't the name (noise, a song): standby again."""
+        """Google heard the phrase the early chime answered, and it wasn't the name. It's noise or a song, or the user
+        called and Google missed it (about half of them on 3-4 Nov, who then had to call again): the chime stands for
+        its few seconds, and only a phrase that sounds like a command gets through."""
         if self._early_armed_at and self._awaiting_command:
             self._early_armed_at = 0.0
-            self.armed_until = 0.0          # _update_windows plays the "back to standby" chime
-            self._ting_undone = True
-            metrics.count("ting_dibatalkan")
-            console.print("[dim]· bunyi \"siap\" dibatalkan: Google tidak mendengar nama Digidaw di situ[/dim]")
+            self._doubted_at = time.time()
+            self._armed_loose = True
+            self._ting_undone = True        # (counted when the wait ends with no command)
+            console.print("[dim]· panggilan diragukan: Google tidak mendengar nama Digidaw; hanya kalimat perintah "
+                          "yang diterima[/dim]")
+
+    @staticmethod
+    def _sounds_like_command(text: str) -> bool:
+        """After a call that wasn't quite heard: does this phrase start like a command, or is it one Digidaw knows?"""
+        if ARMED_COMMAND_RE.match(text.strip()):
+            return True
+        try:
+            import habits
+            return brain._route(habits.apply_aliases(text)) is not None
+        except Exception as e:
+            diag.warn_once("core.commandlike", "kalimat sesudah panggilan gagal dicek", e)
+            return False
 
     def arm(self):
         """The user addressed DIGIDAW without a command yet: chime, lower the music,
         and treat the next phrase as the command. No spoken reply, so nothing gets missed."""
         self.armed_until = time.time() + config.WAKE_LISTEN_SECONDS
         self._awaiting_command = True
+        self._doubted_at = 0.0
+        self._ting_undone = False
+        self._loose_rejected = False
         metrics.count("ting")
         if config.DUCK_MEDIA and not self._ducked:
             media.duck()
@@ -865,8 +902,7 @@ class DigidawCore:
             return
         if self._awaiting_command and now >= self.armed_until:
             self._awaiting_command = False
-            if not self._ting_undone:
-                metrics.count("ting_tanpa_perintah")
+            metrics.count("ting_dibatalkan" if self._ting_undone else "ting_tanpa_perintah")
             self._ting_undone = False
             chime(up=False)
             console.print("[dim]   (kembali siaga)[/dim]")
@@ -966,8 +1002,9 @@ class DigidawCore:
         if not LAMP_BARE_RE.fullmatch(low):
             return False
         try:
+            import habits
             import smarthome
-            return smarthome.has_lamps() and brain._route(low) is None
+            return smarthome.has_lamps() and brain._route(habits.apply_aliases(low)) is None
         except Exception:
             return False
 
@@ -983,7 +1020,8 @@ class DigidawCore:
         verb = BARE_VERB_RE.fullmatch(clean.lower())
         if verb:
             self._pending_verb = (clean.lower(), time.time())
-            reply = BARE_QUESTIONS.get(verb.group(1), "{v} apa").format(v=clean.capitalize()) + f", {T}?"
+            said = verb.group(1).lower()
+            reply = BARE_QUESTIONS.get(said, "Cari apa" if said.startswith("cari ") else "{v} apa").format(v=clean.capitalize()) + f", {T}?"
             events.emit("user", text=text, source=source)
             console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {reply}")
             events.emit("digidaw", text=reply)
@@ -1067,6 +1105,12 @@ class DigidawCore:
                 events.emit("shutdown", restart=True)
             self.shutdown.set()
             return
+        question = brain.memory_question(text) if response else ""
+        if question:
+            console.print(f"[bold cyan]DIGIDAW:[/bold cyan] {question}")
+            events.emit("digidaw", text=question)
+            if self._pc_speaks(source):
+                tts.speak(question)
         # let the user reply naturally ("ya", "yang kedua", ...) without saying "Digidaw" again
         if safety.has_pending():
             self.open_conversation(config.FOLLOWUP_SECONDS + 15)
@@ -1181,6 +1225,8 @@ class DigidawCore:
         if aec.active() and started < tts.voice_ended_at() - 0.4 and not self._barge_in(text):
             return                     # heard over Digidaw's own voice: only "Digidaw …" / "stop" interrupt it
         addressed, command, loose = detect_wake(text)
+        if not addressed and after_misheard_name(command) != command:
+            text = command = after_misheard_name(command)
         if not addressed and (time.time() < self.armed_until or self.in_followup()) and sounds_like_call(text) \
                 and not safety.has_pending():
             console.print(f"[dim]· \"{text}\" dianggap panggilan \"Digidaw\" (salah dengar)[/dim]")
@@ -1204,9 +1250,15 @@ class DigidawCore:
             console.print(f"[dim]· terdengar: {len(text.split())} kata (diabaikan — suara Digidaw sendiri)[/dim]")
             metrics.count("gema_sendiri")
             return
+        if not addressed and self._doubted_at and ended <= self._doubted_at:
+            return                     # the very phrase the chime answered (Whisper: "Digidaw"), not what comes next
         armed_loose = self._armed_loose and time.time() < self.armed_until
-        if not addressed and armed_loose and not ARMED_COMMAND_RE.match(text.strip()):
-            self.armed_until = 0.0     # woken by an alias, and this isn't a command either: chatter
+        if not addressed and armed_loose and not self._sounds_like_command(text):
+            # the call wasn't sure and this isn't a command either: chatter, or a command badly heard. One such phrase
+            # is forgiven (it made the user call again, twice in one evening); a second one ends the wait
+            if self._loose_rejected:
+                self.armed_until = 0.0
+            self._loose_rejected = True
             console.print(f"[dim]· terdengar: {len(text.split())} kata (diabaikan — dipanggil dengan nama mirip, "
                           f"kalimatnya tidak seperti perintah)[/dim]")
             metrics.count("dibuang_nama_mirip")
@@ -1237,6 +1289,7 @@ class DigidawCore:
             self._armed_loose = loose
             return
         self._armed_loose = False
+        self._doubted_at = 0.0
         if CLOSING_RE.fullmatch(command.strip(" .,!?")) and not safety.has_pending() and not screen_agent.waiting():
             self.close_conversation()   # "terima kasih" / "sudah": end the conversation
             reply = f"Sama-sama, {T}."
@@ -1257,7 +1310,7 @@ class DigidawCore:
         metrics.timing("dikenali", time.time() - ended)
         if self._awaiting_command and time.time() < self.armed_until + 2:
             metrics.count("ting_berhasil")
-            self._awaiting_command = False       # (the chime's outcome is counted once)
+            self._awaiting_command = self._ting_undone = False       # (the chime's outcome is counted once)
         elif addressed:
             metrics.count("panggilan_langsung")
         self.submit(command, "voice").wait()

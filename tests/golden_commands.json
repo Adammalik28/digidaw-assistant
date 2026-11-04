@@ -641,6 +641,13 @@
 }
 },
 {
+"said": "minta quotes PS2",
+"tool": "switch_workspace",
+"args": {
+"workspace": "2"
+}
+},
+{
 "said": "lanjutkan pemutaran YouTube",
 "tool": "media_control",
 "args": {
@@ -943,9 +950,9 @@
 },
 {
 "said": "pindah ke World PS2",
-"tool": "focus_window",
+"tool": "switch_workspace",
 "args": {
-"name": "world ps2"
+"workspace": "2"
 }
 },
 {
@@ -1651,6 +1658,13 @@
 }
 },
 {
+"said": "pindah quotes PS3",
+"tool": "switch_workspace",
+"args": {
+"workspace": "3"
+}
+},
+{
 "said": "pindah ke works PS2 Nyanyi dong",
 "tool": "focus_window",
 "args": {
@@ -1857,6 +1871,65 @@
 "tool": "switch_workspace",
 "args": {
 "workspace": "3"
+}
+},
+{
+"said": "pindah ke disk",
+"tool": "_ask",
+"args": {
+"options": [
+"Discord"
+]
+}
+},
+{
+"said": "ubah lampu ke warna putih",
+"tool": "lamp_color",
+"args": {
+"color": "putih",
+"name": "lampu"
+}
+},
+{
+"said": "lampu ke warna merah",
+"tool": "lamp_color",
+"args": {
+"color": "merah",
+"name": "lampu"
+}
+},
+{
+"said": "penggunaan ram",
+"tool": "get_system_status",
+"args": {}
+},
+{
+"said": "ubah lampu ke warna hijau",
+"tool": "lamp_color",
+"args": {
+"color": "hijau",
+"name": "lampu"
+}
+},
+{
+"said": "Hidupkan bluetooth",
+"tool": "bluetooth",
+"args": {
+"action": "on"
+}
+},
+{
+"said": "Google",
+"tool": "open_website",
+"args": {
+"site": "google"
+}
+},
+{
+"said": "buka shopee",
+"tool": "open_website",
+"args": {
+"site": "shopee"
 }
 },
 {

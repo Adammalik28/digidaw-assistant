@@ -11,6 +11,8 @@ else changed. Imported by brain.py at its end (it uses brain's helpers).
 import re
 import time
 
+import calculator
+import pc_control
 import smarthome
 import system_control as sc
 from brain import (  # noqa: E402  (brain imports this module last, when all of these exist)
@@ -43,6 +45,9 @@ _SCENE = (r"(baca|membaca|kerja|bekerja|fokus|belajar|konsentrasi|santai|rileks|
 
 # "cari …" with a site: YouTube search or just the site
 SITE_SEARCH = [
+    # ── "cari di pencarian youtube doraemon" (without a word to look for: core asks "cari apa") ──
+    (r"(?:cari|carikan|telusuri)(?: di)? (?:kolom )?pencarian(?: (youtube|google))? (.{2,80})",
+     lambda m: ("search_youtube" if m[1] == "youtube" else "google_search", {"query": m[2]}) if m[1] else _search_route(m[2])),
     # ── "cari ..." with a site: search on YouTube, or just open the site ("cari youtube" cut off by the mic) ──
     (r"(?:cari|carikan|search)(?: di)? youtube (?!di$)(.+)|(?:cari|carikan|search) (.+) di youtube",
      lambda m: ("search_youtube", {"query": m[1] or m[2]})),
@@ -63,6 +68,10 @@ SITE_SEARCH = [
 
 # Digidaw itself: is the AI working, the HUD window
 ASSISTANT = [
+    # ── sums: exact and instant ("berapa 20 * 30", "10 + 10 berapa", "hitung 25 persen dari 80") ──
+    (r"(?:berapa(?: hasil(?:nya)?)?(?: dari)?|hitung(?:kan)?|hasil(?: dari)?)? ?(.*\d.*?)"
+     r"(?: (?:berapa|hasilnya(?: berapa)?|sama dengan(?: berapa)?))?(?: ?=)?",
+     lambda m: ("calculate", {"sum_said": m[1]}) if calculator.parse(m[1]) else None),
     # ── is the AI working? (must work without the AI) ──
     (r"(?:cek|tes|test|periksa|status)(?: koneksi)? (?:ai|a i|gemini|otak(?: ai)?)(?: (?:saya|digidaw|nya))?|"
      r"(?:apakah|kenapa) ai(?: ?nya)? (?:berfungsi|jalan|normal|tidak (?:jalan|berfungsi|bisa)|error)",
@@ -322,10 +331,12 @@ SOUND = [
                      else f"musik {m[2]}" if m[1] == "musik" else m[2])),
     (r"(?:putar|putarkan|setel|mainkan) (?!(?:lagu|musik|video|playlist)$)(.{3,}?)(?: di youtube)?", lambda m: _play(m[1])),
     (r"(?:ambil |tangkap )?(?:screenshot|tangkapan layar|tangkap layar)(?: layar)?", lambda m: ("take_screenshot", {})),
+    (r"buka kunci(?: (?:komputer|laptop|pc|layar))?", lambda m: ("unlock_screen", {})),
     (r"kunci (?:komputer|laptop|pc|layar)", lambda m: ("lock_workstation", {})),
 ]
 
 
+SCRIPT_WORD = r"(?:skrip|script|scrip|sekrip)"
 # the PC's settings and jobs on the screen (pc_control.py, screen_agent.py, file_tools.py)
 CONTROL = [
     (r"(?:matikan|nonaktifkan|off(?:kan)?) (?:koneksi )?wi ?fi", lambda m: ("wifi_power", {"on": False})),
@@ -341,12 +352,52 @@ CONTROL = [
      lambda m: ("power_mode", {"mode": m[1]})),
     (r"(?:matikan|nonaktifkan)(?: mode)? jangan ganggu", lambda m: ("do_not_disturb", {"on": False})),
     (r"(?:aktifkan |nyalakan |pakai )?(?:mode )?jangan ganggu", lambda m: ("do_not_disturb", {"on": True})),
+    # "matikan notifikasi" is the opposite of "matikan jangan ganggu": notifications off = do not disturb ON
+    (r"(?:matikan|nonaktifkan|senyapkan|diamkan|bisukan) (?:semua )?(?:notifikasi|notif)(?: (?:dulu|semua))?",
+     lambda m: ("do_not_disturb", {"on": True})),
+    (r"(?:nyalakan|hidupkan|aktifkan|bunyikan) (?:lagi )?(?:semua )?(?:notifikasi|notif)(?: lagi)?",
+     lambda m: ("do_not_disturb", {"on": False})),
+    # the user's "fanset 50" (Google also writes "fan set 50"), and the same in words
+    (r"(?:fan ?set|van ?set|pan ?set|(?:atur |set |setel |ubah |ganti |naikkan |turunkan |kecilkan |besarkan )?(?:kecepatan )?"
+     r"(?:kipas|fan)(?:nya)?(?: laptop)?(?: ke| jadi| di)?) (\d{1,3})(?: ?persen| ?%)?",
+     lambda m: ("fan_speed", {"percent": int(m[1])})),
+    (r"(?:atur |set |setel |ubah |ganti )?(?:kecepatan )?(?:kipas|fan)(?:nya)?(?: laptop)?(?: ke| jadi| di)? (?:maksimal|maksimum|penuh|full)",
+     lambda m: ("fan_speed", {"percent": 100})),
+    (r"(?:fan ?set |(?:atur |set |setel |ubah |ganti |kembalikan |balikin )?(?:kecepatan )?(?:kipas|fan)(?:nya)?(?: laptop)?(?: ke| jadi| di)? )"
+     r"(?:otomatis|auto)", lambda m: ("fan_speed", {"auto": True})),
+    (r"(?:matikan|padamkan) kipas(?:nya)?(?: laptop)?", lambda m: ("fan_speed", {"percent": 0})),
+    (r"(?:cek |lihat |berapa )?(?:kecepatan |status )(?:kipas|fan)(?:nya)?(?: laptop)?(?: berapa| sekarang)*|"
+     r"kipas(?:nya)?(?: laptop)? berapa(?: persen)?(?: sekarang)?", lambda m: ("fan_speed", {})),
+    # the user's scripts in ~/myskrip: by name, or the fzf manager behind Super+S
+    (rf"(?:jalankan|jalanin|eksekusi|run|buka) {SCRIPT_WORD} (?!saya$|ku$)(.{{2,40}})", lambda m: ("run_script", {"name": m[1]})),
+    (r"(?:jalankan|jalanin|eksekusi|run) (.{2,40})", lambda m: ("run_script", {"name": m[1]}) if pc_control.is_my_script(m[1]) else None),
+    # "terangkan bersih": "jalankan" misheard (a lamp verb otherwise, and that sentence has no lamp in it), so it asks
+    (r"terangkan (.{2,40})", lambda m: ("run_script", {"name": m[1], "unsure": True}) if pc_control.is_my_script(m[1]) else None),
+    # Google hears "skrip" as "SC" and "screen": not on its own, only with a verb that says what's meant
+    (r"(?:buka|jalankan|jalanin) sc", lambda m: ("open_script_manager", {})),
+    (rf"tutup(?: jendela)? (?:{SCRIPT_WORD}|sc|screen)(?: saya|ku|nya)?", lambda m: ("close_script_window", {})),
+    (rf"(?:buka|tampilkan|lihat|jalankan)?(?: ?(?:pengelola|manajer|manager|menu|daftar))? ?{SCRIPT_WORD}(?: saya|ku)?",
+     lambda m: ("open_script_manager", {})),
     (r"(?:pindahkan |pindah |alihkan |ubah |ganti )?(?:suara|audio|keluaran suara)(?:nya)? ke (.{2,30})",
      lambda m: ("audio_output", {"name": m[1]})),
     (r"(?:matikan|padamkan|offkan) (?:layar|monitor)(?: laptop)?", lambda m: ("screen_power", {"on": False})),
+    (r"(?:nyalakan|hidupkan|aktifkan|onkan) (?:layar|monitor)(?: laptop)?", lambda m: ("screen_power", {"on": True})),
     (r"(?:hentikan|batalkan|stop|setop) tugas(?:nya)?(?: (?:di )?layar)?", lambda m: ("stop_task", {})),
     (r"lanjutkan tugas(?:nya)?", lambda m: ("resume_task", {})),
     (r"(?:apa )?isi folder (.{2,40}?)(?: apa saja| apa aja)?", lambda m: ("list_folder", {"path": m[1]})),
+]
+
+
+# what Digidaw knows about the user (the facts themselves: memory.py)
+MEMORY = [
+    (r"(?:lupakan|hapus|jangan ingat)(?: yang)? (?:itu|tadi)(?: saja| aja)?", lambda m: ("forget_latest", {})),
+    (r"(?:lupakan|hapus (?:ingatan|memori)(?: tentang| soal)?|jangan ingat(?: lagi)?(?: kalau| bahwa)?) (?!percakapan\b)(.{2,60})",
+     lambda m: ("forget", {"keyword": m[1]})),
+    (r"(?:apa|apa saja|apa aja) yang (?:kamu|anda|kau|lu|digidaw) (?:ingat|tahu|ketahui)(?: tentang (?:aku|saya|diriku))?|"
+     r"(?:kamu|anda|kau|lu) (?:ingat|tahu) apa(?: saja| aja)? tentang (?:aku|saya|diriku)|"
+     r"apa yang (?:kamu|anda) pelajari tentang (?:aku|saya)", lambda m: ("recall_memories", {})),
+    (r"(?:putar|putarkan|setel|mainkan)(?: lagu| musik)?(?: yang)? (?:favorit|kesukaan|biasa|biasanya)(?:ku| aku| saya)?",
+     lambda m: ("play_favourite", {})),
 ]
 
 
@@ -445,10 +496,10 @@ WINDOWS = [
     (r"(?:buka|open|jalankan) (.+)", lambda m: _open_known(m[1])),
     (r"(?:tutup|close) (.+)", lambda m: _close_known(m[1])),
     # "cari kepiting": on YouTube when YouTube is in front, otherwise Google (not a chat about crabs)
-    (r"(?:cari|carikan|search|googling)(?: di google)? (?!tahu\b|tau\b|file\b|folder\b|dokumen\b|berkas\b|"
+    (r"(?:cari|carikan|search|googling|telusuri)(?: di google)? (?!tahu\b|tau\b|file\b|folder\b|dokumen\b|berkas\b|"
      r"jendela\b|aplikasi\b|tab\b)(.{2,80})", lambda m: _search_route(m[1])),
 ]
 
 
-ORDER = [SITE_SEARCH, ASSISTANT, PROJECTS, SECURITY, SCREEN, DAY, LAMPS, MESSAGES, WEATHER, SOUND, CONTROL, SYSTEM, WINDOWS]
+ORDER = [SITE_SEARCH, ASSISTANT, PROJECTS, SECURITY, SCREEN, DAY, LAMPS, MESSAGES, WEATHER, SOUND, CONTROL, MEMORY, SYSTEM, WINDOWS]
 FAST_ROUTES = [(re.compile(p), h) for group in ORDER for p, h in group]

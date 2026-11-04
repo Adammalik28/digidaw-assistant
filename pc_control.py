@@ -5,13 +5,15 @@ The mouse: on Wayland no program may move the real pointer, but Hyprland moves i
 input device can click. Screen captures come from grim. Coordinates: screen_agent.py gets them relative to the picture
 of the focused monitor; to_layout() turns them into Hyprland's coordinates (monitor position and scale included).
 
-Settings: Wi-Fi, Bluetooth, power mode, Do Not Disturb, the audio output, the screen. Turning Wi-Fi off asks first:
+Settings: Wi-Fi, Bluetooth, power mode, Do Not Disturb, the audio output, the screen, the fan. Also the user's own scripts. Turning Wi-Fi off asks first:
 it also takes away Digidaw's own hearing and voice (both use the internet).
 """
 import difflib
 import io
 import json
+import os
 import re
+import shlex
 import shutil
 import threading
 import time
@@ -24,6 +26,7 @@ T = config.USER_TITLE
 CAPTURE_WIDTH = 1280               # pixels: enough to read a screen, small enough to send at every step
 _mouse = {"dev": None}
 _latest = {"picture": None}        # the last capture at full size, for a closer look
+CHANGED_SHARE = 0.08               # this share of the pixels around a target differing = it is not the same picture
 _mouse_lock = threading.Lock()
 
 
@@ -37,14 +40,18 @@ def focused_monitor() -> dict:
     return next((m for m in monitors if m.get("focused")), monitors[0])
 
 
-def capture(max_width: int = CAPTURE_WIDTH) -> tuple[bytes, dict]:
-    """(JPEG of the focused monitor, that monitor). Only this monitor: the fewer other things it shows, the better."""
+def _grab(monitor: dict):
     from PIL import Image
-    monitor = focused_monitor()
-    r = ld.run_bytes(["grim", "-o", monitor["name"], "-t", "png", "-"], timeout=10)
+    r = ld.run_bytes(["grim", "-o", monitor["name"], "-t", "ppm", "-"], timeout=10)
     if not r:
         raise RuntimeError("layar tidak bisa dipotret (grim)")
-    image = _latest["picture"] = Image.open(io.BytesIO(r)).convert("RGB")
+    return Image.open(io.BytesIO(r)).convert("RGB")
+
+
+def capture(max_width: int = CAPTURE_WIDTH) -> tuple[bytes, dict]:
+    """(JPEG of the focused monitor, that monitor). Only this monitor: the fewer other things it shows, the better."""
+    monitor = focused_monitor()
+    image = _latest["picture"] = _grab(monitor)
     if image.width > max_width:
         image = image.resize((max_width, round(image.height * max_width / image.width)))
     out = io.BytesIO()
@@ -69,6 +76,35 @@ def closer_look(x: float, y: float):
     def back(cx: float, cy: float) -> tuple[float, float]:
         return (left + cx / 1000 * width) / image.width * 1000, (top + cy / 1000 * height) / image.height * 1000
     return out.getvalue(), back
+
+
+def changed_near(x: float, y: float) -> bool:
+    """Has the screen around this point (in thousandths) changed since the last capture? The AI can take half a minute
+    to answer: by then the page has scrolled or the user has gone somewhere else, and a click would land on something
+    nobody looked at."""
+    from PIL import ImageChops
+    before = _latest["picture"]
+    if before is None:
+        return False
+    now = _grab(focused_monitor())
+    if now.size != before.size:
+        return True
+    cx, cy = x / 1000 * before.width, y / 1000 * before.height
+    half_width, half_height = before.width / 16, before.height / 10
+    box = (max(0, int(cx - half_width)), max(0, int(cy - half_height)),
+           min(before.width, int(cx + half_width)), min(before.height, int(cy + half_height)))
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return False
+    diff = ImageChops.difference(before.crop(box), now.crop(box)).convert("L").point(lambda v: 255 if v > 24 else 0)
+    return diff.histogram()[255] / (diff.width * diff.height) > CHANGED_SHARE
+
+
+def front_window() -> str:
+    """The address of the window in front ("" when none, or not Hyprland)."""
+    try:
+        return json.loads(ld.out(["hyprctl", "activewindow", "-j"]) or "{}").get("address") or ""
+    except ValueError:
+        return ""
 
 
 def to_layout(monitor: dict, x: float, y: float) -> tuple[int, int]:
@@ -254,9 +290,159 @@ def audio_output(name: str) -> str:
 
 
 def screen_power(on: bool = False) -> str:
-    """Turn the screen off or on without sleeping ("matikan layar"); moving the mouse brings it back."""
+    """Turn the screen off or on without sleeping. Only when the user says that of the screen ("matikan layar",
+    "nyalakan layar"): "tutup screen" is not this, it's closing a window. Moving the mouse brings it back."""
     threading.Timer(1.5 if not on else 0, lambda: ld.dispatch("dpms", "on" if on else "off")).start()
     return f"Layar saya {'nyalakan' if on else 'matikan'}, {T}."
 
 
-AI_TOOLS = [click_here, wifi_power, wifi_connect, bluetooth, power_mode, do_not_disturb, audio_output, screen_power]
+def fan_speed(percent: int = -1, auto: bool = False) -> str:
+    """The laptop's fan (NoteBook FanControl, what the user's "fanset 50" does): percent 0-100 ("kipas 50 persen",
+    "fanset 70"), auto=True gives it back to the laptop ("kipas otomatis"), no arguments says how it is now."""
+    if not shutil.which("nbfc"):
+        return f"Pengatur kipas (nbfc) tidak ada di komputer ini, {T}."
+    if auto:
+        return f"Kipas kembali otomatis, {T}." if _ok(ld.run(["nbfc", "set", "-a"], timeout=8)) \
+            else f"Kipas tidak bisa diubah, {T}. Layanan nbfc tidak merespons."
+    if percent < 0:
+        status = ld.out(["nbfc", "status"], timeout=8)
+        speed = re.search(r"Current Fan Speed\s*:\s*([\d.]+)", status)
+        heat = re.search(r"Temperature\s*:\s*([\d.]+)", status)
+        mode = "otomatis" if re.search(r"Auto Control Enabled\s*:\s*true", status) else "manual"
+        if not speed:
+            return f"Status kipas tidak terbaca, {T}."
+        return f"Kipas {round(float(speed[1]))} persen, mode {mode}" + (f", suhu {round(float(heat[1]))} derajat" if heat else "") + f", {T}."
+    if percent > 100:
+        return f"Kecepatan kipas hanya 0 sampai 100 persen, {T}."
+    if percent == 0:
+        return safety.guard("mematikan kipas laptop", _set_fan, percent=0)
+    return _set_fan(percent)
+
+
+def _set_fan(percent: int) -> str:
+    if _ok(ld.run(["nbfc", "set", "-s", str(percent)], timeout=8)):
+        return f"Kipas saya atur ke {percent} persen, {T}."
+    return f"Kipas tidak bisa diubah, {T}. Layanan nbfc tidak merespons."
+
+
+SAID_AS = {"check": "cek", "maintenance": "maintance"}       # how Google writes the words of the user's script names
+SCRIPT_REQUEST_RE = re.compile(r"^(?:(?:tolong|coba|jalankan|jalanin|eksekusi|run|buka|skrip|script|scrip|sekrip|sc|yang)\s+)+",
+                               re.IGNORECASE)
+
+
+def _key(name: str) -> str:
+    """"Cek CPU", "check cpu", "cekcpu.sh", "ssh key" and "ssh.key.sh" should meet."""
+    words = re.sub(r"\.sh$", "", name.lower().strip()).split()
+    return re.sub(r"[^a-z0-9]", "", "".join(SAID_AS.get(w, w) for w in words))
+
+
+def _my_scripts() -> dict[str, str]:
+    """{key: file name} of the scripts the user's own manager lists (a new one is known as soon as it's there)."""
+    folder = config.SCRIPTS_DIR.expanduser()
+    if not folder.is_dir():
+        return {}
+    return {_key(p.name): p.name for p in sorted(folder.glob("*.sh"))
+            if p.is_file() and p.name not in (config.SCRIPT_MANAGER, *config.SCRIPTS_NOT_RUN)}
+
+
+SCRIPT_WINDOW_RE = re.compile(r"Pengelola skrip|Skrip \S+\.sh")
+
+
+def _in_window(command: str, title: str) -> bool:
+    """A terminal floating like the manager's own Super+S window. Started by Hyprland: the terminal shouldn't inherit
+    Digidaw's environment or end with it."""
+    line = f"[float;size 800 750;center] kitty --title {shlex.quote(title)} {command}"
+    return ld.dispatch("exec", line) or ld.spawn(["sh", "-c", line.split("] ", 1)[1]])
+
+
+def open_script_manager() -> str:
+    """Open the user's script manager, the fzf list in ~/myskrip behind Super+S ("buka skrip", "pengelola skrip")."""
+    path = config.SCRIPTS_DIR.expanduser() / config.SCRIPT_MANAGER
+    if not path.is_file():
+        return f"Pengelola skrip {path} tidak ditemukan, {T}."
+    return f"Pengelola skrip saya buka, {T}." if _in_window(shlex.quote(str(path)), "Pengelola skrip") \
+        else f"Pengelola skrip tidak bisa dibuka, {T}."
+
+
+def _spoken(file: str) -> str:
+    return re.sub(r"[.]sh$", "", file).replace("_", " ").replace(".", " ")
+
+
+def _start_script(file: str) -> str:
+    path = config.SCRIPTS_DIR.expanduser() / file
+    if not path.is_file():
+        return f"Skrip {_spoken(file)} sudah tidak ada, {T}."
+    command = shlex.quote(str(path)) if os.access(path, os.X_OK) else f"bash {shlex.quote(str(path))}"
+    if file in config.SCRIPTS_WITHOUT_WINDOW:     # it only starts apps; closing a terminal would close them as well
+        started = ld.dispatch("exec", command) or ld.spawn(["sh", "-c", command])
+    else:                                         # menus, questions and sudo's password happen there, for the user's eyes
+        started = _in_window(f"--hold {command}", f"Skrip {file}")
+    return f"Skrip {_spoken(file)} saya jalankan, {T}." if started else f"Skrip {_spoken(file)} tidak bisa dijalankan, {T}."
+
+
+_which_script = {"files": [], "at": 0.0}     # "Ada beberapa ... Yang mana?" waits for its answer
+WHICH_SECONDS = 30
+
+
+def answer_which_script(said: str) -> str | None:
+    """The answer to that question: "cek cpu", or only "cpu". None = it wasn't one (the sentence is treated as usual)."""
+    files, _which_script["files"] = _which_script["files"], []
+    if not files or time.time() - _which_script["at"] > WHICH_SECONDS:
+        return None
+    key = _key(said)
+    found = [f for f in files if len(key) >= 2 and _key(f).endswith(key)]
+    return _start_script(found[0]) if len(found) == 1 else None
+
+
+def is_my_script(name: str) -> bool:
+    """Exactly a script's name: "jalankan backup" needs no word "skrip" then."""
+    return _key(name) in _my_scripts()
+
+
+def close_script_window() -> str:
+    """Close the window of the script manager or of a script Digidaw started ("tutup skrip"), never anything else."""
+    windows = [c for c in ld._hypr_json("clients") or [] if SCRIPT_WINDOW_RE.fullmatch(str(c.get("title", "")))]
+    for window in windows:
+        ld.dispatch("closewindow", f"address:{window['address']}")
+    return f"Jendela skrip saya tutup, {T}." if windows else f"Tidak ada jendela skrip yang terbuka, {T}."
+
+
+def answer_about_script(said: str, last_reply: str) -> str | None:
+    """Digidaw just asked something about a script ("Skrip yang mana?") and this is exactly a script's name: "atur power"
+    is that script then, not a request for the power mode."""
+    if "skrip" not in last_reply.lower() or not last_reply.rstrip().endswith("?") or not is_my_script(said):
+        return None
+    safety.cancel()
+    return _start_script(_my_scripts()[_key(said)])
+
+
+def run_script(name: str, unsure: bool = False) -> str:
+    """Run one of the user's own scripts in ~/myskrip by name ("jalankan skrip cek cpu", "jalankan skrip backup"). It runs
+    in a terminal window the user can see. Only for those scripts; other commands are run_command. name: only the
+    script's name. unsure: the request itself may be misheard, ask before running."""
+    name = SCRIPT_REQUEST_RE.sub("", name.strip())
+    said = _key(name)
+    if said == _key(config.SCRIPT_MANAGER):
+        return open_script_manager()
+    scripts = _my_scripts()
+    file = scripts.get(said)
+    if not file and len(said) >= 3:
+        starting = [f for k, f in scripts.items() if k.startswith(said)]
+        if len(starting) > 1:
+            _which_script.update(files=starting, at=time.time())
+            return f"Ada beberapa, {T}: {', '.join(_spoken(f) for f in starting)}. Yang mana?"
+        file = starting[0] if starting else None
+    if file and not unsure:
+        return _start_script(file)
+    if file:
+        return safety.guard(f"menjalankan skrip {file}", _start_script, asking=f"Jalankan skrip {_spoken(file)}, {T}?", file=file)
+    close = difflib.get_close_matches(said, scripts, n=1, cutoff=0.7) if said else []
+    if close:      # a misheard name must not start a script by itself: the user says which
+        file = scripts[close[0]]
+        return safety.guard(f"menjalankan skrip {file}", _start_script, asking=f"Maksudnya skrip {_spoken(file)}?", file=file)
+    return safety.guard("membuka daftar skrip", open_script_manager,
+                        asking=f"Skrip {name} tidak ada, {T}. Mau saya bukakan daftarnya?")
+
+
+AI_TOOLS = [click_here, wifi_power, wifi_connect, bluetooth, power_mode, do_not_disturb, audio_output, screen_power,
+            fan_speed, open_script_manager, run_script, close_script_window]

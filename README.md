@@ -107,10 +107,16 @@ dipakai, dan kalau ragu Gemini yang mengambil alih. **Belajar dari Gemini** (`ex
 berhasil lewat Gemini dicatat di `logs/experience.json` dan dipakai sebagai contoh untuk kalimat serupa, jadi Qwen
 makin jarang perlu bantuan; *"bukan, maksudnya …"* menghapus contoh yang salah.
 
-**Mengukur kecerdasannya:** `tests/exam_brain.py [model] [holdout]` memberi nilai pada soal kalimat alami tanpa
-menjalankan alat apa pun. Dengan ini model baru bisa dibandingkan secara adil sebelum dipakai. Hasil terakhir
-(4 Nov 2026) pada soal yang belum pernah dipakai untuk menyetel (`holdout`): 32 dari 40 benar, 7 diserahkan ke Gemini,
-1 salah alat; cara lama pada soal yang sama: 19 benar, 11 diserahkan, 10 salah.
+**Mengukur kecerdasannya:** `tests/exam_brain.py [model] [holdout|real|memory]` memberi nilai tanpa menjalankan alat apa
+pun, jadi model baru bisa dibandingkan secara adil sebelum dipakai. Saat pertama dijalankan (4 Nov 2026) pada soal yang
+belum pernah dipakai menyetel (`holdout`): 32 dari 40 benar, 7 diserahkan ke Gemini, 1 salah alat; cara lama: 19 benar,
+11 diserahkan, 10 salah. Soal `real` berisi kalimat asli seperti yang tertulis oleh pengenal suara, termasuk yang rusak.
+
+**Mengenal Anda:** kalau Anda bercerita (*"aku alergi kacang"*, *"kopi favoritku americano"*, *"rina itu adikku"*), Digidaw
+bertanya *"Boleh saya ingat?"*; hanya *"ya"* yang menyimpannya, diam atau *"tidak"* tidak menyimpan apa-apa, dan kata
+sandi tidak pernah disimpan. *"Apa yang kamu ingat tentang aku"*, *"lupakan kopi"*, *"lupakan yang tadi"*. Dari kebiasaan:
+*"putar lagu kesukaanku"*. Fakta tersimpan di komputer Anda (`memory_semantic.json`), tetapi ikut terkirim ke Gemini saat
+menyimpan dan saat Gemini menjawab. Matikan dengan `LEARN_FACTS = False`.
 
 ---
 
@@ -152,7 +158,9 @@ langsung aktif tanpa restart (yang perlu restart diberi tanda; ada tombol **Rest
 ### ⚡ Kecepatan Respons
 - **Bunyi *ting* tanpa menunggu Google**: pengenal suara di laptop (Whisper) sudah mendengar "Digidaw" ±0,1 detik
   setelah Anda diam, jadi *ting* langsung berbunyi dan suara Digidaw mulai disiapkan. Google tetap memastikan; kalau
-  ternyata bukan panggilan (lagu, obrolan), Digidaw kembali siaga.
+  tidak mendengar namanya, *ting* tetap berlaku sampai 8 detik, tetapi hanya kalimat yang terdengar seperti perintah
+  yang diterima. Jadi Anda tidak perlu memanggil ulang, dan lagu atau obrolan tidak dijalankan.
+- **Hitungan tanpa AI**: *"berapa 20 kali 30"*, *"25 persen dari 80"*, *"akar 144"*, *"2 pangkat 10"* dijawab langsung.
 - **Tahan jaringan lambat**: alamat server disimpan di memori (cache DNS) dan koneksi ke Google (pengenalan suara,
   Gemini) tetap terbuka. Di jaringan yang sering kehilangan paket (hotspot HP), satu paket DNS yang hilang dulu membuat
   Digidaw diam 5 detik sebelum memahami perintah; sekarang tidak lagi (uji 20×: p90 6,2 → 0,8 detik).
@@ -476,7 +484,9 @@ Kalau AI gagal, jawaban suaranya menyebut penyebab yang sebenarnya.
 Tugas di layar berjalan di latar: lihat layar → satu langkah → lihat lagi (`screen_agent.py`). Sebelum setiap klik ada
 "lihat dekat": potongan di sekitar sasaran diperbesar lalu diperiksa lagi, dan tulisan di titik itu ikut dinilai.
 
-- **Esc** atau *"hentikan tugas"* menghentikannya kapan saja.
+- **Esc** atau *"hentikan tugas"* menghentikannya saat itu juga.
+- **Anda yang didahulukan:** perintah baru yang mengubah layar menghentikan tugas, tugas baru menggantikan yang lama, dan
+  selama Anda memegang keyboard atau mouse tugas menunggu. Langkah dibatalkan kalau layar sudah berubah sejak gambarnya diambil.
 - Langkah yang tidak bisa dibatalkan (mengirim, membayar, menghapus, memasang, masuk akun …) menunggu *"ya"* Anda.
 - Kata sandi, PIN, dan OTP tidak pernah diketik Digidaw: ia meminta Anda mengisinya, lalu lanjut setelah Anda bilang *"sudah"*.
 - Tulisan di layar dianggap data, bukan perintah.
@@ -488,6 +498,15 @@ Tugas di layar berjalan di latar: lihat layar → satu langkah → lihat lagi (`
 diperbarui.
 
 ---
+
+### Skrip buatan sendiri & kipas (Arch Linux)
+- *"Buka skrip"*: membuka pengelola skrip yang sama dengan Super+S (`~/myskrip/atur.sh`, fzf).
+- *"Jalankan skrip cek cpu"*, *"jalankan backup"*: menjalankan skrip di `~/myskrip` menurut namanya, di jendela terminal
+  yang terlihat, sehingga menu, pertanyaan, dan kata sandi sudo tetap Anda yang menjawab. Skrip baru langsung dikenal.
+  Nama yang kurang pasti ditanyakan dulu; kalimat Anda sendiri tidak pernah dijalankan sebagai perintah.
+- *"Tutup skrip"*: menutup jendela pengelola atau skrip yang dibuka Digidaw, tidak yang lain.
+- *"Kipas 50 persen"*, *"fanset 70"*, *"kipas maksimal"*, *"kipas otomatis"*, *"kipas berapa persen"*: lewat `nbfc`.
+  *"Matikan kipas"* menunggu "ya".
 
 ## 🖥️ HUD Holografik
 

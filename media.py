@@ -957,4 +957,14 @@ def unduck(force: bool = False):
         _ducked.clear()
 
 
-AI_TOOLS = [play_youtube, media_control, now_playing]
+def play_favourite() -> str:
+    """Play one of the songs the user plays most ("putar lagu kesukaanku", "setel yang biasa")."""
+    import random
+    import habits
+    songs = habits.favourites("music", 3)
+    if not songs:
+        return f"Saya belum tahu lagu kesukaan {config.USER_TITLE}. Putar satu dua lagu dulu, nanti saya ingat."
+    return play_youtube(random.choice(songs))
+
+
+AI_TOOLS = [play_youtube, play_favourite, media_control, now_playing]

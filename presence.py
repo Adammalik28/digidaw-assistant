@@ -26,6 +26,7 @@ EV_REP = 1 << 20               # keyboards repeat keys; power buttons, lid switc
 LOCKERS = {"hyprlock", "swaylock", "gtklock", "waylock", "i3lock", "xsecurelock", "kscreenlocker_greet"}
 
 _last_active = time.time()
+_last_input = 0.0              # the last real keyboard / mouse input
 _away_since = 0.0              # when the user left (the time of their last activity); 0 = here
 _media_while_away = False      # something played meanwhile: maybe they were watching, not gone
 _held: list[str] = []
@@ -52,6 +53,12 @@ def away_for() -> float:
 def idle_for() -> float:
     """Seconds since the last keyboard / mouse input or command."""
     return time.time() - _last_active
+
+
+def hands_off_for() -> float:
+    """Seconds since a person last touched the keyboard or mouse (spoken commands don't count). Infinite when input
+    can't be seen. Digidaw's own virtual mouse is not watched (input_devices)."""
+    return time.time() - _last_input if _watching else float("inf")
 
 
 # ───────────────────────────── someone in the room, a bad moment to talk ─────────────────────────────
@@ -284,6 +291,8 @@ def _watch_linux():
             except OSError:
                 rescan = 0                   # unplugged
         if ready:
+            global _last_input
+            _last_input = now
             _notify(_activity(now, "input"))
         _check(now)
         time.sleep(POLL_SECONDS)
