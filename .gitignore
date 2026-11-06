@@ -8,6 +8,7 @@ memory_semantic.json
 habits.json
 alarms.json
 agenda.json
+alarm_sounds/
 media_state.json
 project_versions.json
 *.json.bak

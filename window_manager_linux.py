@@ -41,6 +41,9 @@ def _find(name: str) -> dict | None:
     for w in wins:
         if target in _names(w):
             return w
+    window = find_app(name)              # the program before any title: a browser tab called "Discord" isn't Discord
+    if window:
+        return window
     for w in wins:
         if needle in w["title"].lower():
             return w
@@ -50,10 +53,74 @@ def _find(name: str) -> dict | None:
     return None
 
 
+def is_app_window(w: dict, name: str) -> bool:
+    """Is this a window of that app? By the program, not by the title: a browser tab called "Discord" isn't Discord."""
+    import resolver
+    import system_control
+    needle = name.lower().strip()
+    needle = resolver.SHORT.get(needle, needle)
+    targets = {needle.replace(" ", "")}
+    if len(needle.split()) > 2:          # a sentence, not a name: "word ps 2 dan buka firefox" isn't Firefox
+        return any(len(t) >= 3 and t in n for t in targets for n in _names(w))
+    key = system_control._match_key(needle, system_control.PROCESS_ALIASES)
+    if key:
+        targets.add(str(system_control.PROCESS_ALIASES[key]).lower().removesuffix(".exe"))
+    key = system_control._match_key(needle, system_control.APPS)
+    if key:                              # any program that can stand in for it: WhatsApp may be WhatSie, Discord may be Vesktop
+        programs = system_control.APPS[key]
+        targets.update(os.path.basename(p).lower() for p in ([programs] if isinstance(programs, str) else programs) if "://" not in p)
+    return any(len(t) >= 3 and t in n for t in targets for n in _names(w))
+
+
+def find_app(name: str) -> dict | None:
+    return next((w for w in _windows() if not _is_digidaw(w) and not w["workspace"].startswith("special:") and w.get("class") != "DigidawPlayer"
+                 and is_app_window(w, name)), None)
+
+
 def _target(name: str) -> dict | None:
     if name and name.strip():
         return _find(name)
     return next((w for w in _windows() if not _is_digidaw(w)), None)
+
+
+def _target_by_sound(name: str) -> dict | None:
+    """"tindakan diskor ke workspace 1": the name as it was heard. The resolver knows "diskor" is Discord; finding a window doesn't."""
+    if not (name or "").strip():
+        return None
+    try:
+        import resolver
+        verdict, matches = resolver.resolve(name, ("window", "app"), sure_only=True)
+        return _find(matches[0].key) if verdict == "sure" and matches else None
+    except Exception:
+        return None
+
+
+HUD_WORDS = re.compile(r"(?:jendela |tampilan |layar )?(?:sistem(?:nya)?|hud(?:nya)?|panel digidaw|sistem digidaw)")
+MUSIC_WORDS = re.compile(r"(?:jendela |pemutar )?(?:musik(?:nya)?|lagu(?:nya)?|pemutar(?: musik| lagu)?|player|youtube musik)")
+
+
+def _window_by_word(name: str) -> dict | None:
+    """"pindahkan sistem ke workspace 1": "buka sistem" opens the HUD, so that's what it is. "pindahkan musik": the window the music plays in."""
+    said = (name or "").lower().strip()
+    if HUD_WORDS.fullmatch(said):
+        own = [w for w in _windows() if _is_digidaw(w)]
+        return next((w for w in own if w["title"].startswith("DIGIDAW HUD")), own[0] if own else None)
+    if MUSIC_WORDS.fullmatch(said):
+        return _music_window()
+    return None
+
+
+def _music_window() -> dict | None:
+    windows = _windows()
+    player = next((w for w in windows if w.get("class") == "DigidawPlayer"), None)
+    if player:
+        return player
+    try:
+        import media
+        title = (media._player_target() or {}).get("title", "")
+    except Exception:
+        title = ""
+    return next((w for w in windows if title and title in w["title"] and not _is_digidaw(w)), None)
 
 
 def _force_foreground(hwnd):
@@ -66,6 +133,11 @@ def foreground_id():
 
 def minimize(hwnd):
     ld.minimize(hwnd)
+
+
+def close_window(w: dict):
+    """Only this window, like clicking its X; the app and its other windows stay."""
+    ld.close(w["hwnd"])
 
 
 def close_windows_of(pids: set[int]) -> list[str]:
@@ -94,7 +166,7 @@ def focus_window(name: str) -> str:
 
 
 SPOKEN_APP = {"kitty": "Terminal", "alacritty": "Terminal", "foot": "Terminal", "thunar": "File manager",
-              "whatsie": "WhatsApp", "code": "VS Code", "org.gnome.nautilus": "Files", "google-chrome": "Chrome"}
+              "whatsie": "WhatsApp", "wasistlos": "WhatsApp Bisnis", "code": "VS Code", "org.gnome.nautilus": "Files", "google-chrome": "Chrome"}
 
 
 def _spoken_name(w: dict, asked: str) -> str:
@@ -105,6 +177,8 @@ def _spoken_name(w: dict, asked: str) -> str:
     asked = (asked or "").strip().lower()
     if not title or re.search(r"\w+\.\w{2,}/|https?://|\?_=", title) or asked in label.lower() or len(title) > 40:
         return label
+    if title.lower() == _app_label(w).lower():
+        return label                     # the title is only the app's own name ("WasIstLos"): not "WasIstLos di WhatsApp Bisnis"
     if asked and asked in title.lower() and asked not in label.lower():
         return f"{title} di {label}" if label.lower() not in title.lower() else title
     return label
@@ -215,12 +289,14 @@ def move_to_workspace(workspace: str, name: str = "", follow: bool = False) -> s
     target = _workspace_arg(workspace)
     if not target:
         return f"Workspace '{workspace}' tidak dikenal, {T}."
-    w = _target(name)
+    w = _window_by_word(name) or _target(name) or _target_by_sound(name)
     if not w:
         return f"Jendela '{name or 'aktif'}' tidak ditemukan, {T}."
+    label = SPOKEN_APP.get(_app_label(w).lower(), _app_label(w))     # "WhatsApp", not "Whatsie"
+    if MUSIC_WORDS.fullmatch((name or "").lower().strip()):
+        label = "Musik"                  # (the player runs in Chrome, which isn't what was asked for)
     if target.isdigit() and w["workspace"] == target:
-        return f"{w['title'][:60]} sudah ada di workspace {target}, {T}."
-    label = _app_label(w)
+        return f"{label} sudah ada di workspace {target}, {T}."
     if not ld.move_to_workspace(w["hwnd"], target, follow):
         return f"Gagal memindahkan {label}, {T}."
     return f"{label} dipindah ke workspace {target}, {T}."

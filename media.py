@@ -24,6 +24,7 @@ import urllib.parse
 import requests
 
 import config
+import diag
 import storage
 import oscompat
 import firefox_player
@@ -652,6 +653,29 @@ _last_paused: list[str] = []   # sessions DIGIDAW paused, so "lanjutkan" resumes
 STATE_FILE = config.BASE_DIR / "media_state.json"
 
 
+_last_video = {"id": "", "title": "", "at": 0.0}
+_played: list[str] = []        # what was asked for lately, for "lagu sebelumnya" once the player is gone
+
+
+def last_video(max_age: float = 3600) -> tuple[str, str] | None:
+    """(address, title) of the last video Digidaw started, while that is recent."""
+    if not _last_video["id"] or time.time() - _last_video["at"] > max_age:
+        return None
+    import alarm_sounds
+    return f"https://www.youtube.com/watch?v={_last_video['id']}", alarm_sounds._clean_title(_last_video["title"])
+
+
+def like_song() -> str:
+    """Remember the song playing now as a favourite ("simpan lagu ini", "tambah ke favorit"): "putar lagu favorit" plays it."""
+    import habits
+    now = snapshot()
+    title = (now.get("title") or "").strip()
+    if not title:
+        return f"Belum ada lagu yang diputar, {T}."
+    habits.like("music", title)
+    return f"{title} saya simpan sebagai lagu favorit, {T}."
+
+
 def _last_query() -> str:
     try:
         return json.loads(STATE_FILE.read_text(encoding="utf-8")).get("last_query", "")
@@ -680,6 +704,9 @@ def play_youtube(query: str, mix: bool = False) -> str:
 
     video = _pick_song(query, results)
     _remember_query(query)
+    _played.append(query)
+    del _played[:-6]
+    _last_video.update(id=video["id"], title=video["title"] or query, at=time.time())
     url = f"https://www.youtube.com/watch?v={video['id']}" + (f"&list=RD{video['id']}" if mix else "")
     if config.PAUSE_OTHER_MEDIA_ON_PLAY:
         threading.Thread(target=_smtc, args=("pause",), kwargs={"only_status": PLAYING}, daemon=True).start()
@@ -791,7 +818,7 @@ def media_control(action: str, seconds: int = 10) -> str:
             playing = [s for s in (cached_sessions() or []) if s["status"] == PLAYING
                        and not CHAT_APPS.search(f"{s.get('title', '')} {s.get('app', '')}")]
             if playing:
-                return f"{playing[0]['title'] or 'Media'} sudah sedang diputar, {T}."
+                return f"{playing[0]['title'] or 'Media'} sedang diputar, {T}."
             last = _last_query()
             if last:   # nothing paused: pick up the music where the user left off, as a mix
                 return play_youtube(last, mix=True)
@@ -805,6 +832,10 @@ def media_control(action: str, seconds: int = 10) -> str:
 
     if action in ("next", "previous"):
         yt = _yt_status()
+        if action == "previous" and yt and yt["paused"] and _yt_js(_PLAY_JS, await_promise=True):
+            return f"Melanjutkan pemutaran, {T}."        # "putar lagu tadi" with it paused: that one
+        if action == "previous" and not yt and _played:
+            return play_youtube(_played[-1])              # the player was closed: what it was playing
         if yt and not yt["paused"]:
             if action == "next":
                 _yt_js("document.querySelector('.ytp-next-button') && document.querySelector('.ytp-next-button').click()")
@@ -899,6 +930,7 @@ def snapshot() -> dict:
 _duck_lock = threading.Lock()
 _duck_depth = 0
 _ducked: dict[str, float] = {}
+DUCK_FILE = config.LOG_DIR / "ducked.json"      # {app: volume before}: only while other apps are lowered
 
 
 def _com_init():
@@ -907,6 +939,27 @@ def _com_init():
         comtypes.CoInitialize()
     except Exception:
         pass
+
+
+def _keep_ducked():
+    try:
+        storage.save_json(DUCK_FILE, _ducked, mode=storage.PRIVATE)
+    except OSError as e:
+        diag.warn_once("media.duck", "volume aplikasi tidak bisa dicatat", e)
+
+
+def restore_left_ducked():
+    """At start: Digidaw stopped while other apps were lowered (killed, a crash, the power). They get their volume back."""
+    if IS_WINDOWS or not DUCK_FILE.exists():
+        return
+    left = storage.load_json(DUCK_FILE, {})
+    if isinstance(left, dict) and left:
+        ld.restore_streams({str(app): int(percent) for app, percent in left.items()})
+    DUCK_FILE.unlink(missing_ok=True)
+
+
+def is_ducked() -> bool:
+    return _duck_depth > 0
 
 
 def duck():
@@ -919,7 +972,10 @@ def duck():
         if _duck_depth > 1:
             return
         if not IS_WINDOWS:
-            _ducked.update(ld.duck(config.DUCK_LEVEL))
+            for app, percent in ld.stream_volumes().items():
+                _ducked.setdefault(app, percent)
+            _keep_ducked()               # on disk before anything is lowered: a crash mustn't leave the apps quiet for good
+            ld.lower_streams(_ducked, config.DUCK_LEVEL)
             return
         _com_init()
         try:
@@ -942,8 +998,9 @@ def unduck(force: bool = False):
         if _duck_depth or not _ducked:
             return
         if not IS_WINDOWS:
-            ld.unduck(dict(_ducked))
+            ld.restore_streams(dict(_ducked))
             _ducked.clear()
+            DUCK_FILE.unlink(missing_ok=True)
             return
         _com_init()
         try:
@@ -967,4 +1024,4 @@ def play_favourite() -> str:
     return play_youtube(random.choice(songs))
 
 
-AI_TOOLS = [play_youtube, play_favourite, media_control, now_playing]
+AI_TOOLS = [play_youtube, play_favourite, like_song, media_control, now_playing]

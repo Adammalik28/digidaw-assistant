@@ -70,12 +70,17 @@ def _foreground() -> dict | None:
 
 
 def _poll():
+    tick = 0
     while True:
         try:
             w = _foreground()
             if w and w["title"] and not _is_self(w):
                 with _lock:
                     _last.update(w, time=time.time())
+            tick += 1
+            if tick % 4 == 0 and not IS_WINDOWS:
+                import everyday
+                everyday._sync_clipboard()
         except Exception:
             pass
         time.sleep(0.7)

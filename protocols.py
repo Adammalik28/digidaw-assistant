@@ -5,6 +5,7 @@ Each step calls one of DIGIDAW's skills by name. Protocols live in protocols.jso
 with defaults on first run) so they can be edited by hand or created by voice via create_protocol.
 """
 import json
+import re
 import time
 import difflib
 
@@ -131,31 +132,111 @@ def _resolve(name: str, protocols: dict) -> str | None:
     return names[close[0]] if close else None
 
 
+# a new window has to appear before the next step ("buka Firefox", then "pindah ke workspace 2")
+PAUSE_AFTER = {"open_on_workspace": 0.3, "open_application": 1.5, "open_many": 2.0, "open_website": 1.0, "open_folder": 1.0, "switch_workspace": 0.4, "move_to_workspace": 0.4}
+MAX_WAIT = 30
+
+
+def _quietly():
+    """A routine opens its apps where they belong and leaves the screen where the user is."""
+    import contextlib
+    import oscompat
+    if oscompat.IS_WINDOWS:
+        return contextlib.nullcontext()
+    import linux_desktop
+    return linux_desktop.quiet_opening()
+
+
+def _run_step(step: dict) -> str | None:
+    """One step, done. Its result; None when there is nothing to do or say. Steps made by talking are the words that were said."""
+    import brain
+    said = step.get("say")
+    if said and not step.get("tool"):
+        wait = re.fullmatch(r"tunggu (\d{1,2})(?: detik)?", said.lower())
+        if wait:
+            time.sleep(min(int(wait[1]), MAX_WAIT))
+            return None
+        return brain.run_phrase(said)
+    tool, args = step.get("tool"), step.get("args", {}) or {}
+    if tool == "wait":
+        time.sleep(min(float(args.get("seconds", 1)), MAX_WAIT))
+        return None
+    fn = brain.TOOL_MAP.get(tool)
+    if not fn or tool in ("run_protocol", "create_protocol", "delete_protocol"):
+        return f"langkah '{tool}' dilewati, tidak dikenal"
+    if tool in LAMP_TOOLS and not smarthome.has_lamps():
+        return None                          # no lamp connected: the step is simply not there
+    return str(fn(**args))
+
+
+ROUTINE_SAID_FROM = 3
+
+
 def run_protocol(name: str) -> str:
-    """Run a saved multi-step protocol/routine, e.g. 'kerja', 'santai', 'fokus' (Pomodoro),
+    """Run a saved multi-step routine, the user's own or a built-in one: 'kerja', 'santai', 'fokus' (Pomodoro),
     'tidur', 'bersih' (Clean Slate), 'pesta' (House Party). See list_protocols for all."""
     import brain
+    import habits
+    import safety
     protocols = load()
     key = _resolve(name, protocols)
     if not key:
-        return f"Protokol '{name}' tidak ditemukan. Tersedia: {', '.join(protocols)}."
-    results = []
-    for step in protocols[key].get("steps", []):
-        tool, args = step.get("tool"), step.get("args", {}) or {}
-        if tool == "wait":
-            time.sleep(min(float(args.get("seconds", 1)), 30))
-            continue
-        fn = brain.TOOL_MAP.get(tool)
-        if not fn or tool in ("run_protocol", "create_protocol", "delete_protocol"):
-            results.append(f"langkah '{tool}' dilewati")
-            continue
-        if tool in LAMP_TOOLS and not smarthome.has_lamps():
-            continue                         # no lamp connected: the step is simply not there
-        try:
-            results.append(str(fn(**args)))
-        except Exception as e:
-            results.append(f"{tool} gagal: {e}")
-    return f"Protokol {key} dijalankan. " + " | ".join(results)
+        return f"Rutinitas '{name}' tidak ditemukan, {T}. Yang ada: {', '.join(protocols)}."
+    failed = []
+    if len(protocols[key].get("steps", [])) >= ROUTINE_SAID_FROM and brain.speaking_aloud():     # (9 s of silence while "mode gabut" opened its apps)
+        import threading
+        import tts
+        threading.Thread(target=tts.speak_filler, args=(f"Menjalankan rutinitas {key}.",), daemon=True, name="routine-said").start()   # (speaking waits for the sentence: the apps don't)
+    with _quietly():
+        for step in protocols[key].get("steps", []):
+            calls = len(brain._calls_this_turn)
+            try:
+                result = _run_step(step)
+            except Exception as e:
+                if type(e).__name__ == "Cancelled":
+                    raise
+                result = f"gagal: {e}"
+            if result and habits.FAILED_RESULT.search(result):
+                failed.append(step_words(step))
+            ran = brain._calls_this_turn[calls:]
+            if ran and ran[-1][0] in PAUSE_AFTER:
+                time.sleep(PAUSE_AFTER[ran[-1][0]])
+    if safety.has_pending():                 # a step that needs "ya" is asked at the end, when the rest has run
+        return safety.question()
+    trouble = f" Yang tidak berhasil: {', '.join(failed)}." if failed else ""
+    return f"Rutinitas {key} sudah jalan, {T}.{trouble}"
+
+
+_STEP_WORDS = {"open_application": "buka {name}", "open_website": "buka {site}", "set_volume": "volume {level}", "set_brightness": "kecerahan {level}",
+               "play_youtube": "putar {query}", "lamp_scene": "lampu {scene}", "set_timer": "timer {minutes} menit", "sleep_pc": "tidurkan laptop",
+               "system_cleanup": "bersihkan file sementara", "wait": "tunggu {seconds} detik"}
+
+
+def step_words(step: dict) -> str:
+    """A step the way one would say it."""
+    if step.get("say"):
+        return step["say"]
+    tool, args = step.get("tool", ""), step.get("args", {}) or {}
+    if tool == "lamp_power":
+        return "nyalakan lampu" if args.get("on") else "matikan lampu"
+    if tool == "media_control":
+        return {"pause": "jeda musik", "play": "lanjutkan musik", "next": "lagu berikutnya"}.get(args.get("action"), "kontrol musik")
+    if tool == "window_action":
+        return {"minimize_all": "sembunyikan semua jendela"}.get(args.get("action"), "atur jendela")
+    try:
+        return _STEP_WORDS[tool].format(**args)
+    except (KeyError, IndexError):
+        return tool.replace("_", " ")
+
+
+def for_hud() -> list[dict]:
+    """The routines for the screen: the user's own first."""
+    rows = [{"key": key, "custom": bool(p.get("custom")), "steps": [step_words(s) for s in p.get("steps", [])]} for key, p in load().items()]
+    return sorted(rows, key=lambda r: not r["custom"])
+
+
+def for_hud_one(key: str) -> list[str]:
+    return [step_words(s) for s in load().get(key, {}).get("steps", [])]
 
 
 def list_protocols() -> str:

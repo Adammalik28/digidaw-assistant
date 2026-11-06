@@ -96,6 +96,7 @@ def in_call() -> str:
         import json
         import shutil
         import subprocess
+        import aec
         if shutil.which("pactl"):
             def listing(kind):
                 out = subprocess.run(["pactl", "-f", "json", "list", kind], capture_output=True, text=True, timeout=3)
@@ -113,6 +114,10 @@ def in_call() -> str:
                     if sources.get(str(stream.get("source")), "").endswith(".monitor"):
                         continue                        # it listens to the speakers, not to the user
                     name = props.get("application.name") or props.get("application.process.binary") or ""
+                    if re.match(r"(?:pipewire alsa|alsa plug-in) \[python", name.lower()):
+                        continue                        # Digidaw's own stream, the moment its client can't be matched (it blocked an announcement)
+                    if owners.get(str(client)) in aec.own_stream_pids():
+                        continue                        # the stream Digidaw hears "cukup" on: read as a call, it silenced every announcement
                     if name and name.lower() not in NOT_A_CALL:
                         app = name
                         break

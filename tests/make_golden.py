@@ -36,9 +36,18 @@ PRIVATE_WORDS = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in _words if w
 
 
 def main():
-    log = os.path.join(os.path.dirname(__file__), "..", "logs", "digidaw.log")
+    folder = os.path.join(os.path.dirname(__file__), "..", "logs")
     seen, cases = set(), []
-    for line in open(log, encoding="utf-8", errors="replace"):
+    lines = []
+    for name in ("digidaw.log.old", "digidaw.log"):       # (the log is rotated: reading one file once shrank this list from 337 commands to 27)
+        if os.path.exists(os.path.join(folder, name)):
+            lines += open(os.path.join(folder, name), encoding="utf-8", errors="replace").read().splitlines()
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "golden_commands.json"), encoding="utf-8") as f:
+            lines += [f"Anda: {case['said']}" for case in json.load(f)]        # what was locked stays locked, also after the log it came from is gone
+    except (OSError, ValueError):
+        pass
+    for line in lines:
         m = re.match(r"^(?:\d\d:\d\d:\d\d )?(?:Anda|You \((?:HUD|HP)\)): (.+?)(?:\s+\(dikenali.*)?$", line.rstrip("\n"))
         if not m:
             continue

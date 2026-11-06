@@ -6,7 +6,9 @@ import threading
 import psutil
 
 import config
+import local_llm
 import oscompat
+import pc_control
 import system_control
 
 T = config.USER_TITLE
@@ -15,6 +17,7 @@ COOLDOWN = 600   # seconds between repeated CPU warnings
 RAM_REPEAT_AFTER = 3600     # the same memory warning is repeated at most hourly...
 RAM_WORSE_BY = 3            # ...unless memory use climbed this many points since the last warning
 RAM_CALM = 85               # below this the memory warning is reset
+FAN_WARM_FOR = 40           # that warm for this long (a moment of work doesn't change the fan)
 HOT_FOR = 60                # the CPU has to stay at config.HEAT_ALERT_CELSIUS this long (a short peak is normal)...
 HOT_COOLDOWN = 1800         # ...and the warning is repeated at most every half hour
 MAX_ESTIMATE_HOURS = 12     # longer battery estimates are noise (right after unplugging): not said
@@ -65,7 +68,7 @@ def _loop(announce):
     start = psutil.sensors_battery()
     # already plugged in and (almost) full when Digidaw starts: this charge was announced before
     full_announced = bool(start and start.power_plugged and start.percent >= 95)
-    cpu_high = ram_high = cpu_hot = 0
+    cpu_high = ram_high = cpu_hot = fan_warm = 0
     last_cpu_alert = last_ram_alert = last_hot_alert = 0.0
     last_ram_level = 0.0
     disk_alerted = False
@@ -104,6 +107,12 @@ def _loop(announce):
                 announce(f"{T}, CPU bekerja {cpu:.0f} persen lebih dari satu menit. "
                          f"Penyebab terbesar: {_top_process('cpu')}.", "warning")
 
+            warm = config.FAN_SAFE_CELSIUS and system_control.temperatures(gpu=False).get("cpu")
+            fan_warm = fan_warm + 1 if warm and warm >= config.FAN_SAFE_CELSIUS else 0
+            if fan_warm * config.MONITOR_INTERVAL >= FAN_WARM_FOR and pc_control.fan_is_manual():
+                pc_control.fan_speed(auto=True)
+                announce(f"{T}, CPU sudah {warm:.0f} derajat dan kipas sedang pelan, jadi kipas saya kembalikan ke otomatis.", "warning")
+
             heat = config.HEAT_ALERT_CELSIUS and system_control.temperatures(gpu=False).get("cpu")
             cpu_hot = cpu_hot + 1 if heat and heat >= config.HEAT_ALERT_CELSIUS else 0
             if cpu_hot * config.MONITOR_INTERVAL >= HOT_FOR and time.time() - last_hot_alert > HOT_COOLDOWN:
@@ -120,6 +129,8 @@ def _loop(announce):
                 last_ram_alert, last_ram_level = time.time(), ram
                 announce(f"{T}, memori hampir penuh ({ram:.0f} persen). "
                          f"Pemakai terbesar: {_top_process('ram')}.", "warning")
+
+            local_llm.tidy_runner()
 
             if not disk_alerted:
                 free_gb = psutil.disk_usage(oscompat.system_disk()).free / 1024 ** 3

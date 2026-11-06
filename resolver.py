@@ -24,7 +24,12 @@ MAYBE = 0.66
 # short forms people say ("buka IG") and that speech recognition writes for some names
 SHORT = {"ig": "instagram", "insta": "instagram", "yt": "youtube", "fb": "facebook", "wa": "whatsapp",
          "tele": "telegram", "gmaps": "google maps", "gdrive": "google drive", "vscode": "code",
-         "vs code": "code", "file explorer": "file manager", "explorer": "file manager"}
+         "vs code": "code", "file explorer": "file manager", "explorer": "file manager",
+         # WasIstLos: the name it goes by, and the name as Google writes it
+         "whatsapp bisnis": "wasistlos", "whatsapp business": "wasistlos", "wa bisnis": "wasistlos", "wa business": "wasistlos",
+         "wasit": "wasistlos", "wasit loss": "wasistlos", "wasit lost": "wasistlos", "wasit los": "wasistlos", "wasit lord": "wasistlos",
+         "wasis": "wasistlos", "wasis los": "wasistlos", "wasis lost": "wasistlos", "wasis loss": "wasistlos", "wasis lord": "wasistlos",
+         "whatsapp lost": "wasistlos", "whatsapp loss": "wasistlos", "warship lo": "wasistlos", "whatsapp los": "wasistlos"}
 # words that are never a name on their own (a fragment like "ho" or "aplikasi" must not open something random)
 NOT_NAMES = {"aplikasi", "app", "apps", "program", "jendela", "window", "tab", "ini", "itu", "dia", "semua", "lagi",
              "dong", "deh", "aja", "saja", "yang", "dan", "atau", "ke", "di", "the", "this", "that", "situs", "web"}

@@ -189,6 +189,31 @@ def agent_exe(agent: str) -> str | None:
     return next((c for c in candidates if c and os.path.isfile(c)), None)
 
 
+_quota = {"until": 0.0}
+
+
+def agent_trouble(error: str) -> str:
+    """An agent's error in words for the user. Out of quota it also says when that ends (5 Nov: "file tidak berhasil dibuat, tidak ada file yang dihasilkan", and a system
+    analysis that called itself done, while Antigravity had refused at once)."""
+    text = str(error or "").strip()
+    if not re.search(r"quota|RESOURCE_EXHAUSTED", text, re.IGNORECASE):
+        return text[:160]
+    resets = re.search(r"resets? in (?:(\d+)h)?\s*(?:(\d+)m)?", text, re.IGNORECASE)
+    if resets and (resets[1] or resets[2]):
+        _quota["until"] = time.time() + int(resets[1] or 0) * 3600 + int(resets[2] or 0) * 60
+    return quota_left() or "Kuota Antigravity habis"
+
+
+def quota_left() -> str:
+    """"Kuota Antigravity habis, pulih sekitar 2 hari 16 jam lagi" while that is known, else ""."""
+    left = _quota["until"] - time.time()
+    if left <= 0:
+        return ""
+    hours = left / 3600
+    when = (f"{max(1, round(left / 60))} menit" if hours < 1 else f"{round(hours)} jam" if hours < 48 else f"{int(hours // 24)} hari {int(hours % 24)} jam")
+    return f"Kuota Antigravity habis, pulih sekitar {when} lagi"
+
+
 def agent_command(agent: str, prompt: str, resume_id: str = "") -> list[str]:
     """Non-interactive command line for the chosen coding agent (optionally continuing a conversation)."""
     exe = agent_exe(agent)
@@ -368,6 +393,8 @@ def _start_next():
 
 def start_build(p: dict) -> str:
     """Start building a planned project in the background (or queue it). Returns what Digidaw says."""
+    if p.get("agent") == "antigravity" and quota_left():
+        return f"{quota_left()}, {T}. Project-nya belum bisa saya mulai."
     if not agent_exe(p["agent"]):
         return (f"{AGENT_LABELS[p['agent']]} tidak ditemukan di komputer ini, {T}. "
                 f"Pilih agen lain di Control Panel, bagian Project Builder.")
@@ -433,6 +460,8 @@ def _handle_event(event: dict, b: dict):
         result = event.get("result") or {}
         b["agent_status"] = result.get("status", "")
         b["agent_summary"] = (result.get("response") or "")[-1500:]
+        if result.get("error"):
+            b["agent_error"] = agent_trouble(result["error"])
         return
     # Claude Code: {"type": "system"|"assistant"|"result", ...}
     etype = event.get("type")
@@ -499,8 +528,8 @@ def _run_job(b: dict):
         b.update(status="failed", error=f"agen berhenti ({b.get('agent_status') or 'kode ' + str(code)})")
         _save_meta(b)
         _emit(b)
-        _say(f"Maaf {T}, {AGENT_LABELS[b['agent']]} berhenti sebelum {b['name']} selesai. "
-             f"Detailnya ada di log project.{_rollback_hint(b)}", "warning")
+        why = f" {b['agent_error']}." if b.get("agent_error") else " Detailnya ada di log project."
+        _say(f"Maaf {T}, {AGENT_LABELS[b['agent']]} berhenti sebelum {b['name']} selesai.{why}{_rollback_hint(b)}", "warning")
         return
     if b.get("agent_summary"):
         events.emit("digidaw", text=f"Ringkasan dari {AGENT_LABELS[b['agent']]}: {b['agent_summary'][-600:]}")

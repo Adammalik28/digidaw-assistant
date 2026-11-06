@@ -34,6 +34,7 @@ import psutil
 import config
 import events
 import oscompat
+import project_builder
 
 def _render_markdown(text: str) -> str:
     """Render markdown ke HTML dengan markdown_it, markdown, atau fallback."""
@@ -195,6 +196,22 @@ def _parse_agent_output(raw_text: str) -> tuple[str, str]:
     return _clean_tts(spoken), full_report
 
 
+def _local_summary(baseline: dict) -> str:
+    return (f"beban CPU {baseline.get('cpu_percent')} persen, RAM terpakai {baseline.get('ram_used_gb')} dari {baseline.get('ram_total_gb')} giga, "
+            f"dan disk utama terpakai {baseline.get('disk_percent')} persen")
+
+
+def _tell_without_agent(baseline: dict, why: str):
+    """It used to say "analisis dari Antigravity telah selesai, sistem berjalan normal" here, with Antigravity out of quota."""
+    message = f"{why}, {T}, jadi analisis lengkapnya belum bisa. Yang bisa saya lihat sendiri: {_local_summary(baseline)}."
+    events.emit("security", status="done", summary=message)
+    events.emit("analysis", status="failed", summary=message)
+    if ANNOUNCE:
+        ANNOUNCE(message, "warning")
+    else:
+        print(f"\n[DIGIDAW] {message}\n")
+
+
 def _run_analysis():
     """Worker background untuk menjalankan Antigravity, membaca stream-json, dan melaporkan hasilnya."""
     started = time.time()
@@ -255,7 +272,7 @@ Tulis respons Anda dengan tepat memuat 2 bagian berikut:
     # an empty folder of its own: Digidaw's folder holds .env (API key) and settings.json (the phone PIN)
     work = Path(tempfile.gettempdir()) / "digidaw-analisis"
     work.mkdir(exist_ok=True)
-    response_text = ""
+    response_text = agent_error = ""
 
     try:
         proc = subprocess.Popen(
@@ -293,6 +310,8 @@ Tulis respons Anda dengan tepat memuat 2 bagian berikut:
                 elif kind == "result":
                     res = data.get("result") or {}
                     response_text = res.get("response") or ""
+                    if res.get("error"):
+                        agent_error = project_builder.agent_trouble(res["error"])
             except ValueError:
                 pass
                 
@@ -308,21 +327,11 @@ Tulis respons Anda dengan tepat memuat 2 bagian berikut:
     finally:
         _state["running"] = False
 
-    # Jika response tidak tertangkap lewat event result, gunakan fallback
-    if not response_text.strip():
-        spoken = (f"Pemeriksaan sistem telah selesai, {T}. Sistem berjalan normal dengan beban CPU {baseline.get('cpu_percent')}%, "
-                  f"RAM terpakai {baseline.get('ram_used_gb')} dari {baseline.get('ram_total_gb')} GB, "
-                  f"dan ruang disk root terpakai {baseline.get('disk_percent')}%.")
-        full_md = (f"# LAPORAN ANALISIS SISTEM (RINGKASAN LOKAL)\n\n"
-                   f"- **Waktu**: {datetime.datetime.now():%d %B %Y, %H:%M}\n"
-                   f"- **OS**: {baseline.get('os')}\n"
-                   f"- **Uptime**: {baseline.get('uptime')}\n"
-                   f"- **CPU**: {baseline.get('cpu_percent')}%\n"
-                   f"- **RAM**: {baseline.get('ram_used_gb')} / {baseline.get('ram_total_gb')} GB ({baseline.get('ram_percent')}%)\n"
-                   f"- **Disk**: {baseline.get('disk_used_gb')} / {baseline.get('disk_total_gb')} GB ({baseline.get('disk_percent')}%)\n")
-    else:
-        spoken, full_md = _parse_agent_output(response_text)
-    
+    if not response_text.strip():            # it never really looked: this is no analysis, and no report or browser window comes of it
+        _tell_without_agent(baseline, agent_error or "Antigravity tidak memberi hasil")
+        return
+    spoken, full_md = _parse_agent_output(response_text)
+
     # Simpan laporan markdown dan HTML
     timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
     md_path = _reports_dir() / f"Analisis_Sistem_Antigravity_{timestamp_str}.md"
@@ -373,6 +382,9 @@ def analisis_sistem() -> str:
     Pemeriksaan berjalan di latar belakang dan hasilnya langsung dilaporkan melalui suara dan laporan visual."""
     if _state["running"]:
         return f"Analisis sistem dengan Antigravity masih berjalan, {T}. Saya akan kabari begitu selesai."
+    out_of_quota = project_builder.quota_left()
+    if out_of_quota:
+        return f"{out_of_quota}, {T}, jadi analisis lengkapnya belum bisa. Yang bisa saya lihat sendiri: {_local_summary(_gather_baseline())}."
         
     exe = agent_exe()
     if not exe:

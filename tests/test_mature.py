@@ -61,6 +61,8 @@ def test_alarm_keeps_laptop_awake():
     ran = []
     real = (sc.ld.run, alarms.next_ring)
     sc.ld.run = lambda args, **kw: ran.append(args)
+    import sysadmin
+    sysadmin.updating = lambda: False            # (the machine this runs on may really be updating)
     try:
         alarms.next_ring = lambda hours=24: {"kind": "alarm", "due": time.time() + 7 * 3600}
         reply = sc._do_power_linux("sleep")

@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import config  # noqa: E402
 import brain   # noqa: E402
+import metrics  # noqa: E402
+metrics.count = lambda *a, **k: None      # (an exam isn't use: today's real counters stay as they are)
 import golden  # noqa: E402
 from exam_cases import CASES, HOLDOUT, MEMORY_FACTS, MEMORY_NONE, REAL  # noqa: E402
 
@@ -52,6 +54,13 @@ def _recorder(fn, name):
 
 
 brain.TOOL_MAP.update({n: _recorder(f, n) for n, f in list(brain.TOOL_MAP.items())})
+# (add_event goes by rule, past TOOL_MAP: this exam once wrote into the real agenda, over everything in it)
+import tempfile              # noqa: E402
+import agenda                # noqa: E402
+import alarms                # noqa: E402
+agenda.STATE_FILE = __import__("pathlib").Path(tempfile.mkdtemp()) / "agenda.json"
+alarms.STATE_FILE = agenda.STATE_FILE.with_name("alarms.json")
+agenda.add_from_sentence = lambda text: (ran.append(("add_event", {"sentence": text})), "Selesai: add_event.")[1]
 brain._local_search_answer = lambda text: None
 results, wrong, times, args_bad = [], [], [], []
 for case in CASES:
@@ -64,8 +73,8 @@ for case in CASES:
     brain._dialog.clear()
     brain._brain_used = ""
     t0 = time.time()
-    reason = brain.gemini_reason(text)
-    reply = None if reason else brain.ask_local(text)
+    reason = brain.gemini_reason(text)        # (as brain._think decides it)
+    reply = None if reason in brain.GEMINI_ONLY_REASONS else brain.ask_local(text, tools_only=bool(reason))
     times.append(time.time() - t0)
     claims = bool(reply and (brain.ACTION_CLAIM_RE.search(reply) or brain.DONE_CLAIM_RE.search(reply)))
     if ran:

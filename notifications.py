@@ -27,8 +27,10 @@ import time
 
 import config
 import diag
+import storage
 
 T = config.USER_TITLE
+UNREAD_RE = re.compile(r"\((\d{1,4})\)")
 KEEP_SECONDS = 12 * 3600
 MAX_KEPT = 200
 MAX_READ = 8                    # messages read out in one go (the rest are counted)
@@ -36,10 +38,12 @@ MAX_CHARS = 280                 # per message
 
 MATCH = "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"
 # apps that are chat / mail: "cek pesan masuk" reads these; "cek notifikasi" reads everything
-CHAT_APPS = ("whatsapp", "whatsie", "telegram", "signal", "discord", "slack", "messenger", "element", "teams",
+CHAT_APPS = ("whatsapp", "whatsie", "wasistlos", "telegram", "signal", "discord", "slack", "messenger", "element", "teams",
              "thunderbird", "geary", "evolution", "mail", "gmail", "skype", "line", "wechat", "instagram", "kdeconnect")
 IGNORED_APPS = ("digidaw", "volume", "brightness", "wp-notify", "spotify", "cliphist", "hyprland", "swaync")
-LABEL = {"whatsie": "WhatsApp", "whatsapp": "WhatsApp", "telegram": "Telegram", "signal": "Signal",
+# (the first match counts: "whatsapp bisnis" before "whatsapp")
+LABEL = {"wasistlos": "WhatsApp Bisnis", "bisnis": "WhatsApp Bisnis", "business": "WhatsApp Bisnis",
+         "whatsie": "WhatsApp", "whatsapp": "WhatsApp", "telegram": "Telegram", "signal": "Signal",
          "discord": "Discord", "slack": "Slack", "thunderbird": "Thunderbird email", "geary": "email", "mail": "email",
          "gmail": "Gmail", "instagram": "Instagram", "messenger": "Messenger", "kdeconnect": "HP"}
 
@@ -51,6 +55,8 @@ WAIT_FOR_PAUSE = 60             # the user is talking with Digidaw: wait this lo
 OFFER_SECONDS = 45              # "Mau saya bacakan?" can be answered with a plain "ya" for this long
 
 _items: collections.deque = collections.deque(maxlen=MAX_KEPT)    # newest last
+_kept_file = None               # set by start: what came in stays known after a restart, for KEEP_SECONDS. (Tests and other processes never write it.)
+_keep_timer = None
 _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 _started = False
@@ -95,6 +101,15 @@ def known_chats() -> list[str]:
     return names
 
 
+def app_of_chat(name: str) -> str:
+    """The app this chat's latest message came in on ("" when none did lately): "balas ke Rina" goes back the same way."""
+    wanted = name.strip().lower()
+    for item in reversed(list(_items)):
+        if wanted and _is_chat(item["app"]) and wanted in _chat(item)[0].lower():
+            return item["app"]
+    return ""
+
+
 def last_chat(max_age: float = 15 * 60) -> dict | None:
     """{"name", "app", "label"} of the chat the user last heard about, if that was recently."""
     if _last_chat["name"] and time.time() - _last_chat["at"] <= max_age:
@@ -126,6 +141,56 @@ def on_new(fn):
         _hooks.append(fn)
 
 
+def _keep_soon():
+    """Saved a moment later: messages come in bunches."""
+    global _keep_timer
+    if _kept_file is None or (_keep_timer is not None and _keep_timer.is_alive()):
+        return
+    _keep_timer = threading.Timer(2.0, _keep_now)
+    _keep_timer.daemon = True
+    _keep_timer.start()
+
+
+def _keep_now():
+    if _kept_file is None:
+        return
+    try:
+        with _lock:
+            items = [dict(i) for i in _items]
+        storage.save_json(_kept_file, items, mode=storage.PRIVATE)
+    except OSError as e:
+        diag.warn_once("notifications.keep", "pesan masuk tidak bisa disimpan", e)
+
+
+def _load_kept(path):
+    """What came in before the restart (the private logs folder, gone after KEEP_SECONDS)."""
+    global _kept_file
+    _kept_file = path
+    cutoff = time.time() - KEEP_SECONDS
+    with _lock:
+        for item in storage.load_json(path, []):
+            if isinstance(item, dict) and item.get("at", 0) >= cutoff and {"app", "summary", "body", "read"} <= set(item):
+                _items.append(item)
+
+
+def _unread_in_titles(wanted: str = "") -> list[tuple[str, int]]:
+    """(chat app, its own unread count): WhatsApp's window says "(26)" while its notifications may never have reached Digidaw."""
+    import window_manager
+    found: dict[str, int] = {}
+    try:
+        windows = window_manager._windows()
+    except Exception:
+        return []
+    for w in windows:
+        app = f"{w.get('class', '')} {w.get('process', '')}"
+        count = UNREAD_RE.search(w.get("title", ""))
+        if count and _is_chat(app):
+            label = _label(app)
+            if not wanted or wanted in label.lower():
+                found[label] = max(found.get(label, 0), int(count[1]))
+    return list(found.items())
+
+
 def _add(app: str, summary: str, body: str, replaces: int = 0):
     app, summary, body = (app or "").strip(), _clean(summary), _clean(body)
     if not (summary or body) or any(i in app.lower() for i in IGNORED_APPS):
@@ -137,6 +202,7 @@ def _add(app: str, summary: str, body: str, replaces: int = 0):
                 return
         item = {"app": app, "summary": summary, "body": body, "at": now, "read": False}
         _items.append(item)
+    _keep_soon()
     taken = False
     for fn in list(_hooks):
         try:
@@ -192,6 +258,8 @@ def _listen():
 
 def start():
     """Start listening in the background (Linux with busctl; elsewhere nothing happens)."""
+    from pathlib import Path
+    _load_kept(Path(config.LOG_DIR) / "notifications.json")
     global _started
     if _started or not shutil.which("busctl"):
         return
@@ -245,7 +313,9 @@ def read_notifications(app: str = "", messages_only: bool = False, include_read:
     messages_only: only chat and email apps (for "pesan masuk"). include_read: also the ones already read out
     ("baca ulang", "bacakan lagi"). sender: only from this person or group ("Rina", "Kelas TI"; several:
     "Rina, Budi"), for "bacakan pesan dari Rina"."""
-    return _reading(app, messages_only, include_read, sender)
+    said = _reading(app, messages_only, include_read, sender)
+    _keep_soon()
+    return said
 
 
 def _reading(app: str = "", messages_only: bool = False, include_read: bool = False, sender: str = "",
@@ -265,6 +335,10 @@ def _reading(app: str = "", messages_only: bool = False, include_read: bool = Fa
                    and (not messages_only or _is_chat(i["app"]))]
         if earlier and not include_read:
             return f"Tidak ada {kind} baru, {T}. Mau saya bacakan ulang {len(earlier)} yang tadi?"
+        marked = _unread_in_titles(wanted) if messages_only or wanted else []
+        if marked:
+            counts = ", ".join(f"{label} menandai {count} belum dibaca" for label, count in marked)
+            return f"Belum ada {kind} baru yang sampai ke saya, {T}, tetapi {counts}. Ucapkan buka {marked[0][0]} untuk melihatnya."
         return f"Belum ada {kind} yang masuk, {T}."
 
     chosen = items[-MAX_READ:]
@@ -313,6 +387,7 @@ def clear_notifications() -> str:
     with _lock:
         n = len(_items)
         _items.clear()
+    _keep_soon()
     return f"{n} notifikasi saya lupakan, {T}."
 
 
@@ -393,11 +468,11 @@ def offer_reading(senders: str = ""):
     _offer.update(until=time.time() + OFFER_SECONDS, senders=senders)
 
 
-def take_offer() -> str | None:
-    """A "ya" right now answers "Mau saya bacakan?": the chats it was about ("" = all new messages); None = nothing
-    was offered. The offer is used up either way."""
-    due, _offer["until"] = time.time() < _offer["until"], 0.0
-    return _offer["senders"] if due else None
+def offered() -> str | None:
+    """A "ya" right now would answer "Mau saya bacakan?": the chats it was about ("" = all new messages); None = nothing
+    was offered. Only looks. Whether a phrase is a command gets asked several times before it runs (hearing.level, core),
+    and when this used the offer up, the first of those took it: "iya" was then ignored, and so was "bacakan" (6 Nov 16:19)."""
+    return _offer["senders"] if time.time() < _offer["until"] else None
 
 
 def clear_offer():

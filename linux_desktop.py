@@ -59,12 +59,42 @@ def out(args: list[str], timeout: float = 5) -> str:
     return r.stdout.strip() if r and r.returncode == 0 else ""
 
 
+_opening = threading.local()
+
+
+class quiet_opening:
+    """While this is on, in this thread, opening an app doesn't bring anything to the front. workspace: where it should appear
+    (Hyprland starts it there without showing it first)."""
+
+    def __init__(self, workspace: str = ""):
+        self.workspace = workspace
+
+    def __enter__(self):
+        self.before = (getattr(_opening, "quiet", False), getattr(_opening, "workspace", ""))
+        _opening.quiet = True
+        _opening.workspace = self.workspace or self.before[1]
+
+    def __exit__(self, *_):
+        _opening.quiet, _opening.workspace = self.before
+
+
+def opening_quietly() -> bool:
+    return getattr(_opening, "quiet", False)
+
+
 def spawn(args: list[str], cwd: str | None = None) -> bool:
     """Start a GUI program that outlives Digidaw."""
     options = _detached()
-    if args and os.path.basename(args[0]) == "whatsie":
+    extra = {}
+    if args and os.path.basename(args[0]) in ("whatsie", "wasistlos"):
         import whatsapp                  # with its control port on, so "balas …" never has to restart it first
-        options["env"] = dict(options["env"], QTWEBENGINE_REMOTE_DEBUGGING=f"127.0.0.1:{whatsapp.PORT}")
+        extra = whatsapp.control_env(os.path.basename(args[0]))
+        options["env"] = dict(options["env"], **extra)
+    workspace = getattr(_opening, "workspace", "")
+    if workspace and not cwd and hyprland() and args:
+        line = " ".join([*(["env", *[f"{k}={v}" for k, v in extra.items()]] if extra else []), *map(shlex.quote, args)])
+        if dispatch("exec", f"[workspace {workspace} silent] {line}"):
+            return True
     try:
         subprocess.Popen(args, cwd=cwd, **options)
         return True
@@ -89,9 +119,90 @@ def _hypr_json(what: str):
         return None
 
 
-def dispatch(*args: str) -> bool:
-    r = run(["hyprctl", "dispatch", *args])
+def _lua_text(value: str) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _lua_rules(rules: str) -> str:
+    """"float;size 800 750;center" -> {float=true, size="800 750", center=true}"""
+    fields = []
+    for rule in filter(None, (r.strip() for r in rules.split(";"))):
+        key, _, value = rule.partition(" ")
+        fields.append(f"{key}={_lua_text(value.strip())}" if value.strip() else f"{key}=true")
+    return "{" + ", ".join(fields) + "}"
+
+
+def _with_window(fields: str, window: str) -> str:
+    fields = f"{fields}, window={_lua_text(window)}" if fields and window else fields or (f"window={_lua_text(window)}" if window else "")
+    return "{" + fields + "}" if fields else ""
+
+
+_SIDES = {"l": "left", "r": "right", "u": "up", "d": "down"}
+
+
+def _as_lua(name: str, args: tuple[str, ...]) -> str | None:
+    """Hyprland 0.57 took the old dispatchers away: `hyprctl dispatch` now reads Lua (hl.dsp.*). Every window, workspace and screen action of Digidaw goes
+    through here, in the old words. None: not one this knows. Field names as in /usr/share/hypr and tried on a real window, 6 Nov."""
+    first = str(args[0]) if args else ""
+    if name == "workspace":
+        return f"hl.dsp.focus({{workspace={_lua_text(first)}}})"
+    if name in ("movetoworkspace", "movetoworkspacesilent"):
+        workspace, _, window = first.partition(",")
+        return f"hl.dsp.window.move({_with_window(f'workspace={_lua_text(workspace)}, follow={"true" if name == "movetoworkspace" else "false"}', window)})"
+    if name == "focuswindow":
+        return f"hl.dsp.focus({_with_window('', first)})"
+    if name == "closewindow":
+        return f"hl.dsp.window.close({_with_window('', first)})"
+    if name == "fullscreenstate":
+        internal, _, client = first.partition(" ")
+        return f"hl.dsp.window.fullscreen_state({{internal={int(internal)}, client={int(client or internal)}}})"
+    if name == "settiled":
+        return f"hl.dsp.window.float({_with_window('action="disable"', first)})"
+    if name == "togglefloating":
+        return f"hl.dsp.window.float({_with_window('action="toggle"', first)})"
+    if name == "movewindow" and first in _SIDES:
+        return f"hl.dsp.window.move({{direction={_lua_text(_SIDES[first])}}})"
+    if name == "swapwindow" and first in _SIDES:
+        return f"hl.dsp.window.swap({{direction={_lua_text(_SIDES[first])}}})"
+    if name == "resizewindowpixel":
+        size, _, window = first.partition(",")
+        width, height = size.replace("exact", "").split()
+        return f"hl.dsp.window.resize({_with_window(f'x={int(width)}, y={int(height)}', window)})"
+    if name == "centerwindow":
+        return "hl.dsp.window.center()"
+    if name == "movecursor":
+        return f"hl.dsp.cursor.move({{x={int(first)}, y={int(args[1])}}})"
+    if name == "dpms":
+        return f"hl.dsp.dpms({{action={_lua_text({'on': 'enable', 'off': 'disable'}.get(first, first))}}})"
+    if name == "exec":
+        rules = re.match(r"\[([^\]]*)\]\s*(.*)", first, re.DOTALL)
+        return f"hl.dsp.exec_cmd({_lua_text(rules[2])}, {_lua_rules(rules[1])})" if rules else f"hl.dsp.exec_cmd({_lua_text(first)})"
+    if name == "exit":
+        return "hl.dsp.exit()"
+    if name == "layoutmsg":
+        return f"hl.dsp.layout({_lua_text(first)})"
+    if name == "focuscurrentorlast":
+        return "hl.dsp.focus({last=true})"
+    if name == "cyclenext":
+        return "hl.dsp.window.cycle_next({next=false})" if first == "prev" else "hl.dsp.window.cycle_next()"
+    if name == "bringactivetotop":
+        return "hl.dsp.window.bring_to_top()"
+    if name == "sendshortcut":
+        mods, key, window = [part.strip() for part in first.split(",", 2)]
+        fields = f"mods={_lua_text(mods)}, key={_lua_text(key)}"
+        return f"hl.dsp.send_shortcut({_with_window(fields, '' if window == 'activewindow' else window)})"
+    return None
+
+
+def _done(r) -> bool:
     return bool(r and r.returncode == 0 and "ok" in (r.stdout or "").lower())
+
+
+def dispatch(*args: str) -> bool:
+    lua = _as_lua(args[0], args[1:]) if args else None
+    if lua and _done(run(["hyprctl", "dispatch", lua])):
+        return True
+    return _done(run(["hyprctl", "dispatch", *args]))        # Hyprland before 0.57
 
 
 def _process_name(pid: int) -> str:
@@ -194,7 +305,13 @@ def active_workspace_id() -> int:
 
 def switch_workspace(target: str) -> bool:
     """target: a number ('4'), or a relative step ('+1' / '-1')."""
-    return dispatch("workspace", target)
+    if str(target) == active_workspace():
+        return True                      # with binds:workspace_back_and_forth, going where you already are throws you back
+    return dispatch("workspace", str(target))
+
+
+def active_workspace() -> str:
+    return str((_hypr_json("activeworkspace") or {}).get("name", ""))
 
 
 def move_to_workspace(address: str, workspace: str, follow: bool = False) -> bool:
@@ -335,28 +452,71 @@ def _is_child(pid) -> bool:
         return False
 
 
-def duck(level: float) -> dict[int, int]:
-    """Lower every playing stream except Digidaw's own; returns {sink_input: original percent}."""
-    me = str(os.getpid())
-    ducked = {}
+def _app_of(item: dict) -> str:
+    props = item.get("properties") or {}
+    return props.get("application.name") or f"stream {item.get('index')}"
+
+
+def _own_stream(item: dict) -> bool:
+    """Digidaw's own voice, beeps and alarms, and system notifications: never lowered."""
+    props = item.get("properties") or {}
+    return props.get("application.process.id") == str(os.getpid()) or props.get("application.name") == APP_NAME \
+        or props.get("media.role") in ("Notification", "Alarm", "Event") \
+        or props.get("application.name") in ("pw-play", "paplay") or _is_child(props.get("application.process.id"))
+
+
+def stream_volumes() -> dict[str, int]:
+    """{app: volume in percent} of what is playing now, except Digidaw's own."""
+    volumes: dict[str, int] = {}
     for item in _sink_inputs():
-        props = item.get("properties") or {}
-        if props.get("application.process.id") == me and _input_percent(item) < 95:
+        if not item.get("corked") and not _own_stream(item):
+            volumes[_app_of(item)] = max(volumes.get(_app_of(item), 0), _input_percent(item))
+    return volumes
+
+
+def lower_streams(volumes: dict[str, int], level: float):
+    """Those apps down to this share of their volume."""
+    for item in _sink_inputs():
+        if (item.get("properties") or {}).get("application.process.id") == str(os.getpid()) and _input_percent(item) < 95:
             # Digidaw's own voice turned down (a remembered volume, or a mistake): it must be heard
             run(["pactl", "set-sink-input-volume", str(item["index"]), "100%"], timeout=2)
-        if item.get("corked") or props.get("application.process.id") == me or props.get("application.name") == APP_NAME \
-                or props.get("media.role") in ("Notification", "Alarm", "Event") \
-                or props.get("application.name") in ("pw-play", "paplay") or _is_child(props.get("application.process.id")):
-            continue            # Digidaw's own beeps/alarms and system notifications are never lowered
-        original = _input_percent(item)
-        ducked[item["index"]] = original
-        run(["pactl", "set-sink-input-volume", str(item["index"]), f"{max(1, int(original * level))}%"], timeout=2)
-    return ducked
+        if not item.get("corked") and not _own_stream(item) and _app_of(item) in volumes:
+            run(["pactl", "set-sink-input-volume", str(item["index"]), f"{max(1, int(volumes[_app_of(item)] * level))}%"], timeout=2)
 
 
-def unduck(ducked: dict[int, int]):
-    for index, percent in ducked.items():
-        run(["pactl", "set-sink-input-volume", str(index), f"{percent}%"], timeout=2)
+def _remember_volume(app: str, percent: int):
+    """The sound system remembers each app's last volume and gives it to its next stream. An app that stopped playing while it
+    was lowered must not keep that: its next stream would start low, and be lowered from there, again and again. What it
+    remembers can only be changed through a stream (WirePlumber ignores written settings), so: a moment of silence in that name."""
+    if not shutil.which("paplay"):
+        return
+    try:
+        proc = subprocess.Popen(["paplay", f"--property=application.name={app}", str(_tone_file([(0, 1200)]))], **QUIET)
+    except OSError:
+        return
+    try:
+        for _ in range(20):
+            time.sleep(0.05)
+            item = next((i for i in _sink_inputs() if (i.get("properties") or {}).get("application.process.id") == str(proc.pid)), None)
+            if item:
+                run(["pactl", "set-sink-input-volume", str(item["index"]), f"{percent}%"], timeout=2)
+                time.sleep(0.15)
+                break
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def restore_streams(volumes: dict[str, int]):
+    """Those apps back at these volumes, also streams that started meanwhile (the next song is often a new one)."""
+    live = set()
+    for item in _sink_inputs():
+        if _app_of(item) in volumes and not _own_stream(item):
+            live.add(_app_of(item))
+            run(["pactl", "set-sink-input-volume", str(item["index"]), f"{volumes[_app_of(item)]}%"], timeout=2)
+    for app, percent in volumes.items():
+        if app not in live and not app.startswith("stream "):
+            _remember_volume(app, percent)
 
 
 # ───────────────────────────── sounds ─────────────────────────────
@@ -389,6 +549,22 @@ def play_file(path: str, wait: bool = True) -> subprocess.Popen | None:
         except subprocess.TimeoutExpired:
             proc.kill()
     return proc
+
+
+def play_audio(path: str) -> subprocess.Popen | None:
+    """Any audio the user may bring (MP3, M4A, FLAC...): pw-play and paplay only know some formats."""
+    if shutil.which("mpv"):
+        player = ["mpv", "--no-config", "--no-video", "--really-quiet", f"--audio-client-name={APP_NAME}"]
+    elif shutil.which("ffplay"):
+        player = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]
+    else:
+        return play_file(path, wait=False)
+    if not os.path.exists(path):
+        return None
+    try:
+        return subprocess.Popen([*player, str(path)], **QUIET)
+    except OSError:
+        return play_file(path, wait=False)
 
 
 def _tone_file(tones: list[tuple[int, int]]) -> Path:
@@ -443,18 +619,24 @@ def sound_for(kind: str) -> str | None:
 class LoopingSound:
     """An alarm sound repeated until stop() (winsound SND_LOOP)."""
 
-    def __init__(self, path: str | None):
+    def __init__(self, path: str | None, fallback: str | None = None):
         self._stop = threading.Event()
         self._proc = None
-        threading.Thread(target=self._loop, args=(path,), daemon=True, name="alarm-sound").start()
+        threading.Thread(target=self._loop, args=(path, fallback), daemon=True, name="alarm-sound").start()
 
-    def _loop(self, path: str | None):
+    def _loop(self, path: str | None, fallback: str | None):
         while not self._stop.is_set():
-            self._proc = play_file(path, wait=False) if path else None
+            started = time.time()
+            self._proc = play_audio(path) if path else None
             if not self._proc:
+                if fallback and path != fallback:
+                    path = fallback
+                    continue
                 play_tones([(988, 180), (0, 70), (988, 180), (0, 400)])   # no sound theme installed
                 continue
-            self._proc.wait()
+            failed = self._proc.wait() != 0 and not self._stop.is_set()
+            if failed and time.time() - started < 2:      # a broken file: the alarm still has to be heard
+                path = fallback if path != fallback else None
             self._stop.wait(0.3)
 
     def stop(self):

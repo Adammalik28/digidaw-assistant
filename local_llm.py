@@ -11,10 +11,15 @@ import threading
 import time
 import typing
 
+import psutil
 import requests
 
 import config
 
+RUNNER_MAX_MB = 3000          # the runner holding this much besides the model: see tidy_runner
+RUNNER_IDLE_SECONDS = 300     # ...and not asked for anything this long
+_last_request = 0.0           # when the model was last asked something
+_warm_request = None          # what warm_up was given, to do the same after tidy_runner
 _status = {"ok": None, "checked": 0.0, "reason": ""}
 _lock = threading.Lock()
 STATUS_TTL = 30               # seconds a "running / not running" answer is trusted
@@ -61,6 +66,8 @@ GPU_ERROR_RE = re.compile(r"out of memory|cuda|cudamalloc|unable to allocate|run
 
 def _options(max_tokens: int) -> dict:
     # Qwen3-Instruct's recommended sampling (temperature 0.7, top_p 0.8, top_k 20): steadier tool calls than 0.8
+    global _last_request
+    _last_request = time.time()
     opts = {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "num_ctx": config.LOCAL_CONTEXT, "num_predict": max_tokens}
     if getattr(config, "LOCAL_FULL_GPU", False) and time.time() - _full_gpu_failed > FULL_GPU_RETRY:
         opts["num_gpu"] = 999      # every layer on the GPU (Ollama would leave a few on the CPU: ~25% slower)
@@ -96,11 +103,13 @@ def _no_think_model() -> bool:
 
 
 def generate(system: str, user: str, schema: dict | None = None, max_tokens: int = 200,
-             temperature: float = 0.2, history: list[tuple[str, str]] | None = None) -> str:
+             temperature: float = 0.2, history: list[tuple[str, str]] | None = None, stop: list[str] | None = None) -> str:
     """One answer without thinking first. schema: a JSON schema the answer must follow (Ollama enforces it token by
     token, so the model can't answer anything else). history: earlier (user, assistant) turns. Returns the text."""
     global _full_gpu_failed
     options = {**_options(max_tokens), "temperature": temperature}
+    if stop:
+        options["stop"] = stop
     if _no_think_model():
         turns = "".join(f"<|im_start|>user\n{u}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n{a}<|im_end|>\n"
                         for u, a in history or [])
@@ -137,16 +146,55 @@ def strip_thinking(text: str) -> str:
     return text.replace("*", "").replace("#", "").strip()
 
 
-def warm_up(system_prompt: str = ""):
+def warm_up(system_prompt: str = "", first_jobs=()):
     """Load the model in the background, with the same context size real requests use (a different size makes
-    Ollama load it again) and the system prompt already processed, so the first command is fast too."""
+    Ollama load it again) and the prompts already processed, so the first command is fast too. first_jobs: calls that
+    process the prompts real commands start with."""
+    global _warm_request
+    _warm_request = (system_prompt, first_jobs)
+
     def run():
         if available(refresh=True):
             try:
                 chat([{"role": "system", "content": system_prompt}, {"role": "user", "content": "halo"}], max_tokens=1)
-            except requests.RequestException:
+                for job in first_jobs:
+                    job()
+            except Exception:
                 pass
     threading.Thread(target=run, daemon=True, name="ollama-warmup").start()
+
+
+def _runner_memory_mb() -> int:
+    """What the model's runner holds in RAM and swap (the model itself is on the GPU)."""
+    total = 0
+    for proc in psutil.process_iter(["name"]):
+        if proc.info["name"] != "llama-server":
+            continue
+        try:
+            with open(f"/proc/{proc.pid}/status") as f:
+                status = f.read()
+        except OSError:
+            continue
+        for key in ("RssAnon", "VmSwap"):
+            found = re.search(rf"^{key}:\s+(\d+)", status, re.MULTILINE)
+            total += int(found[1]) // 1024 if found else 0
+    return total
+
+
+def tidy_runner() -> bool:
+    """The runner keeps old prompts in RAM, up to 8 GB by default, and a model that is never unloaded (LOCAL_KEEP_ALIVE = -1) never gives them back:
+    on 5 Nov it held 6.3 GB, swap was full and Digidaw warned about memory. When it has grown and nobody needed it for a while, the model is
+    loaded afresh (a few seconds, on the GPU), with the prompts ready again, so the next command is as fast as before."""
+    if not _warm_request or time.time() - _last_request < RUNNER_IDLE_SECONDS or _runner_memory_mb() < RUNNER_MAX_MB:
+        return False
+    held = _runner_memory_mb()
+    try:
+        requests.post(_url("/api/generate"), json={"model": config.LOCAL_MODEL, "keep_alive": 0}, timeout=15).raise_for_status()
+    except requests.RequestException:
+        return False
+    print(f"[lokal] otak lokal dimuat ulang: {held} MB memori dilepas")
+    warm_up(*_warm_request)
+    return True
 
 
 # ───────────────────────────── tool schemas ─────────────────────────────

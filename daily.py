@@ -288,8 +288,9 @@ def _maybe_recap():
         day = _current()
         if day.get("recap") or day["active"] < 600:
             return                           # once a day, and only on a day the computer was really used
-    if presence.is_away():
-        return                               # (tried again when the user is back, until midnight)
+    if presence.is_away() or presence.busy_reason():
+        return                               # away, Do Not Disturb, full screen: tried again later, until midnight. Asking
+                                             # core.announce anyway showed it on the HUD every 30 s without a sound.
     text = daily_recap()
     if ANNOUNCE(f"Rangkuman hari ini, {T}. {text}", "info", wait=60, push=False):
         with _lock:

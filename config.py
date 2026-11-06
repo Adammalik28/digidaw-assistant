@@ -32,6 +32,7 @@ FOLLOWUP_SECONDS = 10          # ...for this many seconds (other apps' audio is 
 PHRASE_TIME_LIMIT = 15         # max seconds per spoken phrase (long enough for dictation)
 STT_USE_VAD = True             # WebRTC voice detection (faster, catches soft speech, ignores room noise)
 STT_VAD_AGGRESSIVENESS = 2     # 0-3: higher rejects more noise but may miss very soft speech
+STT_HIGHPASS_HZ = 200          # sound below this never counts as speech (rumble, wind, a table shaking); 0 = off
 STT_END_SILENCE_MS = 500       # silence that ends a sentence (VAD mode)
 STT_MERGE_GAP = 0.8            # keep talking within this many seconds and it's still one sentence
 STT_PAUSE_THRESHOLD = 1.0      # silence that ends a phrase (fallback energy mode)
@@ -76,11 +77,17 @@ AGENT_SKIP_PERMISSIONS = True  # let the agent install packages / run commands w
                                # (needed to build unattended; it works inside the new project folder)
 BUILD_TIMEOUT_MINUTES = 30
 BRIEF_SILENCE_SECONDS = 20     # while describing a project, this much silence means "done"
+QUIET_WELCOME_HOURS = (23, 6)  # back at the computer from..until these hours: no "selamat datang kembali", small news keeps; unread messages are still told
 ALARM_RING_SECONDS = 60        # an alarm rings this long unless stopped / snoozed
 ALARM_MIN_VOLUME = 60            # % — an alarm is never quieter than this ("mode tidur" leaves the volume at 10)
 ALARM_KEEP_AWAKE_HOURS = 16     # an alarm due within this many hours: "sleep" only turns the screen off
 ALARM_SNOOZE_MINUTES = 5
 ALARM_SHOW_HUD = True          # bring the HUD up while ringing (STOP / TUNDA buttons)
+WEEKLY_SCHEDULE_FILE = Path.home() / ".local/share/jadwal-kuliah/jadwal.tsv"   # kept by the user's own script
+WEEKLY_REMIND_MINUTES = 30     # said this long before a class in that file starts (0 = off)
+ALARM_SOUND = ""               # a file in alarm_sounds/ (Control Panel: Alarm); "" = the built-in sound
+ALARM_SOUND_FOR_ALL = True     # that sound for timers and reminders too
+ALARM_RISE_SECONDS = 20        # an alarm starts soft and reaches its full volume after this long (0 = at once)
 GENERATE_DIR = ""              # where generated images/files go ("" = Documents\\Digidaw Generated)
 GENERATE_OPEN_RESULT = True    # open the image/file as soon as it's ready
 GENERATE_TIMEOUT_MINUTES = 10
@@ -103,6 +110,7 @@ START_WITH_WINDOWS = False     # start quietly in the background when you sign i
 # ── Proactive monitoring ────────────────────────────────────────────
 PROACTIVE_ALERTS = True        # battery / charger / CPU / RAM / disk warnings
 MONITOR_INTERVAL = 20          # seconds between checks
+FAN_SAFE_CELSIUS = 75          # the fan set by hand and the CPU this hot: back to automatic, so it can't overheat left alone (0 = never)
 HEAT_ALERT_CELSIUS = 95        # warn when the CPU stays this hot for a minute (0 = never)
 
 # ── Awareness: what a butler notices without being asked ────────────
@@ -120,9 +128,8 @@ LAMP_AWAY_MINUTES = 30         # away this long with the lamp on: dimmed until y
 LAMP_ALARM_LIGHT = True        # a wake-up alarm turns the lamp on slowly like a sunrise; timers/reminders blink it
 
 # ── Conversation ────────────────────────────────────────────────────
-BARGE_IN = False               # interrupt Digidaw by voice while it talks ("Digidaw, stop"): PipeWire echo cancellation.
-                               # Off by default: the cleaned-up microphone sound made "Digidaw" much harder to hear
-                               # (3 Nov 2026: most calls were missed right after a start)
+BARGE_IN = True                # interrupt Digidaw by voice while it talks ("cukup", "stop", "Digidaw, ..."): aec.py listens on its own streams.
+                               # Nothing about the everyday microphone or anyone's sound changes
 STREAM_REPLIES = True          # long AI answers start being spoken while the rest is still being written
 
 # Load .env manually if exists
@@ -185,7 +192,7 @@ SCRIPTS_NOT_RUN = ("lib.sh",)              # a library for the others, as in atu
 SCRIPTS_WITHOUT_WINDOW = ("modeon.sh",)    # only starts apps, which would close along with a terminal
 LEARN_FACTS = True                  # "aku alergi kacang" said in passing: asks "boleh saya ingat?" (memory.learnable)
 LOCAL_ROUTER = True                 # the local model picks one action from a fixed list (local_router.py), never free text
-LOCAL_KEEP_ALIVE = "60m"            # keep the model in (V)RAM between commands
+LOCAL_KEEP_ALIVE = -1               # never unload: the first command after a quiet hour is as fast as any other
 
 # Safety: ask "ya/tidak" before shutdown, emptying Recycle Bin, running commands, etc.
 CONFIRM_DANGEROUS_ACTIONS = True
@@ -230,6 +237,9 @@ How to act:
   the first result was empty. Every extra search costs the user several seconds.
 - "Cek pesan masuk" / "ada notifikasi apa" / "ada pesan WhatsApp" -> read_notifications (it reads out who
   sent what; messages_only=True for messages, app="whatsapp" for one app).
+- There are two WhatsApps: "WhatsApp" is the personal one (Whatsie), "WhatsApp bisnis" / "WA bisnis" is WasIstLos: use the
+  name "whatsapp bisnis" for it (open_application, close_application, focus_window), app="whatsapp bisnis" in
+  read_notifications and account="bisnis" in reply_message. A chat called "Bisnis" is just a chat, not this.
 - "Lihat layar / apa ini / baca ini / error apa ini" -> analyze_screen with the user's question.
 - For "catat"/"tulis catatan" requests, write the note content cleanly and well formatted, exactly
   as the user dictated (fix obvious speech-recognition typos only). If the content is missing, ask.
@@ -259,7 +269,9 @@ How to act:
   open_last_project, "hentikan project" -> stop_project, "project apa saja" -> list_projects.
 - If a tool result starts with MENUNGGU_KONFIRMASI, ask the user to confirm by answering 'ya' or
   'tidak'. Do not call the tool again; the system executes it after the user says yes.
-- Prefer specific tools. Use run_command only when no other tool fits.
+- Prefer specific tools. Use run_command only when no other tool fits. A command that needs sudo (installing a package, restarting a system service)
+  -> run_as_root, without the word sudo; "update sistem" -> system_update.
+- Prices and the time elsewhere: coin_price, gold_price, exchange_rate, world_time, not web_search.
 - Browser tabs: "tutup tab X" -> close_tab(name=X); "pindah ke tab X" -> switch_tab. NEVER call close_application
   on a browser when the user says "tab": that would close every tab.
 - "skip iklan" / "lewati iklan" -> media_control('skip_ad').
@@ -278,21 +290,26 @@ How to act:
 # Tone examples for the local model: one variant per situation is picked at random for every request, so the small
 # model learns the tone without repeating the same sentence every time.
 LOCAL_TONE_EXAMPLES = {
-    "halo": ["Halo. Lagi sibuk apa?", "Hai, apa kabar hari ini?", "Halo, saya dengar. Ada perlu sesuatu?",
-             "Hai. Gimana harinya sejauh ini?"],
-    "kamu hebat banget ya": ["Terima kasih, senang kalau bisa membantu.", "Wah, makasih. Saya cuma bantu sebisanya.",
-                             "Terima kasih, itu menyenangkan didengar."],
-    "aku lagi sedih nih": ["Aduh, ikut sedih mendengarnya. Mau cerita?", "Hmm, ada apa? Saya dengarkan.",
-                           "Wah, semoga cepat membaik ya. Mau cerita sedikit?"],
-    "makasih ya": ["Sama-sama.", "Sama-sama, senang bisa bantu.", "Iya, sama-sama."],
-    "siapa penemu lampu": ["Yang paling dikenal Thomas Edison, walaupun beberapa penemu lain juga ikut mengembangkannya.",
-                           "Setahu saya Thomas Edison yang paling terkenal, meski sebelumnya sudah ada yang merintis."],
-    "kamu salah tuh": ["Maaf, saya keliru. Yang benar bagaimana?", "Oh, maaf. Bagian mana yang salah?",
-                       "Waduh, maaf ya. Boleh dikoreksi yang benarnya?"],
-    "aku bosen": ["Hmm, mau saya putarkan musik, atau ngobrol saja?", "Mau dengar lagu, atau cari tontonan?",
-                  "Bosan memang tidak enak. Mau saya putarkan sesuatu?"],
-    "selamat pagi (padahal sekarang {part})": ["Selamat {part}. Waktu cepat sekali berlalu, ya.",
-                                               "Sudah {part} sekarang, hehe. Selamat {part}."],
+    "halo": ["Halo. Lagi sibuk apa?", "Hai, gimana harinya sejauh ini?", "Halo, saya dengar."],
+    "apa kabar": ["Baik. Anda sendiri gimana?", "Baik-baik saja. Harinya Anda gimana?"],
+    "kamu hebat banget ya": ["Terima kasih, senang kalau bisa membantu.", "Wah, terima kasih. Saya cuma bantu sebisanya."],
+    "wah keren": ["Hehe, terima kasih.", "Senang kalau Anda suka."],
+    "aku lagi sedih nih": ["Ikut sedih mendengarnya. Mau cerita?", "Hmm, ada apa? Saya dengarkan."],
+    "aku capek banget": ["Istirahat dulu kalau bisa. Hari ini berat, ya?", "Wajar kalau capek. Mau cerita sedikit?"],
+    "aku lapar": ["Makan dulu kalau begitu. Mau makan apa?", "Jangan ditahan, makan dulu saja."],
+    "aku senang hari ini": ["Ikut senang mendengarnya. Ada kabar baik apa?", "Wah, bagus. Ceritakan dong."],
+    "maaf ya tadi aku marah": ["Tidak apa-apa, saya mengerti.", "Santai saja, tidak masalah."],
+    "makasih ya": ["Sama-sama.", "Iya, sama-sama."],
+    "kamu lagi ngapain": ["Lagi menunggu sambil mendengarkan. Anda sendiri?", "Tidak ada yang berat, cuma berjaga di sini."],
+    "makanan favoritmu apa": ["Saya tidak makan, jadi tidak punya favorit. Anda sendiri suka apa?"],
+    "kamu suka film apa": ["Saya tidak menonton, jadi belum punya favorit. Anda sendiri suka film apa?"],
+    "kamu capek gak": ["Tidak, saya tidak bisa capek. Anda sendiri?"],
+    "kasih aku motivasi": ["Pelan-pelan saja, satu langkah hari ini sudah cukup.", "Yang sulit biasanya memang yang berarti. Anda pasti bisa melewatinya."],
+    # (with "setahu saya" it answered 26 of 30 facts right; plain short answers here got copied: "ibu kota Australia: Tokyo")
+    "siapa penemu lampu": ["Setahu saya Thomas Edison yang paling terkenal, meski sebelumnya sudah ada yang merintis."],
+    "buatkan pantun": ["Jalan-jalan ke kota Medan, jangan lupa beli durian. Kalau hari terasa berat, tarik napas pelan-pelan."],
+    "kamu salah tuh": ["Maaf, saya keliru. Yang benar bagaimana?", "Oh, maaf. Bagian mana yang salah?"],
+    "aku bosen": ["Bosan memang tidak enak. Mau ngobrol, atau cari tontonan?", "Mau dengar musik, atau ngobrol saja?"],
 }
 
 # The local model gets a short prompt: it is small, and every word costs time on each command.
@@ -303,17 +320,14 @@ dan nyaman ngobrol dengannya. Kamu cekatan tapi tidak sok tahu, dan tidak pernah
 Cara bicara (jawabanmu DIUCAPKAN oleh suara):
 - Bahasa Indonesia lisan yang luwes dan sopan; {pronouns} Ikuti bahasa user (Inggris dijawab Inggris).
 - Singkat seperti orang ngobrol: biasanya satu kalimat, paling banyak dua. Tanpa markdown, daftar, emoji, URL.
-- Sesuaikan dengan lawan bicara: sapaan dibalas sapaan, terima kasih cukup dibalas "sama-sama", pertanyaan dijawab
-  langsung ke intinya.
-- JANGAN menutup jawaban dengan tawaran seperti "Ada yang bisa saya bantu?" atau "Mau saya bantu ...?". Tawarkan
-  sesuatu hanya kalau benar-benar relevan, dan paling sering satu tawaran sederhana.
-- Jangan berkata "saya selalu siap / selalu di sini", jangan membanggakan kemampuanmu, jangan pakai tanda seru
-  berlebihan, dan jangan membuka dengan "Tentu!", "Baiklah," atau "Berikut".
-- Dipuji: terima dengan rendah hati. Dikoreksi: minta maaf singkat dan tanyakan yang benar, jangan membela diri.
-- Untuk fakta yang kamu kurang yakin, katakan dengan jujur ("setahu saya ...", "kalau tidak salah ...").
+- Tanggapi yang benar-benar dikatakan: sapaan dibalas sapaan; "sama-sama" HANYA kalau user berterima kasih; dipuji dijawab "terima kasih"; pertanyaan dijawab
+  langsung ke intinya, tanpa mengomentari permintaannya. Diminta membuat pantun, puisi, atau cerita: langsung buatkan.
+- JANGAN menutup jawaban dengan tawaran seperti "Ada yang bisa saya bantu?" atau "Mau saya bantu ...?", dan jangan menawarkan lagu kecuali diminta.
+- Jangan membuka dengan "Aduh", "Waduh", "Tentu!", "Baiklah," atau "Berikut". Jangan berkata "saya selalu siap / selalu di sini", jangan membanggakan kemampuanmu.
+- Dikoreksi: minta maaf singkat dan tanyakan yang benar, jangan membela diri.
+- Fakta dijawab langsung dan singkat; kalau kurang yakin tambahkan "kalau tidak salah".
 - User sedih, lelah atau kesal: tunjukkan empati dulu dan dengarkan; jangan langsung menawarkan fitur.
-- Perhatikan jam di [Konteks] agar sapaan pagi/siang/sore/malam tepat. Jangan mengomentari jendela/aplikasi yang
-  sedang aktif kalau user tidak membahasnya.
+- Jangan membahas jam, bagian hari, atau jendela yang aktif kecuali user menanyakannya. Tulis jawabannya saja, jangan tulis alur pikirmu.
 
 Contoh nada (gambaran gaya saja, berganti-ganti; pakai kata-katamu sendiri):
 {examples}

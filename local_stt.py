@@ -134,6 +134,24 @@ def transcribe(audio, size: str = GATE_MODEL) -> str:
     return "" if text.lower().strip(" .") in ("digidaw", "") and samples.size < 8000 else text
 
 
+NO_SPEECH_MOST = 0.6
+
+
+def speech_in(audio) -> str | None:
+    """The words Whisper finds in a short sound, "" when nobody is speaking in it, None when it can't tell (no model). Without the prompt: with it, it
+    "hears" the prompt in a cough or an echo ("Digidaw, Digidaw, Jujur, Digidaw…", 5 Nov). On made-up sounds 19 of 20 noises came back empty and 21 of 24
+    words came back as something; which words is not to be trusted ("cukup" comes back as "terima kasih")."""
+    if not available(GATE_MODEL):
+        return None
+    samples = np.frombuffer(audio.get_raw_data(convert_rate=16000, convert_width=2), np.int16).astype(np.float32) / 32768.0
+    if samples.size < 1600:
+        return ""
+    model = _model(GATE_MODEL)
+    with _run_lock:
+        segments, _ = model.transcribe(samples, language="id", beam_size=1, vad_filter=False, condition_on_previous_text=False, without_timestamps=True)
+        return " ".join(s.text for s in segments if s.no_speech_prob < NO_SPEECH_MOST).strip()
+
+
 def mentions_wake(text: str) -> bool:
     """Does the (locally transcribed) phrase look like it calls Digidaw? Deliberately lenient:
     a false yes only means this one phrase goes to Google."""

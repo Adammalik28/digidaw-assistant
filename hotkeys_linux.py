@@ -63,9 +63,23 @@ def _name(combo: str) -> str:
     return "+".join(p.strip().lower() for p in combo.split("+") if p.strip())
 
 
+def _keys(mods: str, key: str) -> str:
+    """'CTRL ALT', 'D' -> 'CTRL + ALT + D', how Hyprland's Lua writes a key."""
+    return " + ".join([*mods.split(), key])
+
+
+def _eval(code: str) -> bool:
+    r = ld.run(["hyprctl", "eval", code])
+    return bool(r and r.returncode == 0 and "ok" in (r.stdout or ""))
+
+
 def _bind(name: str, mods: str, key: str) -> bool:
-    ld.run(["hyprctl", "keyword", "unbind", f"{mods}, {key}"])
     command = f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} {shlex.quote(name)}"
+    keys = ld._lua_text(_keys(mods, key))
+    # Hyprland 0.57 has no `hyprctl keyword` any more ("unknown request"): the hotkeys were dead since that update
+    if _eval(f"hl.unbind({keys}) hl.bind({keys}, hl.dsp.exec_cmd({ld._lua_text(command)}), {{description={ld._lua_text(f'{MARKER} {name}')}}})"):
+        return True
+    ld.run(["hyprctl", "keyword", "unbind", f"{mods}, {key}"])
     r = ld.run(["hyprctl", "keyword", "bind", f"{mods}, {key}, exec, {command}"])
     return bool(r and r.returncode == 0 and "ok" in (r.stdout or ""))
 
@@ -91,7 +105,12 @@ def _ours_present() -> set[str]:
         binds = json.loads(ld.out(["hyprctl", "-j", "binds"]) or "[]")
     except ValueError:
         return set()
-    return {b.get("arg", "").rsplit(" ", 1)[-1].strip("'") for b in binds if MARKER in b.get("arg", "")}
+    found = set()
+    for b in binds:
+        text = next((b.get(field, "") for field in ("description", "arg") if MARKER in str(b.get(field, ""))), "")
+        if text:
+            found.add(text.rsplit(" ", 1)[-1].strip("'"))
+    return found
 
 
 def _watchdog():
@@ -139,7 +158,8 @@ def stop():
         binds = dict(_binds)
         _binds.clear()
     for mods, key in binds.values():
-        ld.run(["hyprctl", "keyword", "unbind", f"{mods}, {key}"])
+        if not _eval(f"hl.unbind({ld._lua_text(_keys(mods, key))})"):
+            ld.run(["hyprctl", "keyword", "unbind", f"{mods}, {key}"])
     SOCKET.unlink(missing_ok=True)
 
 

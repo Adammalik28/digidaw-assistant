@@ -18,9 +18,11 @@ apps' audio while DIGIDAW talks.
 import io
 import os
 import re
+import glob
 import time
 import uuid
 import queue
+import ctypes
 import asyncio
 import contextlib
 import hashlib
@@ -40,6 +42,50 @@ import metrics
 import storage
 import events
 
+# pygame.mixer.music.pause() and unpause() wait for SDL's audio lock while holding Python's GIL. Whoever has that lock may
+# be waiting for the GIL just then: the sound thread when a sound ends, Sound(file=<a Python object>) at every read. Then
+# nothing in Digidaw runs any more: on 6 Nov at 16:26 it stood still for 110 s until systemd's watchdog killed it (core
+# dump; tests/test_more_use.py reproduces it). ctypes lets go of the GIL while it waits, and these two are all that freeze:
+# every other pygame call used here was stress-tested next to the same decoding and ending sounds.
+_sdl_mixer_lib = None
+
+
+def _sdl_mixer():
+    global _sdl_mixer_lib
+    if _sdl_mixer_lib is None:
+        found = glob.glob(os.path.join(os.path.dirname(pygame.__file__), "..", "pygame.libs", "libSDL2_mixer*"))
+        try:
+            _sdl_mixer_lib = ctypes.CDLL(os.path.realpath(found[0])) if found else False
+        except OSError:
+            _sdl_mixer_lib = False
+    return _sdl_mixer_lib
+
+
+def _pause_music():
+    lib = _sdl_mixer()
+    lib.Mix_PauseMusic() if lib else pygame.mixer.music.pause()
+
+
+def _resume_music():
+    lib = _sdl_mixer()
+    lib.Mix_ResumeMusic() if lib else pygame.mixer.music.unpause()
+
+
+def _decoded(mp3: bytes) -> bytes:
+    """The sound of an MP3 (or the part of one that has arrived). From a file in memory, not a Python object: SDL decodes
+    with its audio lock held, and each read through Python needs the GIL as well, for as long as that takes."""
+    if not hasattr(os, "memfd_create"):
+        return pygame.mixer.Sound(file=io.BytesIO(mp3)).get_raw()
+    fd = os.memfd_create("digidaw-suara")
+    try:
+        left = memoryview(mp3)
+        while left:
+            left = left[os.write(fd, left):]
+        return pygame.mixer.Sound(file=f"/proc/self/fd/{fd}").get_raw()
+    finally:
+        os.close(fd)
+
+
 AUDIO_DIR = config.AUDIO_DIR
 CACHE_DIR = AUDIO_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,6 +94,8 @@ CACHE_MAX_CHARS = 90
 CACHE_MAX_FILES = 1500        # ~10 KB each; frequent replies then always play instantly
 EDGE_MAX_ATTEMPTS = 5       # instant connection resets are retried this many times (IPv6 path)
 EDGE_FIRST_AUDIO_DEADLINE = 4.0   # no Edge audio after this long -> use the fallback voice
+FIRST_PIECE_CHARS = 55            # Edge sends nothing before it has made the whole piece: about 1 s + 20 ms per letter (5 Nov). A long first
+                                  # sentence missed the deadline half the time and came out 4 s late in the robotic voice, so it starts with its first clause
 EDGE_BREAK_SECONDS = 30           # after an Edge failure, sentences skip Edge for this long (one slow answer
                                   # used to mean 90 s of the robotic voice)...
 EDGE_PROBE_EVERY = 10             # ...while a background check retries it every 10 s
@@ -152,6 +200,40 @@ def speakable(text: str) -> str:
     text = re.sub(r"([,.!?])\1+", r"\1", text)
     text = re.sub(r"([?!])\.", r"\1", text)
     return re.sub(r"\s{2,}", " ", text).strip(" ,")
+
+
+CLAUSE_RE = re.compile(r"(?<=[,;:])\s+(?=\S)")
+JOINING_WORD_RE = re.compile(r"\s+(?=(?:dan|yang|karena|tetapi|tapi|namun|atau|untuk|dengan|sehingga|agar|supaya|ketika|saat|jika|kalau|dari)\s)")
+SHORTEST_PIECE = 15
+SHORTEST_BEFORE_JOIN = 25         # "Presiden Indonesia | dari yang pertama..." is no place to breathe
+
+
+def _at_joining_words(clause: str, most: int) -> list[str]:
+    parts, rest = [], clause
+    while len(rest) > most:
+        cuts = [m.start() for m in JOINING_WORD_RE.finditer(rest) if SHORTEST_BEFORE_JOIN <= m.start() <= most]
+        if not cuts:
+            break
+        parts.append(rest[:cuts[-1]])
+        rest = rest[cuts[-1]:].lstrip()
+    return parts + [rest]
+
+
+def in_clauses(sentence: str, most: int = FIRST_PIECE_CHARS) -> list[str]:
+    """A long sentence as pieces that end where a person would breathe: at commas, or before a joining word when it has none."""
+    pieces: list[str] = []
+    for clause in CLAUSE_RE.split(sentence):
+        for part in _at_joining_words(clause, most):
+            if pieces and len(pieces[-1]) + len(part) < most:
+                pieces[-1] += " " + part
+            else:
+                pieces.append(part)
+    if len(pieces) > 1 and len(pieces[-1]) < SHORTEST_PIECE:      # ", Tuan." doesn't stand alone
+        # (not `pieces[-2] += " " + pieces.pop()`: that stores after the pop, one place off. With two pieces it raised,
+        # and the reply was never said, 6 Nov 15:26; with three it lost the first and said the middle one twice)
+        tail = pieces.pop()
+        pieces[-1] += " " + tail
+    return pieces
 
 
 _edge_warned = {"at": 0.0}
@@ -296,6 +378,9 @@ class NeuralVoice:
         self.after_speak = None
         self.first_audio_delay = None
         self._spoken_at = 0.0
+        self.saying = ""                  # the pieces being said now (what the microphone may hear of itself)
+        self._paused = False              # it holds its breath while it checks whether someone said "cukup"
+        self._saying_filler = False       # "Sebentar, Tuan.": gives way as soon as the answer is there
         self.link = EdgeLink()
         self.edge_down_until = 0.0        # circuit breaker: Edge failed, don't make every sentence wait for it
         self._piper = None
@@ -320,9 +405,36 @@ class NeuralVoice:
         """True while DIGIDAW's voice (or its room echo) can reach the microphone."""
         return self.speaking or time.time() - self.last_activity < tail
 
+    def pause(self):
+        """Hold the voice where it is (aec.py: someone may be saying "cukup", and over Digidaw's voice not even Google can read it)."""
+        if not self.speaking or self._paused:
+            return
+        self._paused = True
+        try:
+            _pause_music()
+            pygame.mixer.pause()
+        except Exception:
+            pass
+
+    def resume(self):
+        """Go on from where it was held."""
+        if not self._paused:
+            return
+        self._paused = False
+        try:
+            _resume_music()
+            pygame.mixer.unpause()
+        except Exception:
+            pass
+
+    def _wait_while_paused(self):
+        while self._paused and not self._stop.is_set():
+            time.sleep(0.03)
+
     def stop(self):
         """Interrupt current speech immediately."""
         self._stop.set()
+        self._paused = False
         try:
             pygame.mixer.music.stop()
             if self._channel:
@@ -347,7 +459,7 @@ class NeuralVoice:
         return edge_tts.Communicate(text, self._voice_for(text), rate=config.EDGE_RATE, pitch=config.EDGE_PITCH,
                                     connector=connector, connect_timeout=5, receive_timeout=15)
 
-    async def _race_stream(self, text: str, on_chunk):
+    async def _race_stream(self, text: str, on_chunk, stoppable: bool = True):
         """Fetch Edge audio over IPv6 and IPv4 at the same time and keep whichever delivers audio
         first. (On some networks IPv6 answers much faster but its connections are often reset
         instantly, while IPv4 always connects but responds slowly.)"""
@@ -369,7 +481,7 @@ class NeuralVoice:
                                 for t in tasks:
                                     if t is not asyncio.current_task():
                                         t.cancel()   # the other path lost the race
-                            if self._stop.is_set():
+                            if stoppable and self._stop.is_set():
                                 return True
                             on_chunk(chunk["data"])
                     if state["winner"] == family:
@@ -393,7 +505,7 @@ class NeuralVoice:
         if not any(r is True for r in results):
             raise ConnectionError("layanan suara Edge tidak terjangkau")
 
-    def _synth_edge(self, text: str, path: Path, timeout: float = 20, use_link: bool = True):
+    def _synth_edge(self, text: str, path: Path, timeout: float = 20, use_link: bool = True, stoppable: bool = True):
         chunks: list[bytes] = []
         try:
             if not use_link:
@@ -401,8 +513,12 @@ class NeuralVoice:
             self.link.stream(text, self._voice_for(text), chunks.append, timeout=timeout)
         except Exception:
             chunks.clear()
-            asyncio.run(asyncio.wait_for(self._race_stream(text, chunks.append), timeout))
+            asyncio.run(asyncio.wait_for(self._race_stream(text, chunks.append, stoppable), timeout))
         if not chunks:
+            if stoppable and self._stop.is_set():
+                # The answer was stopped while this sentence was on its way. Taken for a failure of Edge, every "cukup" made the
+                # next answers speak with the robotic voice for 30 s (6 Nov, 08:45).
+                raise InterruptedError("suara dihentikan")
             raise ConnectionError("tidak ada audio dari Edge")
         path.write_bytes(b"".join(chunks))
 
@@ -441,6 +557,9 @@ class NeuralVoice:
                         print(f"[TTS] suara cadangan ({engine}) dipakai untuk: {text[:60]}")
                         metrics.count("suara_cadangan")
                     return path, keep
+            except InterruptedError:
+                path.unlink(missing_ok=True)
+                return None, False
             except Exception as e:
                 if engine == "edge":
                     note_edge_failure(e)
@@ -468,7 +587,7 @@ class NeuralVoice:
                 time.sleep(EDGE_PROBE_EVERY)
                 test = AUDIO_DIR / f"probe_{uuid.uuid4().hex[:8]}.mp3"
                 try:
-                    self._synth_edge("Ya.", test, timeout=6, use_link=False)
+                    self._synth_edge("Ya.", test, timeout=6, use_link=False, stoppable=False)
                     ok = test.exists() and test.stat().st_size > 0
                 except Exception:
                     ok = False
@@ -550,8 +669,10 @@ class NeuralVoice:
         """The Edge part of _stream_edge: the kept connection, or a fresh one when that fails before any sound.
         Raises InterruptedError when the speech was stopped."""
         try:
+            # Not shorter than the deadline: a working connection takes 1.2-3 s for a short sentence (5 Nov). Giving up on it at 2.5 s left a new
+            # connection too little time, and most sentences that fell to the robotic voice had fallen that way.
             self.link.stream(text, self._voice_for(text), on_chunk, should_stop=self._stop.is_set,
-                             first_timeout=2.5 if self.link.is_warm() else 3.5)
+                             first_timeout=EDGE_FIRST_AUDIO_DEADLINE + 1)
         except InterruptedError:
             raise
         except Exception:
@@ -582,6 +703,8 @@ class NeuralVoice:
                 item = False
             if not mp3 and not isinstance(item, bytes) and time.time() - started > EDGE_FIRST_AUDIO_DEADLINE:
                 return False   # Edge is too slow right now: let the caller use the fallback voice
+            if self._paused:
+                last_data = time.time()     # (no "the sentence has ended" while it is held)
             if item is None or isinstance(item, Exception):
                 finished = True
             elif item:
@@ -602,7 +725,7 @@ class NeuralVoice:
                 decoded_len = len(mp3)
                 tail_done = flush_tail
                 try:
-                    pcm = pygame.mixer.Sound(file=io.BytesIO(bytes(mp3))).get_raw()
+                    pcm = _decoded(bytes(mp3))
                 except Exception:
                     pcm = b""   # not enough data to decode yet
                 limit = len(pcm) if flush_tail else len(pcm) - hold_back
@@ -612,7 +735,7 @@ class NeuralVoice:
                     segments.append(pcm[pcm_done:limit])
                     pcm_done = limit
 
-            if segments:
+            if segments and not self._paused:
                 if self._channel is None:
                     self.first_audio_delay = time.time() - started
                     if self._spoken_at:
@@ -637,7 +760,7 @@ class NeuralVoice:
                 self.last_activity = time.time()
             # the "done" message sometimes lags seconds behind the audio: don't keep the mic closed for it
             done = finished or (sounds and idle > 0.6)
-            if done and not segments and not playing:
+            if done and not segments and not playing and not self._paused:
                 break
         return bool(sounds)
 
@@ -645,9 +768,12 @@ class NeuralVoice:
     def _play(self, path: Path):
         if not pygame.mixer.get_init():
             pygame.mixer.init()
+        self._wait_while_paused()
         pygame.mixer.music.load(str(path))
         pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
+        if self._paused:                  # (held between the check and here)
+            _pause_music()
+        while pygame.mixer.music.get_busy() or self._paused:   # (get_busy says False while paused)
             if self._stop.is_set():
                 pygame.mixer.music.stop()
                 break
@@ -697,6 +823,14 @@ class NeuralVoice:
                 chunks.append(sentence)
         return chunks
 
+    def _quick_start(self, chunks: list[str]) -> list[str]:
+        """A long first sentence is said clause by clause, unless its whole recording is already here."""
+        first = chunks[0] if chunks else ""
+        if len(first) <= FIRST_PIECE_CHARS or config.TTS_ENGINE != "edge":
+            return chunks
+        cached = len(first) <= CACHE_MAX_CHARS and any(self._cache_path(first, name).exists() for name in self._cache_engines())
+        return chunks if cached else in_clauses(first) + chunks[1:]
+
     @staticmethod
     def _cache_engines() -> list[str]:
         """The recordings that may be replayed for the voice in use."""
@@ -704,6 +838,7 @@ class NeuralVoice:
 
     def _speak_one(self, chunk: str, prefetched=None):
         """Speak one sentence: cached file, prefetched file, streamed Edge, then fallbacks."""
+        self.saying = f"{self.saying} {chunk}"[-300:]
         path, cached = prefetched or (None, False)
         if path is None and len(chunk) <= CACHE_MAX_CHARS:
             for name in self._cache_engines():
@@ -715,7 +850,8 @@ class NeuralVoice:
         if path is None and edge and self.edge_ok():
             if self._stream_edge(chunk):
                 return
-            self.edge_failed()          # no audio in time: the next sentences don't wait for Edge again
+            if not self._stop.is_set():
+                self.edge_failed()      # no audio in time: the next sentences don't wait for Edge again
         if path is None and not self._stop.is_set():
             # Edge is down: the local Piper voice (instant), the Google voice only as the last resort
             path, cached = self._synthesize(chunk, ["piper", "gtts"] if edge else None)
@@ -765,6 +901,8 @@ class NeuralVoice:
     def speak_live(self, live: "LiveSpeech"):
         """Speak the sentences of an answer while the AI is still writing it: the first one is streamed as soon as it
         is complete, the next ones are fetched in the background while the one before plays."""
+        if self._saying_filler:
+            self.stop()
         if not self._lock.acquire(timeout=20):
             self.stop()
             if not self._lock.acquire(timeout=5):
@@ -789,6 +927,7 @@ class NeuralVoice:
 
         try:
             self._stop.clear()
+            self.saying = ""
             self._spoken_at = live.started
             self.speaking = True
             self.last_activity = time.time()
@@ -826,16 +965,19 @@ class NeuralVoice:
                 except Exception:
                     pass
             self.speaking = False
+            self._paused = False
             self.last_activity = time.time()
             events.set_status("idle")
             self._prune_cache()
             self._lock.release()
             live.finished.set()
 
-    def speak(self, text: str):
+    def speak(self, text: str, filler: bool = False):
         text = clean_for_speech(text or "")
         if not text:
             return
+        if self._saying_filler:
+            self.stop()                   # the answer has come: 10 s went by on 6 Nov, with the text ready after 3
         # never wait forever behind a previous sentence that got stuck (network, audio device)
         if not self._lock.acquire(timeout=20):
             print("[TTS] suara sebelumnya macet — dihentikan paksa")
@@ -844,6 +986,8 @@ class NeuralVoice:
                 return
         try:
             self._stop.clear()
+            self._saying_filler = filler
+            self.saying = ""
             self._spoken_at = time.time()
             self.speaking = True
             self.last_activity = time.time()
@@ -858,7 +1002,7 @@ class NeuralVoice:
                 if config.TTS_ENGINE == "sapi":
                     self._speak_sapi(text)
                 else:
-                    self._speak_chunks(self._chunks(text))
+                    self._speak_chunks(self._quick_start(self._chunks(text)))
             except Exception as e:
                 print(f"[TTS Error] {e}")
             finally:
@@ -868,6 +1012,8 @@ class NeuralVoice:
                     except Exception:
                         pass
                 self.speaking = False
+                self._paused = False
+                self._saying_filler = False
                 self.last_activity = time.time()
                 events.set_status("idle")
                 self._prune_cache()
@@ -940,7 +1086,7 @@ class LiveSpeech:
             text = self.shape(piece, not self._sentences) if self.shape else piece
             text = clean_for_speech(text or "")
             if text:
-                self._sentences.append(text)
+                self._sentences.extend(in_clauses(text) if not self._sentences else [text])   # (see FIRST_PIECE_CHARS)
         if ready:
             self._cond.notify_all()
             if self._speaker is None and self._sentences:
@@ -969,8 +1115,32 @@ class LiveSpeech:
 tts_engine = NeuralVoice()
 
 
+_last_said = {"text": "", "at": 0.0}
+_NOT_WORTH_REPEATING = re.compile(r"(?:Sebentar|Satu momen|Baik, \S+, sedang saya proses)\b")
+
+
 def speak(text: str):
+    if text and not _NOT_WORTH_REPEATING.match(text):
+        _last_said.update(text=text, at=time.time())
     tts_engine.speak(text)
+
+
+_filler_at = {"at": 0.0}
+
+
+def speak_filler(text: str):
+    """"Sebentar, Tuan.": not worth repeating, and it stops the moment the answer is there."""
+    _filler_at["at"] = time.time()
+    tts_engine.speak(text, filler=True)
+
+
+def filler_said_within(seconds: float) -> bool:
+    return time.time() - _filler_at["at"] < seconds
+
+
+def last_spoken() -> tuple[str, float]:
+    """(what Digidaw said last, when): for "tadi kamu bilang apa"."""
+    return _last_said["text"], _last_said["at"]
 
 
 def stop():
@@ -1077,6 +1247,21 @@ def prewarm():
 
 def is_speaking() -> bool:
     return tts_engine.is_speaking()
+
+
+def pause():
+    tts_engine.pause()
+
+
+def resume():
+    tts_engine.resume()
+
+
+def echo_of_own_voice(plain_words: str) -> bool:
+    """Is what was heard over Digidaw's voice only words it is saying itself right now?"""
+    saying = set(re.sub(r"[^\w\s]", " ", tts_engine.saying.lower()).split())
+    words = plain_words.split()
+    return bool(words) and sum(word in saying for word in words) >= max(1, len(words) * 0.6)   # (a mishearing or two among them)
 
 
 def spoke_since(t: float) -> bool:

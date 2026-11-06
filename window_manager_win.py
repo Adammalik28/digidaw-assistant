@@ -109,6 +109,11 @@ def minimize(hwnd):
     win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
 
 
+def close_window(w: dict):
+    """Only this window, like clicking its X; the app and its other windows stay."""
+    win32gui.PostMessage(w["hwnd"], win32con.WM_CLOSE, 0, 0)
+
+
 def close_windows_of(pids: set[int]) -> list[str]:
     """Send a normal close request (like clicking X) to every window owned by these processes."""
     closed = []

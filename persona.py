@@ -20,7 +20,7 @@ BRANDS = {"firefox": "Firefox", "chrome": "Chrome", "google chrome": "Google Chr
           "youtube": "YouTube", "instagram": "Instagram", "whatsapp": "WhatsApp", "whatsapp web": "WhatsApp Web",
           "facebook": "Facebook", "twitter": "Twitter", "x": "X", "github": "GitHub", "gmail": "Gmail",
           "spotify": "Spotify", "mousepad": "Mousepad", "terminal": "Terminal", "kitty": "Terminal",
-          "thunar": "File manager", "whatsie": "WhatsApp", "file manager": "File manager", "discord": "Discord", "telegram": "Telegram", "vscode": "VS Code", "code": "VS Code",
+          "thunar": "File manager", "whatsie": "WhatsApp", "wasistlos": "WhatsApp Bisnis", "whatsapp bisnis": "WhatsApp Bisnis", "file manager": "File manager", "discord": "Discord", "telegram": "Telegram", "vscode": "VS Code", "code": "VS Code",
           "netflix": "Netflix", "shopee": "Shopee", "tokopedia": "Tokopedia", "chatgpt": "ChatGPT",
           "gemini": "Gemini", "claude": "Claude", "brave": "Brave", "edge": "Edge", "waydroid": "Waydroid",
           "steam": "Steam", "obs": "OBS", "vlc": "VLC", "gimp": "GIMP", "libreoffice": "LibreOffice"}
@@ -111,6 +111,9 @@ REWRITES = [(re.compile(p + rf",? ?(?:{re.escape(T)})?\.?$", re.IGNORECASE), fn)
     (r"^Melanjutkan pemutaran", lambda m: _pick(["lanjut ya.", "dilanjutkan.", "oke, lanjut lagi."])),
     (r"^Media di-pause", lambda m: _pick(["saya jeda dulu.", "dijeda.", "oke, berhenti sebentar."])),
     (r"^Teks sudah saya ketik", lambda m: _pick(["sudah saya ketik.", "beres, sudah diketik."])),
+    (r"^Mikrofon sistem dinyalakan kembali", lambda m: _pick(["mikrofon nyala lagi.", "mikrofon sudah aktif."])),
+    (r"^Mode jangan ganggu aktif\. Notifikasi disenyapkan", lambda m: _pick(["mode jangan ganggu aktif.", "notifikasi saya senyapkan."])),
+    (r"^Mode jangan ganggu dimatikan", lambda m: _pick(["mode jangan ganggu dimatikan.", "notifikasi aktif lagi."])),
 ]]
 # a reply that already sounds natural is left alone; these only drop the stiff ", KING." / "KING, " parts
 # every place the title sits in a reply ("..., KING." / "KING, ..." / "Halo KING!" / "— KING —"); removed, then put
@@ -292,7 +295,11 @@ def warm_phrases() -> list[str]:
     replies += [f"{brand(n)} sudah ditutup, {T}." for n in habits.favourites("app", 6)]
     replies += [f"Pindah ke workspace {n}, {T}." for n in range(1, 7)]
     replies += [f"Volume diatur ke {n} persen, {T}." for n in (10, 20, 30, 40, 50, 60, 70, 80, 100)]
-    replies += [f"Melanjutkan pemutaran, {T}.", f"Media di-pause, {T}.", f"Teks sudah saya ketik, {T}."]
+    replies += [f"Kecerahan layar diatur ke {n} persen, {T}." for n in (20, 40, 50, 60, 80, 100)]
+    replies += [f"Melanjutkan pemutaran, {T}.", f"Media di-pause, {T}.", f"Teks sudah saya ketik, {T}.",
+                f"Mikrofon sistem dinyalakan kembali, {T}.",
+                f"Mode jangan ganggu aktif. Notifikasi disenyapkan, {T}.", f"Mode jangan ganggu dimatikan, {T}.",
+                f"Disalin, {T}.", f"Ditempel, {T}.", f"Disimpan, {T}."]
     try:                                 # the lamp: the colours and moods said most (half of them weren't cached)
         import smarthome
         if smarthome.has_lamps():

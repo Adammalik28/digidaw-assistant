@@ -26,8 +26,14 @@ WINDOWS = [("firefox", "firefox", "Firefox", "firefox"), ("discord", "discord", 
 
 
 def setup_module(module=None):
+    import notifications
+    import window_manager
+    notifications.unread_summary = lambda since=0: ""              # (not the real messages waiting right now)
     resolver._static_candidates = lambda: (APPS, SITES)
     resolver._window_candidates = lambda: WINDOWS
+    fake_wins = [{"hwnd": str(i), "title": label, "process": proc, "class": proc, "pid": 1000 + i, "workspace": "1"}
+                 for i, (_, _, label, proc) in enumerate(WINDOWS)]
+    window_manager._windows = lambda: fake_wins
     brain._is_open = lambda m: m.kind in ("window", "site") or m.target in {"firefox", "discord", "kitty"}
     brain._active_title = lambda: "tiktok - make your day — mozilla firefox"
     running = {"firefox", "discord", "kitty", "chrome"}            # processes "running" on the fake desktop
@@ -48,18 +54,63 @@ CASES = [
     ("Hidupkan musik", ("media_control", {"action": "play"})),
     ("musik", ("media_control", {"action": "play"})),
     ("lagu berikutnya", ("media_control", {"action": "next"})),
-    ("putar musik Do I Wanna Know", ("play_youtube", {"query": "musik do i wanna know", "mix": False})),
+    ("putar musik Do I Wanna Know", ("play_youtube", {"query": "do i wanna know", "mix": False})),
     # volume / brightness
     ("naikkan volume 10% lagi", ("volume_up", {"amount": 10})),
     ("turunkan volume 5 persen", ("volume_down", {"amount": 5})),
     ("naikkan volume ke 80", ("set_volume", {"level": 80})),
     ("volume 50", ("set_volume", {"level": 50})),
+    # the general volume, not an app called "lagi" or "20"
+    ("naikkan volume lagi", ("volume_up", {"amount": 10})),
+    ("kecilkan suara lagi", ("volume_down", {"amount": 10})),
+    ("turunkan suara dikit", ("volume_down", {"amount": 10})),
+    ("turunkan volume sedikit", ("volume_down", {"amount": 10})),
+    ("turunkan volume 20", ("volume_down", {"amount": 20})),
+    ("kurangi volume 15", ("volume_down", {"amount": 15})),
+    ("naikkan volume 20", ("volume_up", {"amount": 20})),
+    ("matikan suara laptop", None),
+    ("nyalakan suara lagi", None),
+    ("volume speaker 50", None),
+    ("kecilkan suara kamu", None),
+    # one app's sound
+    ("kecilkan suara discord", ("app_volume", {"app": "discord", "action": "down"})),
+    ("volume discord 30 persen", ("app_volume", {"app": "discord", "level": 30})),
+    ("bisukan suara spotify", ("app_volume", {"app": "spotify", "action": "mute"})),
+    ("volume musik 30", ("app_volume", {"app": "musik", "level": 30})),
+    # clipboard: "tadi" is the last thing copied, not the one before it
+    ("tempel tadi", ("edit_action", {"action": "paste"})),
+    ("tempel yang tadi", ("edit_action", {"action": "paste"})),
+    ("paste tadi", ("edit_action", {"action": "paste"})),
+    ("tempel salinan kedua", ("paste_previous", {"index": 2})),
+    # the two WhatsApps: "whatsapp" is Whatsie, "whatsapp bisnis" is WasIstLos
+    ("buka whatsapp", ("open_application", {"name": "whatsapp"})),
+    ("buka whatsapp bisnis", ("open_application", {"name": "whatsapp bisnis"})),
+    ("buka wa bisnis", ("open_application", {"name": "wa bisnis"})),
+    ("buka WhatsApp Business", ("open_application", {"name": "whatsapp business"})),
+    ("tutup whatsapp bisnis", ("close_application", {"name": "whatsapp bisnis"})),
+    ("pindahkan whatsapp bisnis ke workspace 2", ("move_to_workspace", {"workspace": "2", "follow": False, "name": "whatsapp bisnis"})),
+    ("buka whatsapp bisnis di workspace 1", ("open_on_workspace", {"name": "whatsapp bisnis", "workspace": "1"})),
+    ("cek pesan whatsapp bisnis", ("read_notifications", {"messages_only": True, "app": "whatsapp bisnis"})),
+    ("ada pesan di wa bisnis", ("read_notifications", {"messages_only": True, "app": "wa bisnis"})),
+    ("cek pesan whatsapp", ("read_notifications", {"messages_only": True, "app": "whatsapp"})),
+    ("volume whatsapp bisnis 100", ("app_volume", {"app": "wasistlos", "level": 100})),
+    ("volume bisnis 50", ("app_volume", {"app": "bisnis", "level": 50})),
+    ("bisukan suara whatsapp bisnis", ("app_volume", {"app": "wasistlos", "action": "mute"})),
+    # ports, also as Google heard them on 6 Nov
+    ("port apa saja yang terbuka", ("open_ports", {})),
+    ("faktor apa saja yang terbuka", ("open_ports", {})),
+    ("chord apa saja yang terbuka", ("open_ports", {})),
+    ("daftar port", ("open_ports", {})),
+    ("siapa yang pakai port 8080", ("port_process", {"port": 8080})),
+    ("siapa yang pakai 8080", ("port_process", {"port": 8080})),
+    ("siapa yang memakai power 3001", ("port_process", {"port": 3001})),
+    ("error apa ini", ("explain_last_error", {})),
     ("kecerahan ke 10%", ("set_brightness", {"level": 10})),
     # opening: exact, short forms, several, cut off, in a given browser
     ("IG", ("open_website", {"site": "instagram"})),
     ("tik", ("open_website", {"site": "tiktok"})),             # one cut-off word: only a near-certain name
     ("dingin", None),                                          # ...never a merely similar one
-    ("halo", None),
+    ("halo", ("small_talk", {"kind": "hello"})),
     ("Tik Tok dan Instagram", ("open_many", {"names": ["tiktok", "instagram"]})),
     ("buka YouTube dan Tik Tok", ("open_many", {"names": ["youtube", "tiktok"]})),
     ("buka termi", ("open_application", {"name": "terminal"})),
@@ -148,16 +199,22 @@ def test_resolver_scores():
 
 
 def test_read_offer():
-    """"ya" reads the messages only right after "Mau saya bacakan?", and only once."""
+    """"ya" reads the messages only right after "Mau saya bacakan?". Deciding only looks: hearing.level and core ask
+    before the command runs, and it must still be there when it does."""
     setup_module()
     import notifications
     notifications.clear_offer()
     assert route("ya") is None
     notifications.offer_reading()                          # the welcome back: all new messages
     assert route("ya bacakan") == ("read_notifications", {"messages_only": True})
+    assert route("ya") == ("read_notifications", {"messages_only": True})
+    notifications.clear_offer()
     assert route("ya") is None
     notifications.offer_reading("Rina")                    # "ada pesan WhatsApp dari Rina": only hers
     assert route("iya") == ("read_notifications", {"messages_only": True, "sender": "Rina"})
+    assert route("bacakan") == ("read_notifications", {"messages_only": True, "sender": "Rina"})
+    notifications.clear_offer()
+    assert route("bacakan") is None                        # nothing offered, nothing unread: not about messages
 
 
 def test_watch_and_reply_parsing():
@@ -183,6 +240,9 @@ def test_misc():
     assert not brain.FRAGMENT_RE.fullmatch(brain._normalize("terus buka youtube"))
     assert brain.gemini_reason("buka firefox lalu putar musik be my baby") == "beberapa perintah sekaligus"
     assert brain.WAKE_PREFIX_RE.sub("", "Digidaw, buka Firefox.").strip() == "buka Firefox."
+    for phrase in brain.NEAR_PHRASES:                      # "Maksudnya X?" only offers what can be done without an AI
+        assert brain._route(phrase) or brain._alarm_route(phrase), phrase
+    assert route("Shaolin url ini") == ("copy_current_link", {})
 
 
 if __name__ == "__main__":

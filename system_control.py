@@ -91,7 +91,7 @@ ADMIN_PROMPT = "muncul jendela izin Windows" if IS_WINDOWS else "muncul jendela 
 ACCESS_DENIED_RE = re.compile(r"access is denied|akses ditolak|permissiondenied|unauthorizedaccess|"
                               r"requires elevation|run as administrator|administrator privileges|"
                               r"permission denied|operation not permitted|must be (?:run as )?root|are you root|"
-                              r"requires root|izin ditolak", re.IGNORECASE)
+                              r"requires root|izin ditolak|a terminal is required|a password is required", re.IGNORECASE)
 
 
 def run_elevated(script: str, timeout: int = 180) -> tuple[bool, str]:
@@ -187,6 +187,8 @@ def bring_forward(before: set[int], hint: str = "", timeout: float = 8.0, allow_
     bring it to the front. With allow_existing, an already open window of that app is used when no new
     window appears (single-window apps, a new browser tab)."""
     hint = (hint or "").lower().removesuffix(".exe").strip(":/ ")
+    if not IS_WINDOWS and ld.opening_quietly():
+        return                           # a routine: apps open where they belong, the screen stays where the user is
 
     def worker():
         import window_manager
@@ -368,6 +370,7 @@ if not IS_WINDOWS:
         "store": ["gnome-software", "plasma-discover", "pamac-manager", "octopi"],
         "snipping tool": ["flameshot gui", "spectacle", "satty", "swappy"],
         "whatsapp": ["zapzap", "whatsapp-for-linux", "whatsie", "https://web.whatsapp.com"],
+        "whatsapp bisnis": ["wasistlos"], "whatsapp business": ["wasistlos"], "wa bisnis": ["wasistlos"], "wa business": ["wasistlos"],
         "discord": ["discord", "vesktop", "webcord"], "telegram": ["telegram-desktop", "Telegram"],
         "steam": ["steam"], "obs": ["obs"], "vlc": ["vlc"], "zoom": ["zoom"], "gimp": ["gimp"],
         "recycle bin": ["trash:///"], "tempat sampah": ["trash:///"], "trash": ["trash:///"],
@@ -382,7 +385,8 @@ if not IS_WINDOWS:
         "vs code": "code", "vscode": "code", "visual studio code": "code",
         "word": "soffice.bin", "excel": "soffice.bin", "powerpoint": "soffice.bin", "libreoffice": "soffice.bin",
         "spotify": "spotify", "paint": "pinta", "discord": "discord", "telegram": "telegram-desktop",
-        "whatsapp": "zapzap", "task manager": "missioncenter", "terminal": os.path.basename(_TERMINAL),
+        "whatsapp": "zapzap", "whatsapp bisnis": "wasistlos", "whatsapp business": "wasistlos", "wa bisnis": "wasistlos",
+        "wa business": "wasistlos", "task manager": "missioncenter", "terminal": os.path.basename(_TERMINAL),
         "steam": "steam", "zoom": "zoom", "obs": "obs", "vlc": "vlc", "gimp": "gimp",
         "file manager": _fm_proc, "explorer": _fm_proc, "file explorer": _fm_proc,
     }
@@ -497,11 +501,12 @@ def _suggestions(name: str) -> str:
     return f" Maksud Anda {' atau '.join(pretty)}?"
 
 
-def open_application(name: str) -> str:
+def open_application(name: str, new_window: bool = False) -> str:
     """Open any installed application on the PC by name (e.g. 'notepad', 'chrome', 'spotify',
-    'word', 'steam', 'kalkulator', a game name). Searches the Start Menu if not a common app."""
+    'word', 'steam', 'kalkulator', a game name). Searches the Start Menu if not a common app. An app already open is shown instead;
+    new_window=True opens another one ('buka firefox baru')."""
     if not IS_WINDOWS:
-        return _open_application_linux(name)
+        return _open_application_linux(name, new_window)
     key = _match_key(name, APPS)
     if key:
         before = _hwnds()
@@ -528,7 +533,24 @@ def open_application(name: str) -> str:
     return f"Aplikasi '{name}' tidak ditemukan di komputer ini, {T}."
 
 
-def _open_application_linux(name: str) -> str:
+# these open another window on purpose: "buka terminal" twice is two terminals
+SEVERAL_WINDOWS = {"terminal", "kitty", "alacritty", "foot", "konsole", "konsol", "console", "file manager", "file explorer", "explorer", "thunar",
+                   "nautilus", "dolphin", "notepad", "mousepad", "text editor", "kalkulator", "calculator"}
+
+
+def _open_application_linux(name: str, new_window: bool = False) -> str:
+    import resolver
+    import window_manager
+    name = resolver.SHORT.get(name.lower().strip(), name)      # "wasis lord", as Google wrote it, from the local brain or the AI
+    leaving = _closing.pop(name.lower().strip(), None)
+    if leaving:                        # "tutup firefox, buka firefox": it first has to be gone
+        leaving.join(CLOSE_GRACE_SECONDS * 2 + 2)
+    open_window = window_manager.find_app(name) if not new_window else None
+    if open_window:
+        if ld.opening_quietly():         # a routine run twice doesn't open everything twice
+            return f"{name} sudah terbuka, {T}."
+        if name.lower().strip() not in SEVERAL_WINDOWS and (_match_key(name, APPS) or "") not in SEVERAL_WINDOWS:
+            return window_manager.focus_window(name)      # "buka Firefox" three times is one Firefox, in front
     key = _match_key(name, APPS)
     if key:
         before = _hwnds()
@@ -558,6 +580,10 @@ def _open_application_linux(name: str) -> str:
         return f"Menjalankan {exe}, {T}."
     if _match_key(name, WEBSITES):
         return open_website(name)      # "buka tiktok" with no desktop app -> the website
+    import site_finder
+    visited = site_finder.visited(name)
+    if visited:
+        return open_website(site_finder.host_of(visited))      # "buka komiku": no app, but a site the user goes to
     return f"Aplikasi '{name}' tidak ditemukan di komputer ini, {T}.{_suggestions(name)}"
 
 
@@ -596,6 +622,11 @@ def open_website(site: str, browser: str = "") -> str:
         url = s if s.startswith("http") else "https://" + s
         _open_url(url, browser)
         return f"Membuka {s}{where}, {T}."
+    import site_finder
+    found = site_finder.find(s, online=True)      # "medanpedia": the site itself, not a page of search results about it
+    if found:
+        _open_url(found, browser)
+        return f"Membuka {site_finder.host_of(found)}{where}, {T}."
     return google_search(s, browser)
 
 
@@ -720,6 +751,36 @@ CLOSE_GRACE_SECONDS = 3.0
 WINDOW_CLOSE_FIRST = {"firefox", "firefox-bin", "librewolf", "thunderbird", "zen", "floorp"}      # how long an app may take to quit before it is stopped forcibly
 
 
+CLOSE_ANSWER_SECONDS = 0.5     # "tutup Firefox" took 3.1 s to answer, waiting for it to be gone; what's asked to close is closed anyway
+_closing: dict[str, threading.Thread] = {}      # what is still on its way out, by the name it was called
+
+
+def _quit_soon(procs: list[psutil.Process], names: str, said: str = "") -> tuple[list[psutil.Process], list[psutil.Process]]:
+    """_quit_processes, for someone waiting for an answer: an app that takes its time goes on quitting behind the answer. Whatever still doesn't stop is said."""
+    done: dict = {}
+
+    def run():
+        done["result"] = _quit_processes(procs)
+        alive, denied = done["result"]
+        if not late.is_set() or not (alive or denied):
+            return
+        print(f"[tutup] {names} tidak mau berhenti")
+        if ANNOUNCE:
+            ANNOUNCE(f"{names} tidak mau berhenti, {T}.", "warning")
+
+    late = threading.Event()
+    thread = threading.Thread(target=run, daemon=True, name="close-app")
+    thread.start()
+    thread.join(CLOSE_ANSWER_SECONDS)
+    if "result" in done:
+        return done["result"]
+    late.set()
+    if "result" in done:               # (finished in that very moment)
+        return done["result"]
+    _closing[said.lower().strip() or names.lower()] = thread
+    return [], []
+
+
 def _quit_processes(procs: list[psutil.Process]) -> tuple[list[psutil.Process], list[psutil.Process]]:
     """Close apps without letting them ask anything ("tutup" is absolute): Linux sends SIGTERM to the app's
     main processes (apps quit without dialogs; Chromium browsers still save their session cleanly); Windows
@@ -763,6 +824,47 @@ def _quit_processes(procs: list[psutil.Process]) -> tuple[list[psutil.Process], 
     return alive, denied
 
 
+PROCESS_SAID = {"soffice": "LibreOffice", "oosplash": "LibreOffice", "thunar": "File Manager", "wasistlos": "WhatsApp Bisnis",
+                "whatsie": "WhatsApp"}
+
+
+def _process_said(process: str) -> str:
+    """"LibreOffice", not "Soffice.bin"."""
+    base = process.removesuffix(".exe").removesuffix(".bin")
+    return PROCESS_SAID.get(base.lower(), base)
+
+
+def _nothing_to_close(name: str) -> str:
+    """Probably a misheard name ("tutup Revo"): what is open helps more than only "it isn't"."""
+    message = f"Tidak ada aplikasi '{name}' yang sedang berjalan, {T}."
+    try:
+        import window_manager
+        labels = sorted({SPOKEN_LABEL(w) for w in window_manager.closable_windows()})
+    except Exception:
+        return message
+    return f"{message} Yang terbuka: {', '.join(labels[:5])}." if labels else message
+
+
+def SPOKEN_LABEL(w: dict) -> str:
+    return _process_said(w.get("class") or w["process"]).split(".")[-1].capitalize()
+
+
+def _service_that_comes_back(procs: list) -> str:
+    """The user service these processes run in, if systemd brings it back whatever ends it (Restart=always). Ending only the
+    process means nothing there: "tutup Hermes" answered "sudah ditutup", and it was back 5 s later (6 Nov)."""
+    if IS_WINDOWS:
+        return ""
+    for p in procs:
+        try:
+            with open(f"/proc/{p.pid}/cgroup") as f:
+                found = re.search(r"/user@\d+\.service/(?:[^/\n]+/)*([^/\n]+\.service)\s*$", f.read(), re.MULTILINE)
+        except OSError:
+            continue
+        if found and ld.out(["systemctl", "--user", "show", found[1], "-p", "Restart", "--value"]) == "always":
+            return found[1]
+    return ""
+
+
 def close_application(name: str, force: bool = False) -> str:
     """Close a running application by name (e.g. 'chrome', 'notepad', 'spotify') completely and without
     questions: the app gets no chance to ask "save changes?" or "close all tabs?"; if it doesn't quit within
@@ -776,7 +878,14 @@ def close_application(name: str, force: bool = False) -> str:
         import window_manager
         w = window_manager._find(name)   # e.g. Store apps whose window has another process
         if not w:
-            return f"Tidak ada aplikasi '{name}' yang sedang berjalan, {T}."
+            return _nothing_to_close(name)
+        # named by its title ("tutup agenda"), or it's one window of many: that window is meant, not the whole browser
+        # (quitting it once took the HUD along)
+        said = name.lower().strip()
+        by_title = said in w["title"].lower() and said.replace(" ", "") not in window_manager._names(w)
+        if by_title or any(o["pid"] == w["pid"] and o["hwnd"] != w["hwnd"] for o in window_manager._windows()):
+            window_manager.close_window(w)
+            return f"{name.strip().capitalize()} sudah ditutup, {T}."
         try:
             procs = [psutil.Process(w["pid"])]
             procs[0].info = {"name": procs[0].name(), "pid": w["pid"]}
@@ -784,10 +893,27 @@ def close_application(name: str, force: bool = False) -> str:
             return f"Tidak ada aplikasi '{name}' yang sedang berjalan, {T}."
         if _protected(procs[0].info["name"]):
             return f"{procs[0].info['name']} adalah proses sistem; tidak saya tutup, {T}."
-    names = ", ".join(sorted({p.info["name"].removesuffix(".exe") for p in procs}))
+    names = ", ".join(sorted({_process_said(p.info["name"]) for p in procs}))
+    if "," not in names and len(name.strip()) >= 4 and name.lower().replace(" ", "") not in names.lower().replace(" ", ""):
+        names = name.strip().capitalize()    # "tutup notepad" closes Mousepad: answer with the word the user said
+
+    unit = _service_that_comes_back(procs)
+    if unit:
+        stopped = ld.run(["systemctl", "--user", "stop", unit], timeout=20)
+        if stopped and stopped.returncode == 0:
+            procs = [p for p in procs if p.is_running()]
+            if not procs:
+                again = "; ia menyala lagi saat login berikutnya" if ld.out(["systemctl", "--user", "show", unit, "-p", "UnitFileState", "--value"]) == "enabled" else ""
+                return f"{names} sudah ditutup, {T}. Ini berjalan sebagai layanan, jadi layanannya saya hentikan{again}."
 
     if not force:
-        alive, denied = _quit_processes(procs)
+        import window_manager
+        pids = {p.pid for p in procs}
+        if any(window_manager._is_digidaw(w) and w["pid"] in pids and w["pid"] != os.getpid() for w in window_manager._windows()):
+            # the HUD is a window of this browser: quitting the browser would take the HUD along ("paksa tutup" still does)
+            closed = window_manager.close_windows_of(pids)
+            return f"{names} sudah ditutup, {T}. HUD tetap terbuka." if closed else f"Hanya HUD yang terbuka di {names}, {T}."
+        alive, denied = _quit_soon(procs, names, name)
         if denied:
             pids = sorted({p.pid for p in denied})
             label = ", ".join(sorted({p.info["name"].removesuffix(".exe") for p in denied}))
@@ -825,26 +951,41 @@ def _kill_elevated(pids: list[int], label: str) -> str:
 
 
 def list_running_apps() -> str:
-    """List the applications currently using the most memory."""
-    usage: dict[str, float] = {}
-    for p in psutil.process_iter(["name", "memory_info"]):
-        try:
-            n = (p.info["name"] or "").removesuffix(".exe")
-            if not n or _protected(n):
-                continue
-            usage[n] = usage.get(n, 0) + p.info["memory_info"].rss
-        except Exception:
-            continue
-    top = sorted(usage.items(), key=lambda x: x[1], reverse=True)[:8]
-    return "Aplikasi terberat saat ini: " + ", ".join(f"{n} ({_fmt_size(m)})" for n, m in top)
+    """The applications that are open, and which of them use the most ('aplikasi apa saja yang berjalan')."""
+    import everyday
+    import window_manager
+    spoken = getattr(window_manager, "SPOKEN_APP", {})
+    names = sorted({spoken.get(window_manager._app_label(w).lower(), window_manager._app_label(w)) for w in window_manager.closable_windows()})
+    return (f"Yang terbuka: {', '.join(names)}. " if names else "") + everyday.heavy_apps()
 
 
 # ─────────────────────────── web & media ───────────────────────────
 
 def google_search(query: str, browser: str = "") -> str:
     """Search Google in the browser (browser = 'chrome', 'firefox', 'edge'... or empty for the default)."""
+    _last_search.update(query=query, at=time.time())
     _open_url("https://www.google.com/search?q=" + urllib.parse.quote(query), browser)
     return f"Mencari '{query}' di Google{' lewat ' + browser.title() if browser else ''}, {T}."
+
+
+_last_search = {"query": "", "at": 0.0}
+SEARCH_REMEMBERED_SECONDS = 15 * 60
+
+
+def searched_lately() -> bool:
+    return bool(_last_search["query"]) and time.time() - _last_search["at"] < SEARCH_REMEMBERED_SECONDS
+
+
+def open_first_result() -> str:
+    """Open the first result of the Google search just made ("cari LMS kampus" … "buka yang pertama")."""
+    if not searched_lately():
+        return f"Belum ada pencarian tadi, {T}. Mau cari apa?"
+    import site_finder
+    url = site_finder.first_result(_last_search["query"])
+    if not url:
+        return f"Hasil pertamanya tidak bisa saya ambil, {T}. Silakan klik di halaman pencariannya."
+    _open_url(url)
+    return f"Membuka {site_finder.host_of(url)}, {T}."
 
 
 def search_youtube(query: str) -> str:
@@ -1136,24 +1277,28 @@ def _open_note(path: Path):
     bring_forward(before, "notepad" if IS_WINDOWS else os.path.basename(ld.text_editor() or path.name))
 
 
-def write_note(content: str, title: str = "") -> str:
+def write_note(content: str, title: str = "", show: bool = True) -> str:
     """Write a note: saves the text to a .txt file and opens it in Notepad (a text editor on Linux).
-    Use for 'buka notepad dan catat ...', 'tulis catatan ...', 'catat ini ...'."""
+    Use for 'buka notepad dan catat ...', 'tulis catatan ...', 'catat ini ...'. show=False: saved without opening a window."""
     safe_title = re.sub(r'[\\/:*?"<>|]+', "", title).strip()[:60]
     stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     path = _notes_dir() / f"{safe_title or 'Catatan'}_{stamp}.txt"
     path.write_text(content.strip() + "\n", encoding="utf-8")
+    if not show:
+        return f"Sudah saya catat, {T}."
     _open_note(path)
     return f"Catatan sudah saya tulis dan buka di {oscompat.TEXT_EDITOR_NAME}, {T}."
 
 
-def append_to_last_note(content: str) -> str:
-    """Add more text to the most recent note and reopen it in Notepad."""
+def append_to_last_note(content: str, show: bool = True) -> str:
+    """Add more text to the most recent note and reopen it in Notepad. show=False: without opening a window."""
     note = _latest_note()
     if not note:
-        return write_note(content)
+        return write_note(content, show=show)
     with open(note, "a", encoding="utf-8") as f:
         f.write(content.strip() + "\n")
+    if not show:
+        return f"Sudah saya tambahkan ke catatan terakhir, {T}."
     _open_note(note)
     return f"Sudah saya tambahkan ke catatan {note.stem}, {T}."
 
@@ -1179,6 +1324,10 @@ def _resolve_folder(name: str) -> str:
     key = _match_key(n, FOLDER_ALIASES)
     if key:
         return str(_known_folder(FOLDER_ALIASES[key]))
+    if n in ("screenshot", "screenshots", "tangkapan layar"):
+        return str(Path(config.SCREENSHOT_DIR) if config.SCREENSHOT_DIR else _known_folder("pictures") / "Screenshots")
+    if n in ("sc", "skrip", "script", "scrip", "sekrip"):        # (Google hears "skrip" as "SC")
+        return str(config.SCRIPTS_DIR.expanduser())
     if n in ("recycle bin", "sampah", "tempat sampah", "trash"):
         return "shell:RecycleBinFolder" if IS_WINDOWS else "trash:///"
     if n in ("this pc", "komputer", "my computer", "pc"):
@@ -1197,6 +1346,41 @@ def _resolve_folder(name: str) -> str:
 
 
 SPECIAL_FOLDERS = ("shell:", "trash:")
+FOLDER_SEARCH_SECONDS = 1.5
+FOLDER_SEARCH_DEPTH = 4
+NOT_SEARCHED = {"node_modules", "__pycache__", "venv", "site-packages", "dist-packages"}
+
+
+def _find_folder(name: str) -> str | None:
+    """A folder by name under the home folder (its links to other drives too), the nearest first: the same name, else one
+    that contains it. Gives up after a moment rather than make the user wait."""
+    wanted = re.sub(r"[^a-z0-9]", "", name.lower())
+    if len(wanted) < 3:
+        return None
+    started, level, containing = time.time(), [str(Path.home())], None
+    for _ in range(FOLDER_SEARCH_DEPTH):
+        below = []
+        for folder in level:
+            try:
+                entries = sorted(os.scandir(folder), key=lambda e: e.name.lower())
+            except OSError:
+                continue
+            for entry in entries:
+                if time.time() - started > FOLDER_SEARCH_SECONDS:
+                    return containing
+                try:
+                    if entry.name.startswith(".") or entry.name in NOT_SEARCHED or not entry.is_dir():
+                        continue
+                except OSError:
+                    continue
+                key = re.sub(r"[^a-z0-9]", "", entry.name.lower())
+                if key == wanted:
+                    return entry.path
+                if wanted in key and not containing:
+                    containing = entry.path
+                below.append(entry.path)
+        level = below
+    return containing
 
 
 def open_folder(name: str) -> str:
@@ -1204,7 +1388,9 @@ def open_folder(name: str) -> str:
     'music', 'videos', 'recycle bin', 'this pc', 'catatan', 'project', a drive letter like 'D', or a path."""
     target = _resolve_folder(name)
     if not target.startswith(SPECIAL_FOLDERS) and not os.path.isdir(target):
-        return f"Folder '{name}' tidak ditemukan, {T}."
+        target = _find_folder(name)      # "folder skripsi": wherever it is under the home folder
+        if not target:
+            return f"Folder '{name}' tidak ditemukan, {T}."
     before = _hwnds()
     if IS_WINDOWS:
         subprocess.Popen(["explorer.exe", target])
@@ -1468,6 +1654,19 @@ def get_system_status() -> str:
     return status
 
 
+def get_battery() -> str:
+    """How full the battery is ('berapa baterai', 'cek baterai', 'sisa batre')."""
+    battery = psutil.sensors_battery()
+    if not battery:
+        return f"Laptop ini tidak memberi tahu baterainya, {T}."
+    state = "sedang dicas" if battery.power_plugged else "memakai baterai"
+    left = ""
+    if not battery.power_plugged and battery.secsleft and battery.secsleft > 0:
+        hours, minutes = battery.secsleft // 3600, battery.secsleft % 3600 // 60
+        left = f", cukup sekitar {f'{hours} jam ' if hours else ''}{minutes} menit lagi"
+    return f"Baterai {battery.percent:.0f} persen, {state}{left}, {T}."
+
+
 CPU_SENSORS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "acpitz")   # Intel, AMD, AMD, ARM, the board's
 
 
@@ -1571,10 +1770,20 @@ def get_time() -> str:
     return f"Sekarang pukul {now:%H.%M}, {T}."
 
 
-def get_date() -> str:
-    """Current day and date."""
+def get_date(when: str = "") -> str:
+    """Current day and date. when: 'besok', 'lusa', 'kemarin' for that day; 'bulan' or 'tahun' for only that."""
     now = datetime.datetime.now()
-    return f"Hari ini {HARI[now.weekday()]}, {now.day} {BULAN[now.month - 1]} {now.year}, {T}."
+    when = when.lower().strip()
+    if when == "bulan":
+        return f"Sekarang bulan {BULAN[now.month - 1]} {now.year}, {T}."
+    if when == "tahun":
+        return f"Sekarang tahun {now.year}, {T}."
+    import agenda
+    tomorrow = agenda.tomorrow_offset()              # (after midnight "besok" is the day that has just begun)
+    offset = {"besok": tomorrow, "lusa": tomorrow + 1, "kemarin": -1}.get(when, 0)
+    day = now + datetime.timedelta(days=offset)
+    verb = {"kemarin": "adalah"}.get(when, "")
+    return f"{when.capitalize() or 'Hari ini'} {verb + ' ' if verb else ''}{HARI[day.weekday()]}, {day.day} {BULAN[day.month - 1]} {day.year}, {T}."
 
 
 def lock_workstation() -> str:
@@ -1603,6 +1812,9 @@ POWER_UNIT = "digidaw-power"      # Linux: the delayed shutdown/restart is a can
 
 
 def _do_power_linux(action: str) -> str:
+    import sysadmin
+    if sysadmin.updating():                # pacman cut off halfway can leave the system unable to boot
+        return f"Update sistem masih berjalan, {T}. Tunggu sampai selesai dulu."
     if action in ("shutdown", "restart"):
         ld.run(["systemctl", "--user", "stop", f"{POWER_UNIT}.timer"])
         ld.run(["systemctl", "--user", "reset-failed", f"{POWER_UNIT}.timer", f"{POWER_UNIT}.service"])
@@ -1621,7 +1833,7 @@ def _do_power_linux(action: str) -> str:
         if upcoming:                     # asleep, the laptop couldn't ring it: only the screen goes off
             when = datetime.datetime.fromtimestamp(upcoming["due"]).strftime("%H.%M")
             what = {"alarm": "alarm", "reminder": "pengingat", "timer": "timer"}.get(upcoming["kind"], "alarm")
-            threading.Timer(4, lambda: ld.run(["hyprctl", "dispatch", "dpms", "off"]) if shutil.which("hyprctl")
+            threading.Timer(4, lambda: ld.dispatch("dpms", "off") if shutil.which("hyprctl")
                             else ld.run(["xset", "dpms", "force", "off"])).start()
             return (f"Ada {what} pukul {when}, {T}, jadi laptop tidak saya tidurkan: layarnya saja saya matikan supaya "
                     f"{what} tetap berbunyi. Selamat tidur.")
@@ -1710,7 +1922,10 @@ def _run_command_elevated(command: str) -> str:
 def run_command(command: str) -> str:
     """Run a command on the PC (PowerShell on Windows, the shell on Linux) and return its output. A command that only
     looks (df -h, ls, pacman -Qi ...) runs right away; anything else asks confirmation. Use only when no other specific
-    tool can do the job."""
+    tool can do the job. A command that needs sudo: run_as_root."""
+    if not IS_WINDOWS and re.match(r"\s*sudo\s", command):
+        import sysadmin
+        return sysadmin.run_as_root(command)
     if _read_only_command(command):
         return _do_run_command(command)
     return safety.guard(f"jalankan perintah {SHELL_NAME}: {command}", _do_run_command, command=command)
@@ -1720,7 +1935,7 @@ def run_command(command: str) -> str:
 # substitutes (; | & > < ` $) asks, and so do files that hold secrets.
 READ_ONLY_COMMANDS = {"ls", "df", "du", "free", "uptime", "ps", "ip", "lsblk", "lscpu", "lsusb", "lspci", "whoami", "date",
                       "hostname", "uname", "nvidia-smi", "sensors", "which", "pwd", "wc", "head", "tail", "cat", "stat",
-                      "file", "ping", "iwgetid", "pactl", "wpctl", "hyprctl"}
+                      "file", "ping", "iwgetid", "pactl", "wpctl", "hyprctl", "ss"}
 READ_ONLY_SUBCOMMANDS = {"pacman": r"-Q\w*", "systemctl": r"(?:--user )?(?:status|is-active|is-enabled|list-units)",
                          "journalctl": r"(?:-\S+ ?\S* ?)+", "nmcli": r"(?:-\S+ \S+ )*(?:dev|device|con|connection|radio|general)(?: (?:show|status|wifi))?(?: list)?",
                          "git": r"(?:status|log|diff|branch)", "bluetoothctl": r"(?:devices|show|info)", "pactl": r"(?:list|info|get-)\S*",
@@ -1859,7 +2074,7 @@ def recall_memories() -> str:
 
 # Skills exposed to Gemini function calling (media/window/AI skills live in their own modules)
 AI_TOOLS = [
-    open_application, open_many, close_application, close_many, close_all_apps, list_running_apps, open_website, google_search, project_location,
+    get_battery, open_first_result, open_application, open_many, close_application, close_many, close_all_apps, list_running_apps, open_website, google_search, project_location,
     search_youtube, play_spotify,
     set_volume, volume_up, volume_down, volume_mute, set_brightness, take_screenshot,
     type_text, press_keys, get_clipboard, set_clipboard, start_dictation,

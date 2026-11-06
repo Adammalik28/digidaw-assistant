@@ -99,3 +99,6 @@ pywebpush>=2.0  # notifications on the phone while the HUD page is closed (Web P
 nvidia-cublas-cu12>=12.4; sys_platform == "linux"   # optional: Whisper (wake-word check) on an NVIDIA GPU instead of the CPU
 nvidia-cudnn-cu12>=9,<10; sys_platform == "linux"
 tinytuya==1.20.0
+openwakeword==0.6.0 --no-deps  # the name heard in the sound (name_spotter.py); installed with --no-deps: its tflite dependency doesn't exist for Python 3.12
+scipy>=1.11
+scikit-learn>=1.5   # only to learn the user's own voice (scripts/train_wake.py)

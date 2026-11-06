@@ -442,8 +442,8 @@ def _clamscan(targets: list[str], label: str, timeout: int):
 def _clam_missing() -> str | None:
     if shutil.which("clamscan"):
         return None
-    return (f"ClamAV belum terpasang, {T}. Pasang dulu dengan perintah: sudo pacman -S clamav, "
-            f"lalu sudo freshclam untuk mengunduh database virusnya.")
+    import sysadmin
+    return sysadmin.offer_install("clamav", "Pemindai virus ClamAV", then="freshclam")
 
 
 def defender_scan(kind: str = "quick") -> str:

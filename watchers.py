@@ -9,8 +9,10 @@ something.
   program    a program has ended ("kabari kalau ffmpeg selesai")
   internet   the internet is back
   situs      a website answers again ("kabari kalau situs kampus bisa dibuka")
+  cpu        the processor has calmed down ("kabari kalau cpu di bawah 20 persen")
+  update     the system update that is running has finished
 
-Watches live in memory only (gone after a restart) and give up after MAX_HOURS. A watch the user asked for is said
+Watches are kept across a restart (logs/watchers.json) and give up after MAX_HOURS. A watch the user asked for is said
 even while they are away (level "reminder": the phone gets it too).
 """
 import datetime
@@ -23,18 +25,21 @@ from pathlib import Path
 
 import config
 import diag
+import storage
 
 T = config.USER_TITLE
 ANNOUNCE = None                      # set by main (core.announce)
+STATE_FILE = config.LOG_DIR / "watchers.json"
 CHECK_EVERY = 10                     # seconds; each kind also has its own pace (PACE)
-PACE = {"hujan_reda": 300, "hujan": 300, "situs": 60, "internet": 15, "baterai": 30, "program": 10, "unduhan": 10}
+PACE = {"hujan_reda": 300, "hujan": 300, "situs": 60, "internet": 15, "baterai": 30, "program": 10, "unduhan": 10,
+        "cpu": 15, "update": 10}
 MAX_HOURS = {"unduhan": 6, "pesan": 24, "hujan_reda": 12, "hujan": 12, "baterai": 12, "program": 12, "internet": 12,
-             "situs": 12}
+             "situs": 12, "cpu": 6, "update": 6}
 DOWNLOAD_WAIT = 180                  # "kabari kalau unduhan selesai" before the download started: wait this long for it
 PARTIAL = (".part", ".crdownload", ".download", ".partial", ".aria2", ".opdownload", ".tmp")
 KIND_WORDS = {"unduhan": "unduhan selesai", "pesan": "pesan masuk", "hujan_reda": "hujan reda", "hujan": "hujan turun",
               "baterai": "baterai", "program": "program selesai", "internet": "internet tersambung",
-              "situs": "situs bisa dibuka"}
+              "situs": "situs bisa dibuka", "cpu": "CPU tenang", "update": "update selesai"}
 
 _lock = threading.Lock()
 _watches: list[dict] = []
@@ -67,6 +72,11 @@ _PATTERNS = [
      r"normal|on|hidup|pulih|lancar)(?: lagi| kembali)?", lambda m: ("internet", "", "")),
     (r"(?:situs|website|web|laman) ([\w.-]+(?:\.[a-z]{2,})?)(?: sudah| udah)? (?:bisa (?:dibuka|diakses)|"
      r"normal|nyala|aktif|up|online)(?: lagi| kembali)?", lambda m: ("situs", m[1], "")),
+    (r"(?:beban )?(?:cpu|prosesor|processor)(?:nya)? (?:sudah |udah )?(?:tenang|turun|normal|rendah|adem|selesai sibuk|"
+     r"(?:di ?bawah|kurang dari) (\d{1,3})(?: ?(?:persen|%))?)",
+     lambda m: ("cpu", "", f"<{m[1]}" if m[1] else "<25")),
+    (r"(?:update|pembaruan|upgrade)(?: (?:sistem|arch|paket|aur))?(?:nya)? (?:sudah |udah )?(?:selesai|beres|kelar|rampung)",
+     lambda m: ("update", "", "")),
     (r"(?:program |aplikasi |proses )?([\w.-]{2,30}) (?:sudah |udah )?(?:selesai|ditutup|berhenti|tertutup|beres|kelar)"
      r"(?: (?:jalan|berjalan|bekerja|diproses|memproses))?", lambda m: ("program", m[1], "")),
 ]
@@ -271,8 +281,49 @@ def _check_site(w: dict) -> str | None:
     return None
 
 
+def _check_cpu(w: dict) -> str | None:
+    import psutil
+    pct = psutil.cpu_percent(interval=0.4)
+    raw = (w.get("value") or "<25").lstrip("<>")
+    limit = float(raw) if raw.replace(".", "", 1).isdigit() else 25.0
+    if pct <= limit:
+        w["state"]["calm"] = w["state"].get("calm", 0) + 1
+        if w["state"]["calm"] >= 2:
+            return f"{T}, beban CPU sudah turun ke {pct:.0f} persen."
+    else:
+        w["state"]["calm"] = 0
+    return None
+
+
+def _updating_now() -> bool:
+    """Digidaw's own update (a system unit), or one the user started in a terminal (those run as root, so by name only)."""
+    import psutil
+    try:
+        import sysadmin
+        if sysadmin.updating():
+            return True
+    except Exception:
+        pass
+    return any(p.info["name"] in ("pacman", "yay", "paru") for p in psutil.process_iter(["name"]))
+
+
+def _check_update(w: dict) -> str | None:
+    if _updating_now():
+        if not w["state"].get("seen"):
+            w["state"]["seen"] = True
+            _save()                      # (a restart in between must still know that it was seen running)
+        return None
+    if w["state"].get("seen"):
+        return f"{T}, pembaruan sistem sudah selesai."
+    # ("selesai" after 15 seconds of nothing was said even when no update had ever run)
+    if time.time() - w["created"] > DOWNLOAD_WAIT:
+        return f"{T}, saya tidak melihat update yang berjalan, jadi saya berhenti memantaunya."
+    return None
+
+
 CHECKS = {"unduhan": _check_download, "hujan_reda": _check_rain_stop, "hujan": _check_rain_start,
-          "baterai": _check_battery, "program": _check_program, "internet": _check_internet, "situs": _check_site}
+          "baterai": _check_battery, "program": _check_program, "internet": _check_internet, "situs": _check_site,
+          "cpu": _check_cpu, "update": _check_update}
 
 
 # ───────────────────────────── messages (from notifications.py) ─────────────────────────────
@@ -345,7 +396,37 @@ def _loop():
                 _finish(w, text)
 
 
+def _save():
+    try:
+        with _lock:
+            items = [dict(w) for w in _watches]
+        storage.save_json(STATE_FILE, items, mode=storage.PRIVATE, indent=1)
+    except Exception:
+        pass
+
+
+def _load_saved():
+    now = time.time()
+    saved = storage.load_json(STATE_FILE, [])
+    if not isinstance(saved, list):
+        return
+    with _lock:
+        known = {(w["kind"], w["target"].lower(), w["value"]) for w in _watches}
+        for w in saved:
+            if not isinstance(w, dict) or w.get("kind") not in MAX_HOURS or w.get("expires", 0) <= now:
+                continue
+            key = (w["kind"], str(w.get("target", "")).lower(), str(w.get("value", "")))
+            if key not in known:
+                w.setdefault("state", {})
+                w.setdefault("checked", 0.0)
+                if w["kind"] in ("unduhan", "update") and not w["state"].get("seen"):
+                    w["created"] = now           # (its wait for something to start begins again, or it gives up at once)
+                _watches.append(w)
+                known.add(key)
+
+
 def _publish():
+    _save()
     try:
         import events
         events.state["watches"] = snapshot()
@@ -366,6 +447,9 @@ def describe(w: dict) -> str:
     if kind == "baterai":
         return "baterai penuh" if not value or value == "penuh" else \
             f"baterai {'di bawah' if value.startswith('<') else 'di atas'} {value[1:]} persen"
+    if kind == "cpu":
+        pct = value.lstrip("<>") if value else "25"
+        return f"beban CPU di bawah {pct} persen"
     if kind in ("program", "situs"):
         return f"{KIND_WORDS[kind].split()[0]} {target} {'selesai' if kind == 'program' else 'bisa dibuka'}"
     return KIND_WORDS.get(kind, kind)
@@ -376,6 +460,9 @@ def start():
     if _started:
         return
     _started = True
+    _load_saved()
+    if _watches:
+        _publish()                       # the HUD shows the ones kept from before the restart
     try:
         import notifications
         notifications.on_new(on_notification)
@@ -388,15 +475,16 @@ def start():
 
 def watch_for(what: str, target: str = "", value: str = "") -> str:
     """Keep an eye on something and say it when it happens: "kabari saya kalau unduhan selesai",
-    "kabari kalau Rina membalas", "kabari kalau hujan reda", "kabari kalau baterai penuh".
-    what: unduhan | pesan | hujan_reda | hujan | baterai | program | internet | situs.
+    "kabari kalau Rina membalas", "kabari kalau hujan reda", "kabari kalau baterai penuh",
+    "kabari kalau CPU sudah tenang", "kabari kalau update selesai".
+    what: unduhan | pesan | hujan_reda | hujan | baterai | program | internet | situs | cpu | update.
     target: the person (pesan), program name (program) or website (situs). value: for baterai "penuh", "<20" or ">80"."""
     kind = (what or "").strip().lower().replace(" ", "_")
     kind = {"download": "unduhan", "message": "pesan", "chat": "pesan", "rain_stop": "hujan_reda", "reda": "hujan_reda",
             "rain": "hujan", "battery": "baterai", "process": "program", "aplikasi": "program", "wifi": "internet",
-            "website": "situs", "web": "situs"}.get(kind, kind)
+            "website": "situs", "web": "situs", "prosesor": "cpu", "processor": "cpu", "pembaruan": "update"}.get(kind, kind)
     if kind not in MAX_HOURS:
-        return f"Saya belum bisa memantau '{what}', {T}. Yang bisa: unduhan, pesan, hujan, baterai, program, internet, situs."
+        return f"Saya belum bisa memantau '{what}', {T}. Yang bisa: unduhan, pesan, hujan, baterai, program, internet, situs, cpu, update."
     target, value = (target or "").strip(), (value or "").strip().replace(" ", "")
     if kind in ("program", "situs") and not target:
         return f"Program atau situs apa yang perlu saya pantau, {T}?"
@@ -432,6 +520,8 @@ def watch_for(what: str, target: str = "", value: str = "") -> str:
     _publish()
     if kind == "unduhan" and not _partials(_downloads_dir()):
         return f"Baik, {T}. Saya kabari begitu unduhan di folder Downloads selesai."
+    if kind == "update" and not _updating_now():
+        return f"Belum ada update yang berjalan, {T}. Kalau dalam 3 menit ada yang mulai, saya kabari saat selesai."
     return f"Baik, {T}. Saya kabari kalau {describe(w)}."
 
 

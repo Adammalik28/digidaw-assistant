@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenda Digidaw</title>
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='8' y='12' width='48' height='44' rx='7' fill='none' stroke='%233fd8ff' stroke-width='5'/%3E%3Cpath d='M8 26h48M22 6v12M42 6v12' stroke='%233fd8ff' stroke-width='5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #070b12; --panel: #0e151f; --panel-2: #151e2b;
+    --line: rgba(166, 205, 238, 0.10); --line-strong: rgba(166, 205, 238, 0.22);
+    --cyan: #4ad4ff; --cyan-soft: #a5e8ff; --amber: #ffb44f; --red: #ff6f6f; --green: #52e5a6;
+    --text: #ecf4fb; --muted: #8fa1b2;
+    --font-display: 'Chakra Petch', 'Plus Jakarta Sans', system-ui, sans-serif; --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-mono: 'Chakra Petch', 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--text); font-family: var(--font-body); font-size: 14.5px; font-weight: 500;
+    background: var(--bg);
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  .page { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto minmax(0, 1fr); gap: 16px 20px; height: 100vh; padding: 20px 24px; }
+
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .today-num { font-family: var(--font-display); font-weight: 700; font-size: 44px; line-height: 1; color: var(--cyan-soft); text-shadow: 0 0 22px rgba(63, 216, 255, 0.45); }
+  .today-text b { display: block; font-size: 21px; font-weight: 700; line-height: 1.15; }
+  .today-text span { font-size: 15px; color: var(--muted); }
+  .next { margin-left: auto; text-align: right; min-width: 0; max-width: 46%; }
+  .next small { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
+  .next b { display: block; font-size: 19px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .next span { font-family: var(--font-mono); font-size: 13px; color: var(--amber); }
+
+  main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+  .tools { display: flex; gap: 10px; align-items: center; }
+  .tools h1 { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.3em; font-weight: 700; color: var(--cyan); margin: 0; white-space: nowrap; }
+  .count { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .search { margin-left: auto; width: min(280px, 45%); }
+  input, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 11px; width: 100%; min-width: 0; }
+  input:focus, select:focus { border-color: var(--cyan); outline: none; box-shadow: 0 0 0 1px var(--cyan); }
+  input::placeholder { color: var(--muted); }
+  select option { background: #06192a; }
+
+  .btn { background: var(--panel-2); border: 1px solid var(--line-strong); color: var(--cyan-soft); border-radius: 6px; padding: 8px 14px; font-weight: 700; letter-spacing: 0.04em; transition: background 0.15s; }
+  .btn:hover { background: rgba(63, 216, 255, 0.18); }
+  .btn.primary { background: var(--cyan); border-color: var(--cyan); color: #02131e; }
+  .btn.primary:hover { background: var(--cyan-soft); }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: rgba(255, 107, 107, 0.15); }
+  .btn:disabled { opacity: 0.5; cursor: wait; }
+
+  .list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .filter-note { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--amber); margin-bottom: 8px; }
+  .filter-note button { background: none; border: 0; padding: 2px 4px; color: var(--cyan-soft); text-decoration: underline; }
+  .group { margin-bottom: 18px; }
+  .group h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+  .group.today h2 { color: var(--amber); }
+  .group h2 i { font-style: normal; opacity: 0.75; letter-spacing: 0; }
+
+  .event { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 8px; padding: 11px 14px; margin-bottom: 8px; transition: border-color 0.15s, background 0.15s; }
+  .event:hover, .event:focus-within { border-color: var(--line-strong); background: rgba(10, 40, 62, 0.8); }
+  .event.weekly { border-left-color: var(--green); }
+  .event.weekly .chip b { color: var(--green); }
+  .event.today { border-left-color: var(--amber); }
+  .event.tomorrow { border-left-color: var(--cyan); }
+  .event.past { opacity: 0.55; border-left-color: var(--muted); }
+  .chip { text-align: center; line-height: 1; }
+  .chip b { display: block; font-family: var(--font-display); font-size: 25px; font-weight: 700; color: var(--cyan-soft); }
+  .chip span { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; color: var(--muted); margin-top: 5px; }
+  .event.today .chip b { color: var(--amber); }
+  .ev-main { min-width: 0; }
+  .ev-title { font-size: 19px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+  .ev-when { font-size: 15.5px; color: var(--cyan-soft); margin-top: 2px; }
+  .ev-when em { font-style: normal; color: var(--muted); }
+  .ev-tags { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 3px; font-size: 13.5px; color: var(--muted); }
+  .ev-side { display: flex; align-items: center; gap: 12px; }
+  .left { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .event.today .left { color: var(--amber); }
+  .event.tomorrow .left { color: var(--cyan-soft); }
+  .ev-acts { display: flex; gap: 4px; opacity: 0.35; transition: opacity 0.15s; }
+  .event:hover .ev-acts, .event:focus-within .ev-acts { opacity: 1; }
+  .icon { width: 32px; height: 32px; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--muted); }
+  .icon:hover { color: var(--cyan-soft); border-color: var(--line-strong); }
+  .icon.del:hover { color: var(--red); border-color: var(--red); }
+  .icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  .empty { display: grid; justify-items: center; gap: 8px; padding: 56px 20px; text-align: center; color: var(--muted); }
+  .empty svg { width: 46px; height: 46px; fill: none; stroke: var(--line-strong); stroke-width: 1.4; }
+  .empty b { font-size: 19px; color: var(--text); }
+  .empty q { quotes: none; font-style: italic; color: var(--cyan-soft); }
+
+  aside { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px; }
+  .card h2 { margin: 0 0 10px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-head b { font-size: 17px; font-weight: 700; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+  .cal-grid span { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); padding: 3px 0; }
+  .day { position: relative; aspect-ratio: 1.22; background: none; border: 1px solid transparent; border-radius: 6px; font-size: 14.5px; font-weight: 600; color: var(--text); padding: 0; }
+  .day:hover { background: rgba(63, 216, 255, 0.12); }
+  .day.other { color: rgba(127, 169, 187, 0.4); }
+  .day.today { border-color: var(--amber); color: var(--amber); }
+  .day.picked { background: var(--cyan); color: #02131e; }
+  .day.has::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+  .day.picked.has::after { background: #02131e; box-shadow: none; }
+  .day.weekly::before { content: ""; position: absolute; left: 50%; bottom: 3px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--green); }
+  .day.weekly.has::before { margin-left: -7px; }
+  .day.weekly.has::after { margin-left: 2px; }
+  .day.picked.weekly::before { background: #02131e; }
+  .cal-legend { display: flex; gap: 14px; justify-content: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: var(--cyan); vertical-align: 1px; }
+  .cal-legend i.w { background: var(--green); }
+
+  .wk-day { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 9px 0 3px; }
+  .wk-day:first-of-type { margin-top: 0; }
+  .wk-row { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 2px 0; }
+  .wk-row b { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--green); }
+  .wk-row span { font-size: 15px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+  .wk-row small { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
+  .wk-edit { margin-top: 10px; width: 100%; }
+
+  form { display: grid; gap: 8px; margin: 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+  .check input { width: 16px; height: 16px; accent-color: var(--cyan); }
+  label.f { display: grid; gap: 3px; font-size: 13.5px; color: var(--muted); }
+  .form-acts { display: flex; gap: 8px; }
+  .form-acts .primary { flex: 1; }
+  .msg { font-size: 14.5px; min-height: 18px; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); }
+
+  .alarm { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .alarm:last-of-type { border-bottom: 0; }
+  .alarm .clock { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--amber); width: 68px; }
+  .alarm.timer .clock, .alarm.reminder .clock { font-size: 15px; color: var(--cyan-soft); }
+  .alarm .a-main { min-width: 0; line-height: 1.2; }
+  .alarm .a-main b { display: block; font-size: 15.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alarm .a-main small { font-size: 13px; color: var(--muted); }
+  .none { font-size: 14.5px; color: var(--muted); padding: 2px 0 6px; }
+  .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .weekdays label { position: relative; text-align: center; font-size: 13px; font-weight: 700; padding: 5px 0; border: 1px solid var(--line); border-radius: 5px; cursor: pointer; color: var(--muted); user-select: none; }
+  .weekdays input { position: absolute; opacity: 0; width: 100%; height: 100%; inset: 0; margin: 0; cursor: pointer; }
+  .weekdays label:has(input:checked) { background: var(--cyan); border-color: var(--cyan); color: #02131e; }
+  .weekdays label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 1px; }
+
+  .offline { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: #3a1616; border: 1px solid var(--red); border-radius: 6px; padding: 6px 14px; font-size: 14.5px; }
+
+  @media (max-width: 860px) {
+    html, body { height: auto; }
+    .page { display: block; height: auto; padding: 14px 16px; }
+    header { margin-bottom: 14px; gap: 14px; }
+    .next { margin-left: 0; text-align: left; max-width: 100%; width: 100%; }
+    .list { overflow: visible; padding-right: 0; }
+    aside { overflow: visible; padding-right: 0; margin-top: 16px; }
+    .ev-acts { opacity: 1; }
+    .event { grid-template-columns: 52px minmax(0, 1fr); }
+    .ev-side { grid-column: 2; justify-content: space-between; }
+    .tools { flex-wrap: wrap; }
+    .search { width: 100%; margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  /* (the letters are wider than the old ones) */
+  .ev-title { font-size: 16px; } .ev-when { font-size: 13.5px; } .ev-tags { font-size: 12.5px; } .today-text b { font-size: 19px; } .today-text span { font-size: 14px; }
+  .wk-row span { font-size: 13.5px; } .wk-row small { font-size: 12px; } .next b { font-size: 16px; } .group h2, .card h2 { letter-spacing: 0.06em; }
+  .event { border-radius: 12px; border-left-width: 1px; } .card { border-radius: 14px; } .btn { border-radius: 9px; font-size: 13.5px; } .tools h1 { letter-spacing: 0.12em; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="today-num" id="todayNum">--</div>
+    <div class="today-text"><b id="todayDay"></b><span id="todayMonth"></span></div>
+    <div class="next" id="next" hidden><small>Berikutnya</small><b id="nextTitle"></b><span id="nextWhen"></span></div>
+  </header>
+
+  <main>
+    <div class="tools">
+      <h1>AGENDA</h1><span class="count" id="count"></span>
+      <input class="search" id="search" type="search" placeholder="Cari acara…" aria-label="Cari acara">
+    </div>
+    <div class="filter-note" id="filterNote" hidden><span id="filterText"></span><button id="filterClear">Tampilkan semua</button></div>
+    <div class="list" id="list" aria-live="polite"></div>
+  </main>
+
+  <aside>
+    <section class="card" aria-label="Kalender">
+      <div class="cal-head">
+        <button class="icon" id="calPrev" aria-label="Bulan sebelumnya"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <b id="calTitle"></b>
+        <button class="icon" id="calNext" aria-label="Bulan berikutnya"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend" id="calLegend" hidden><span><i></i>Acara</span><span><i class="w"></i>Kuliah</span></div>
+    </section>
+
+    <section class="card">
+      <h2 id="formTitle">Tambah acara</h2>
+      <form id="form">
+        <input id="fTitle" placeholder="Nama acara" maxlength="120" required aria-label="Nama acara">
+        <div class="two">
+          <label class="f">Tanggal<input id="fDate" type="date" required></label>
+          <label class="f">Jam (boleh kosong)<input id="fTime" type="time"></label>
+        </div>
+        <label class="f">Ingatkan
+          <select id="fRemind">
+            <option value="0">Hanya pada harinya</option>
+            <option value="1" selected>Malam sebelumnya</option>
+            <option value="3">3 hari sebelumnya</option>
+            <option value="7">Seminggu sebelumnya</option>
+          </select>
+        </label>
+        <label class="check"><input id="fYearly" type="checkbox"> Setiap tahun</label>
+        <div class="form-acts">
+          <button class="btn primary" id="fSave" type="submit">SIMPAN</button>
+          <button class="btn" id="fCancel" type="button" hidden>BATAL</button>
+        </div>
+        <div class="msg" id="fMsg" role="status"></div>
+      </form>
+    </section>
+
+    <section class="card" id="weeklyCard" hidden>
+      <h2>Jadwal mingguan</h2>
+      <div id="weeklyList"></div>
+      <button class="btn wk-edit" id="weeklyEdit" type="button" hidden>UBAH DI SKRIP JADWAL</button>
+    </section>
+
+    <section class="card">
+      <h2>Alarm &amp; pengingat <span id="alarmCount"></span></h2>
+      <div id="alarms"></div>
+      <form id="alarmForm" style="margin-top:10px">
+        <div class="two">
+          <input id="aLabel" placeholder="Nama alarm" maxlength="80" aria-label="Nama alarm">
+          <input id="aTime" type="time" required aria-label="Jam alarm">
+        </div>
+        <div class="weekdays" id="aDays" role="group" aria-label="Ulangi setiap hari apa"></div>
+        <button class="btn" type="submit">TAMBAH ALARM</button>
+        <div class="msg" id="aMsg" role="status"></div>
+      </form>
+    </section>
+  </aside>
+</div>
+<div class="offline" id="offline" hidden>Sambungan ke Digidaw terputus, mencoba lagi…</div>
+
+<script>
+(() => {
+  const TOKEN = "__DIGIDAW_TOKEN__";
+  const $ = (id) => document.getElementById(id);
+  const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+  const ICONS = {
+    edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>',
+    del: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>',
+    yes: '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>',
+    no: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  };
+  const REMIND = { 0: "diingatkan pada harinya", 1: "diingatkan malam sebelumnya", 3: "diingatkan 3 hari sebelumnya", 7: "diingatkan seminggu sebelumnya" };
+
+  const state = { events: [], alarms: [], weekly: [], weeklyEditable: false, query: "", picked: "", editing: "", month: null, confirming: "" };
+
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parse = (s) => new Date(`${s}T00:00:00`);
+  const clock = (t) => (t || "").replace(":", ".");
+  const longDate = (s) => { const d = parse(s); return `${HARI[d.getDay()]}, ${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`; };
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+  async function api(path, body) {
+    const r = await fetch(`${path}${body ? "" : `?token=${encodeURIComponent(TOKEN)}`}`, body
+      ? { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify(body) } : {});
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  }
+
+  function daysLeft(ev) {
+    const today = parse(iso(new Date()));
+    return Math.round((parse(ev.date) - today) / 86400000);
+  }
+  /* how long until it, the way one says it */
+  function leftText(ev) {
+    const days = daysLeft(ev);
+    if (ev.past) return "sudah lewat";
+    if (days === 0) {
+      if (!ev.time) return "hari ini";
+      const [h, m] = ev.time.split(":").map(Number);
+      const at = new Date(); at.setHours(h, m, 0, 0);
+      const minutes = Math.round((at - new Date()) / 60000);
+      if (minutes <= 0) return "sedang berlangsung";
+      return minutes < 60 ? `${minutes} menit lagi` : `${Math.floor(minutes / 60)} jam ${minutes % 60 ? `${minutes % 60} menit ` : ""}lagi`;
+    }
+    if (days === 1) return "besok";
+    if (days === 2) return "lusa";
+    if (days < 60) return `${days} hari lagi`;
+    if (days < 365) return `${Math.round(days / 30)} bulan lagi`;
+    return "tahun depan";
+  }
+  function groupOf(ev) {
+    if (ev.past) return ["past", "Baru lewat"];
+    const days = daysLeft(ev);
+    if (days === 0) return ["today", "Hari ini"];
+    if (days === 1) return ["tomorrow", "Besok"];
+    const now = new Date();
+    const weekEnds = 7 - ((now.getDay() + 6) % 7);          // to the coming Sunday
+    if (days < weekEnds) return ["week", "Minggu ini"];
+    if (days < weekEnds + 7) return ["nextweek", "Minggu depan"];
+    const d = parse(ev.date);
+    return [`m${d.getFullYear()}-${d.getMonth()}`, `${BULAN[d.getMonth()]} ${d.getFullYear()}`];
+  }
+
+  /* the weekly schedule (the user's own script keeps it; read-only here), as rows like the events */
+  function weeklyOn(key) {
+    const d = parse(key), day = d.getDay() || 7, now = new Date();
+    return state.weekly.filter((w) => w.day === 0 || w.day === day).map((w) => {
+      const [h, m] = w.time.split(":").map(Number);
+      const at = new Date(d); at.setHours(h, m, 0, 0);
+      return { weekly: true, isClass: w.is_class, id: `w${w.id}-${key}`, title: w.name, name: w.name, detail: w.detail, date: key, time: w.time,
+               past: at < now, yearly: false };
+    });
+  }
+  /* the next 7 days: what's still to come */
+  function weeklyComing() {
+    const rows = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(); d.setDate(d.getDate() + i);
+      rows.push(...weeklyOn(iso(d)).filter((r) => !r.past));
+    }
+    return rows;
+  }
+  const byWhen = (a, b) => `${a.date} ${a.time || ""}`.localeCompare(`${b.date} ${b.time || ""}`);
+  const everything = () => [...state.events, ...weeklyComing()].sort(byWhen);
+
+  function renderHeader() {
+    const now = new Date();
+    $("todayNum").textContent = now.getDate();
+    $("todayDay").textContent = HARI[now.getDay()];
+    $("todayMonth").textContent = `${BULAN[now.getMonth()]} ${now.getFullYear()}`;
+    const next = everything().find((e) => !e.past);
+    $("next").hidden = !next;
+    if (next) {
+      $("nextTitle").textContent = next.title;
+      $("nextWhen").textContent = `${longDate(next.date)}${next.time ? ` · ${clock(next.time)}` : ""} · ${leftText(next)}`;
+    }
+  }
+
+  function eventRow(ev, kind) {
+    const d = parse(ev.date);
+    const row = el("article", `event${ev.weekly ? " weekly" : ""}${kind === "today" ? " today" : kind === "tomorrow" ? " tomorrow" : ""}${ev.past ? " past" : ""}`);
+    const chip = el("div", "chip");
+    chip.append(el("b", "", d.getDate()), el("span", "", BULAN[d.getMonth()].slice(0, 3).toUpperCase()));
+    const main = el("div", "ev-main");
+    main.append(el("div", "ev-title", ev.title));
+    const when = el("div", "ev-when", longDate(ev.date));
+    when.append(" · ");
+    if (ev.time) when.append(`Jam ${clock(ev.time)}`); else when.append(el("em", "", "Sepanjang hari"));
+    main.append(when);
+    const tags = el("div", "ev-tags");
+    if (ev.weekly) {
+      tags.append(el("span", "", ev.isClass ? "Kuliah mingguan" : "Jadwal mingguan"));
+      if (ev.detail) tags.append(el("span", "", ev.detail));
+    } else {
+      if (ev.yearly) tags.append(el("span", "", "Setiap tahun"));
+      tags.append(el("span", "", REMIND[ev.remind_days] || `diingatkan ${ev.remind_days} hari sebelumnya`));
+    }
+    main.append(tags);
+    const side = el("div", "ev-side");
+    side.append(el("span", "left", leftText(ev)));
+    if (ev.weekly) {                             /* changed in the user's own script, not here */
+      row.append(chip, main, side);
+      return row;
+    }
+    const acts = el("div", "ev-acts");
+    const button = (icon, label, cls, fn) => {
+      const b = el("button", `icon ${cls}`); b.type = "button"; b.innerHTML = ICONS[icon];
+      b.title = label; b.setAttribute("aria-label", `${label}: ${ev.title}`); b.addEventListener("click", fn); return b;
+    };
+    if (state.confirming === ev.id) {            /* two clicks to delete, in place */
+      acts.style.opacity = 1;
+      acts.append(el("span", "left", "Hapus?"), button("yes", "Ya, hapus", "del", () => remove(ev)),
+                  button("no", "Batal", "", () => { state.confirming = ""; renderList(); }));
+    } else {
+      acts.append(button("edit", "Ubah", "", () => startEdit(ev)),
+                  button("del", "Hapus", "del", () => { state.confirming = ev.id; renderList(); }));
+    }
+    side.append(acts);
+    row.append(chip, main, side);
+    return row;
+  }
+
+  function renderList() {
+    const q = state.query.trim().toLowerCase();
+    let items = state.picked ? [...state.events.filter((e) => e.date === state.picked), ...weeklyOn(state.picked)].sort(byWhen) : everything();
+    if (q) items = items.filter((e) => e.title.toLowerCase().includes(q));
+    const upcoming = state.events.filter((e) => !e.past).length;
+    const classes = state.weekly.filter((w) => w.is_class).length;
+    $("count").textContent = [upcoming ? `${upcoming} acara` : "", classes ? `${classes} kuliah per minggu` : ""].filter(Boolean).join(" · ");
+    $("filterNote").hidden = !state.picked;
+    if (state.picked) $("filterText").textContent = longDate(state.picked);
+    const box = $("list");
+    const scroll = box.scrollTop;
+    box.textContent = "";
+    if (!items.length) {
+      const empty = el("div", "empty");
+      empty.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>';
+      if (q) empty.append(el("b", "", `Tidak ada jadwal "${state.query.trim()}"`));
+      else if (state.picked) {
+        empty.append(el("b", "", "Tidak ada jadwal di tanggal ini"), el("span", "", "Isi formulir di samping untuk menambahkannya."));
+      } else {
+        const hint = el("span", "", "Isi formulir di samping, atau ucapkan ");
+        hint.append(el("q", "", "ingatkan rapat besok jam 9"));
+        empty.append(el("b", "", "Belum ada acara"), hint);
+      }
+      box.append(empty);
+      return;
+    }
+    const order = [], groups = {};
+    items.filter((e) => !e.past).concat(items.filter((e) => e.past)).forEach((ev) => {
+      const [key, name] = groupOf(ev);
+      if (!groups[key]) { groups[key] = { name, items: [] }; order.push(key); }
+      groups[key].items.push(ev);
+    });
+    order.forEach((key) => {
+      const section = el("section", `group ${key}`);
+      const title = el("h2", "", groups[key].name);
+      if (groups[key].items.length > 1) title.append(el("i", "", `${groups[key].items.length} acara`));
+      section.append(title);
+      groups[key].items.forEach((ev) => section.append(eventRow(ev, key)));
+      box.append(section);
+    });
+    box.scrollTop = scroll;
+  }
+
+  function renderCalendar() {
+    const month = state.month;
+    $("calTitle").textContent = `${BULAN[month.getMonth()]} ${month.getFullYear()}`;
+    const grid = $("calGrid"); grid.textContent = "";
+    ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"].forEach((d) => grid.append(el("span", "", d)));
+    const start = new Date(month); start.setDate(1 - ((month.getDay() + 6) % 7));
+    const marked = {};
+    state.events.forEach((e) => { (marked[e.date] = marked[e.date] || []).push(e.title); });
+    const today = iso(new Date());
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const key = iso(d);
+      if (i === 35 && d.getMonth() !== month.getMonth()) break;
+      const b = el("button", "day", d.getDate()); b.type = "button";
+      if (d.getMonth() !== month.getMonth()) b.classList.add("other");
+      if (key === today) b.classList.add("today");
+      if (key === state.picked) b.classList.add("picked");
+      const weekly = weeklyOn(key);
+      if (marked[key]) b.classList.add("has");
+      if (weekly.length) b.classList.add("weekly");
+      const names = [...(marked[key] || []), ...weekly.map((w) => `${w.title} ${clock(w.time)}`)];
+      if (names.length) b.title = names.join(", ");
+      b.setAttribute("aria-label", `${longDate(key)}${names.length ? `, ${names.length} jadwal` : ""}`);
+      b.addEventListener("click", () => {
+        state.picked = state.picked === key ? "" : key;
+        if (state.picked && !state.editing) $("fDate").value = key;
+        renderCalendar(); renderList();
+      });
+      grid.append(b);
+    }
+  }
+
+  function renderWeekly() {
+    const box = $("weeklyList"); box.textContent = "";
+    $("weeklyCard").hidden = !state.weekly.length;
+    $("calLegend").hidden = !state.weekly.length;
+    $("weeklyEdit").hidden = !state.weeklyEditable;
+    ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"].forEach((name, i) => {
+      const rows = state.weekly.filter((w) => w.day === i + 1 || w.day === 0);
+      if (!rows.length) return;
+      box.append(el("div", "wk-day", name));
+      rows.forEach((w) => {
+        const row = el("div", "wk-row"), what = el("span", "", w.name);
+        if (w.detail) what.append(el("small", "", w.detail));
+        row.append(el("b", "", clock(w.time)), what);
+        box.append(row);
+      });
+    });
+  }
+
+  function repeatOrDate(a) {
+    const due = new Date(a.due);
+    if (a.repeat) return a.repeat.charAt(0).toUpperCase() + a.repeat.slice(1);
+    const today = iso(new Date()), tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const key = iso(due);
+    if (key === today) return "Hari ini";
+    if (key === iso(tomorrow)) return "Besok";
+    return `${HARI[due.getDay()]}, ${due.getDate()} ${BULAN[due.getMonth()]}`;
+  }
+  function renderAlarms() {
+    const box = $("alarms"); box.textContent = "";
+    const items = state.alarms.filter((a) => a.kind !== "action");
+    $("alarmCount").textContent = items.length || "";
+    if (!items.length) { box.append(el("div", "none", "Belum ada alarm atau pengingat.")); return; }
+    items.forEach((a) => {
+      const due = new Date(a.due);
+      const row = el("div", `alarm ${a.kind}`);
+      row.append(el("div", "clock", `${String(due.getHours()).padStart(2, "0")}.${String(due.getMinutes()).padStart(2, "0")}`));
+      const main = el("div", "a-main");
+      main.append(el("b", "", a.label), el("small", "", repeatOrDate(a)));
+      const del = el("button", "icon del"); del.type = "button"; del.innerHTML = ICONS.del;
+      del.title = "Hapus"; del.setAttribute("aria-label", `Hapus ${a.label}`);
+      del.addEventListener("click", async () => { await api("/api/alarms", { cancel: a.id }); load(); });
+      row.append(main, del);
+      box.append(row);
+    });
+  }
+
+  function startEdit(ev) {
+    state.editing = ev.id;
+    $("formTitle").textContent = "Ubah acara";
+    $("fTitle").value = ev.name; $("fDate").value = ev.date; $("fTime").value = ev.time || "";
+    $("fYearly").checked = ev.yearly;
+    const known = [...$("fRemind").options].some((o) => o.value === String(ev.remind_days));
+    if (!known) $("fRemind").add(new Option(`${ev.remind_days} hari sebelumnya`, String(ev.remind_days)));
+    $("fRemind").value = String(ev.remind_days);
+    $("fCancel").hidden = false; $("fMsg").textContent = "";
+    $("fTitle").focus();
+  }
+  function endEdit() {
+    state.editing = "";
+    $("formTitle").textContent = "Tambah acara";
+    $("form").reset();
+    $("fDate").value = state.picked || iso(new Date());
+    $("fCancel").hidden = true;
+  }
+  function say(id, text, ok) { $(id).textContent = text; $(id).className = `msg ${ok ? "ok" : "err"}`; }
+
+  async function remove(ev) {
+    state.confirming = "";
+    const r = await api("/api/agenda", { op: "delete", id: ev.id });
+    if (state.editing === ev.id) endEdit();
+    say("fMsg", r.ok ? `${ev.title} dihapus.` : r.message, r.ok);
+    load();
+  }
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("fSave").disabled = true;
+    try {
+      const r = await api("/api/agenda", {
+        op: state.editing ? "update" : "add", id: state.editing, title: $("fTitle").value, date: $("fDate").value,
+        time: $("fTime").value, yearly: $("fYearly").checked, remind_days: Number($("fRemind").value) });
+      say("fMsg", r.message.replace(/,\s*Tuan\./, ".").replace(/\s*Saya kabari.*$/, ""), r.ok);
+      if (r.ok) { endEdit(); await load(); }
+    } catch (err) { say("fMsg", "Gagal menyimpan. Sambungan ke Digidaw terputus?", false); }
+    $("fSave").disabled = false;
+  });
+  $("fCancel").addEventListener("click", () => { endEdit(); $("fMsg").textContent = ""; });
+  $("weeklyEdit").addEventListener("click", () => api("/api/agenda", { op: "edit_weekly" }));
+  $("search").addEventListener("input", (e) => { state.query = e.target.value; renderList(); });
+  $("filterClear").addEventListener("click", () => {
+    state.picked = "";
+    if (!state.editing) $("fDate").value = iso(new Date());
+    renderCalendar(); renderList();
+  });
+  $("calPrev").addEventListener("click", () => { state.month.setMonth(state.month.getMonth() - 1); renderCalendar(); });
+  $("calNext").addEventListener("click", () => { state.month.setMonth(state.month.getMonth() + 1); renderCalendar(); });
+
+  ["S", "S", "R", "K", "J", "S", "M"].forEach((letter, i) => {
+    const label = el("label", "", letter);
+    const name = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][i];
+    const input = el("input"); input.type = "checkbox"; input.value = i; input.title = name; input.setAttribute("aria-label", name);
+    label.title = name; label.append(input); $("aDays").append(label);
+  });
+  $("alarmForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const days = [...$("aDays").querySelectorAll("input:checked")].map((i) => Number(i.value));
+    try {
+      const r = await api("/api/alarms", { time: $("aTime").value, label: $("aLabel").value, days });
+      say("aMsg", r.message.replace(/,\s*Tuan\./, "."), r.ok);
+      if (r.ok) { $("alarmForm").reset(); await load(); }
+    } catch (err) { say("aMsg", "Gagal menyimpan. Sambungan ke Digidaw terputus?", false); }
+  });
+
+  async function load() {
+    try {
+      const data = await api("/api/agenda");
+      state.events = data.events; state.alarms = data.alarms; state.weekly = data.weekly || []; state.weeklyEditable = !!data.weekly_editable;
+      if (!state.events.some((e) => e.id === state.confirming)) state.confirming = "";
+      renderHeader(); renderList(); renderCalendar(); renderAlarms(); renderWeekly();
+      $("offline").hidden = true;
+    } catch (e) { $("offline").hidden = false; }
+  }
+
+  function connect() {
+    const source = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
+    source.onmessage = (m) => {
+      let ev; try { ev = JSON.parse(m.data); } catch (e) { return; }
+      if (ev.type === "agenda" || ev.type === "timers") load();      /* changed by voice or from the phone too */
+    };
+    source.onerror = () => { $("offline").hidden = false; };
+    source.onopen = () => { load(); };
+  }
+
+  const now = new Date();
+  state.month = new Date(now.getFullYear(), now.getMonth(), 1);
+  $("fDate").value = iso(now);
+  renderHeader(); renderCalendar(); renderList(); renderAlarms();
+  connect();
+  setInterval(() => { renderHeader(); if (!state.confirming) renderList(); }, 30000);
+})();
+</script>
+</body>
+</html>

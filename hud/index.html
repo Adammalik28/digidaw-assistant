@@ -4,187 +4,252 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DIGIDAW HUD</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%23041018' stroke='%233fd8ff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='17' fill='none' stroke='%233fd8ff' stroke-width='6' stroke-dasharray='6 4'/%3E%3Ccircle cx='32' cy='32' r='8' fill='%23e8fbff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%23070b12' stroke='%234ad4ff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='11' fill='%234ad4ff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #02070d;
-    --panel: rgba(6, 26, 42, 0.55);
-    --panel-strong: rgba(8, 36, 58, 0.85);
-    --line: rgba(64, 214, 255, 0.20);
-    --line-strong: rgba(64, 214, 255, 0.55);
-    --cyan: #3fd8ff;
-    --cyan-soft: #8ceaff;
-    --amber: #ffb547;
-    --red: #ff5d5d;
-    --green: #4dffb5;
-    --text: #d6f5ff;
-    --muted: #6f9fb3;
-    --accent: var(--cyan);
-    --font-display: 'Orbitron', 'Segoe UI', sans-serif;
-    --font-body: 'Rajdhani', 'Segoe UI', sans-serif;
-    --font-mono: 'JetBrains Mono', Consolas, monospace;
+    color-scheme: dark;
+    --bg: #070b12; --surface: #0e151f; --surface-2: #151e2b; --surface-3: #1d2839;
+    --line: rgba(166, 205, 238, 0.10); --line-2: rgba(166, 205, 238, 0.22);
+    --text: #ecf4fb; --text-2: #a3b5c6; --text-3: #7a8c9e;
+    --accent: #4ad4ff; --accent-ink: #032330; --accent-soft: rgba(74, 212, 255, 0.13);
+    --warm: #ffb44f; --good: #52e5a6; --bad: #ff6f6f;
+    --state: var(--accent);
+    --sans: 'Plus Jakarta Sans', system-ui, 'Segoe UI', sans-serif;
+    --tech: 'Chakra Petch', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    /* the names the Control Panel, alarm and project parts use */
+    --panel: var(--surface); --panel-strong: var(--surface-2); --line-strong: var(--line-2); --cyan: var(--accent); --cyan-soft: #a5e8ff;
+    --amber: var(--warm); --red: var(--bad); --green: var(--good); --muted: var(--text-3);
+    --font-display: var(--tech); --font-body: var(--sans); --font-mono: var(--mono);
   }
-  body.state-thinking { --accent: var(--amber); }
-  body.state-paused { --accent: #7d8b99; }
-  body.state-paused .reactor-wrap, body.state-paused #reactor { filter: grayscale(0.85) brightness(0.7); }
-  .top-btn.on { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 14px rgba(255, 181, 71, 0.35); }
-
+  body.state-thinking { --state: var(--warm); }
+  body.state-listening { --state: var(--good); }
+  body.state-paused { --state: #7d8b99; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; }
-  body {
-    margin: 0;
-    background-color: var(--bg);
-    background-image:
-      radial-gradient(ellipse at 50% 42%, rgba(20, 120, 170, 0.22), transparent 62%),
-      linear-gradient(rgba(63, 216, 255, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(63, 216, 255, 0.035) 1px, transparent 1px);
-    background-size: 100% 100%, 42px 42px, 42px 42px;
-    color: var(--text);
-    font-family: var(--font-body);
-    font-size: 15px;
-    overflow: hidden;
-  }
-  body::after {
-    content: "";
-    position: fixed; inset: 0;
-    pointer-events: none;
-    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
-    opacity: 0.35;
-  }
+  body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font: 500 14.5px/1.45 var(--sans); }
+  body::before { content: ""; position: fixed; left: 50%; top: 40%; width: 70vmax; height: 70vmax; transform: translate(-50%, -50%); pointer-events: none; transition: background 0.6s;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--state) 10%, transparent), transparent); }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .app { position: relative; z-index: 1; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; padding: 10px 14px 14px; gap: 10px; }
 
-  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; padding: 14px 18px 16px; gap: 12px; }
+  /* top bar */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 46px; }
+  .brand { display: flex; align-items: center; gap: 11px; flex: none; }
+  .logo { position: relative; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--state); display: grid; place-items: center; transition: border-color 0.3s; }
+  .logo::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--state); box-shadow: 0 0 12px var(--state); transition: background 0.3s; }
+  .brand-name { font: 700 19px/1 var(--tech); letter-spacing: 0.1em; }
+  .brand-sub { font-size: 11.5px; color: var(--text-3); margin-top: 3px; }
+  .status-strip { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; min-width: 0; font-size: 12px; color: var(--text-3); }
+  .status-strip > span, .ai-ind { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); color: var(--text-3); white-space: nowrap; font-size: 12px; }
+  .status-strip b { color: var(--text); font-weight: 600; }
+  button.ai-ind { cursor: pointer; } button.ai-ind:hover { border-color: var(--line-2); }
+  .ai-ind.bad b { color: var(--bad); } .ai-ind.warn b { color: var(--warm); }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-right: 1px; }
+  .dot.on { background: var(--good); } .dot.warn { background: var(--warm); } .dot.check { background: var(--accent); animation: blink 1s infinite; }
+  .status-strip .badge { display: none; color: var(--warm); border-color: color-mix(in srgb, var(--warm) 45%, transparent); font-weight: 600; }
+  .status-strip .badge.show { display: inline-flex; animation: blink 1.4s infinite; }
+  .top-right { display: flex; align-items: center; gap: 5px; flex: none; }
+  .top-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: none; border: 1px solid transparent; color: var(--text-2); cursor: pointer; transition: background 0.15s; }
+  .top-btn:hover { background: var(--surface-2); color: var(--text); }
+  .top-btn svg { width: 19px; height: 19px; }
+  .top-btn.on { color: var(--warm); background: color-mix(in srgb, var(--warm) 14%, transparent); }
+  .top-btn.danger:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+  .clock { text-align: right; margin-left: 10px; }
+  .clock #clock { font: 600 23px/1 var(--tech); font-variant-numeric: tabular-nums; }
+  .clock #date { font-size: 11.5px; color: var(--text-2); margin-top: 3px; white-space: nowrap; }
 
-  /* ── top bar ── */
-  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
-  .brand { display: flex; align-items: center; gap: 14px; }
-  .logo { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--cyan); box-shadow: 0 0 14px var(--cyan), inset 0 0 12px var(--cyan); position: relative; }
-  .logo::after { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: radial-gradient(circle, #fff 0 25%, var(--cyan) 60%, transparent 72%); }
-  .brand-name { font-family: var(--font-display); font-weight: 900; font-size: 22px; letter-spacing: 0.32em; color: var(--cyan-soft); text-shadow: 0 0 12px rgba(63, 216, 255, 0.6); }
-  .brand-sub { font-size: 10.5px; letter-spacing: 0.34em; color: var(--muted); }
-  .status-strip { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.08em; flex-wrap: wrap; justify-content: center; }
-  .status-strip b { color: var(--cyan-soft); font-weight: 500; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); display: inline-block; margin-right: 6px; box-shadow: 0 0 8px currentColor; }
-  .dot.on { background: var(--green); }
-  .dot.warn { background: var(--amber); }
-  .dot.check { background: var(--cyan); animation: blink 1s infinite; }
-  .ai-ind { background: none; border: 0; padding: 2px 4px; margin: -2px -4px; font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
-  .ai-ind:hover b, .ai-ind:focus-visible b { color: #fff; }
-  .ai-ind:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-  .ai-ind.bad b { color: #ff9b9b; }
-  .ai-ind.warn b { color: var(--amber); }
-  .badge { border: 1px solid var(--amber); color: var(--amber); padding: 1px 8px; font-size: 10.5px; letter-spacing: 0.14em; display: none; }
-  .badge.show { display: inline-block; animation: blink 1.2s infinite; }
-  .clock { text-align: right; }
-  .clock #clock { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: 0.1em; color: var(--cyan-soft); }
-  .clock #date { font-size: 12px; letter-spacing: 0.24em; color: var(--muted); text-transform: uppercase; }
-
-  /* ── layout ── */
-  .main { display: grid; grid-template-columns: 300px minmax(0, 1fr) 370px; gap: 16px; min-height: 0; }
+  /* the three columns */
+  .main { display: grid; grid-template-columns: minmax(280px, 330px) minmax(0, 1fr) minmax(310px, 390px); gap: 14px; min-height: 0; }
   .main > * { min-width: 0; }
-  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  .panel { flex: none; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px 13px; }
+  .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 22px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+  .tag { font: 500 11px var(--tech); letter-spacing: 0.05em; color: var(--text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link { background: none; border: 0; padding: 2px 0; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .link:hover { text-decoration: underline; }
+  .empty { color: var(--text-3); font-size: 13.5px; }
+  .sub-title { font-size: 12px; font-weight: 600; color: var(--text-3); margin: 10px 0 2px; display: flex; justify-content: space-between; align-items: center; }
+  .tabs { display: flex; gap: 3px; padding: 2px; background: var(--surface-2); border-radius: 10px; }
+  .tab { background: none; border: 0; border-radius: 8px; padding: 3px 10px; color: var(--text-2); font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .tab.on { background: var(--surface-3); color: var(--text); }
+  .tab .n { margin-left: 5px; font: 500 11px var(--tech); color: var(--text-3); } .tab .n.live { color: var(--warm); }
+  .ws-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 9px; }
 
-  .panel { position: relative; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px 14px; }
-  .panel::before, .panel::after { content: ""; position: absolute; width: 14px; height: 14px; border: 0 solid var(--cyan); }
-  .panel::before { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
-  .panel::after { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
-  .panel-title { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.28em; color: var(--cyan); margin-bottom: 10px; text-transform: uppercase; }
-  .panel-title .tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+  /* today */
+  .wx { display: flex; align-items: center; gap: 12px; }
+  .weather-temp { font: 600 34px/1 var(--tech); }
+  .weather-cond { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wx-sub { font-size: 12px; line-height: 1.35; color: var(--text-2); }
+  .wx-sub b { color: var(--text); font-weight: 600; }
+  .timer-row, .agenda-row { display: grid; align-items: center; gap: 0 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .timer-row:first-child, .agenda-row:first-child { border-top: 0; }
+  .timer-row { grid-template-columns: 20px minmax(0, 1fr) auto 22px; }
+  .timer-row svg { width: 18px; height: 18px; color: var(--warm); }
+  .timer-row b { font: 600 14px var(--tech); font-variant-numeric: tabular-nums; }
+  .t-label { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-sub { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .x { background: none; border: 0; color: var(--text-3); cursor: pointer; font-size: 14px; line-height: 1; padding: 3px; border-radius: 6px; }
+  .x:hover, .x:focus-visible { color: var(--bad); background: var(--surface-3); }
+  #agendaList { max-height: 196px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  .agenda-row { grid-template-columns: 34px minmax(0, 1fr) auto 22px; }
+  .agenda-date { text-align: center; line-height: 1; }
+  .agenda-date b { display: block; font: 700 17px var(--tech); }
+  .agenda-date span { font-size: 10px; color: var(--text-3); }
+  .agenda-row .when { font: 500 11px var(--tech); letter-spacing: 0.04em; color: var(--text-2); }
+  .agenda-row.today .agenda-date b, .agenda-row.today .when { color: var(--warm); }
 
-  /* ── gauges ── */
-  .gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
-  .perf { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(90, 215, 255, 0.18); font-family: var(--font-mono);
-    font-size: 11.5px; letter-spacing: 0.08em; color: var(--muted); text-align: center; }
-  .perf b { color: var(--accent); font-weight: 600; }
-  .gauge { position: relative; text-align: center; }
-  .gauge svg { width: 100%; max-width: 112px; transform: rotate(-90deg); display: block; margin: 0 auto; }
-  .gauge .track { fill: none; stroke: rgba(63, 216, 255, 0.12); stroke-width: 7; }
-  .gauge .bar { fill: none; stroke: var(--cyan); stroke-width: 7; stroke-linecap: butt; transition: stroke-dashoffset 0.8s ease, stroke 0.4s; filter: drop-shadow(0 0 4px rgba(63, 216, 255, 0.7)); }
-  .gauge .ticks { fill: none; stroke: rgba(63, 216, 255, 0.35); stroke-width: 2; stroke-dasharray: 1 5.6; }
-  .gauge.warn .bar { stroke: var(--amber); filter: drop-shadow(0 0 4px rgba(255, 181, 71, 0.7)); }
-  .gauge.crit .bar { stroke: var(--red); filter: drop-shadow(0 0 4px rgba(255, 93, 93, 0.8)); }
-  .gauge-val { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-78%); font-family: var(--font-display); font-weight: 700; font-size: 19px; color: var(--text); }
-  .gauge-val small { font-size: 10px; color: var(--muted); margin-left: 1px; }
-  .gauge-label { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.22em; color: var(--muted); margin-top: 4px; }
-  .gauge-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--cyan-soft); opacity: 0.8; }
+  /* system */
+  .gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .gauge { position: relative; text-align: center; min-width: 0; }
+  .gauge svg { width: 100%; max-width: 68px; display: block; margin: 0 auto; transform: rotate(-90deg); }
+  .gauge .track { fill: none; stroke: var(--surface-3); stroke-width: 8; }
+  .gauge .bar { fill: none; stroke: var(--accent); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.8s ease, stroke 0.3s; }
+  .gauge.warn .bar { stroke: var(--warm); } .gauge.crit .bar { stroke: var(--bad); }
+  .gauge-val { position: absolute; left: 0; right: 0; top: 0; aspect-ratio: 1; max-width: 68px; margin: 0 auto; display: grid; place-content: center; grid-auto-flow: column; align-items: baseline; font: 600 15px var(--tech); }
+  .gauge-val small { font-size: 9.5px; color: var(--text-3); }
+  .gauge-label { font-size: 11px; font-weight: 600; color: var(--text-2); margin-top: 3px; }
+  .gauge-sub { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .net { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; align-items: center; margin-top: 9px; font-size: 12px; color: var(--text-3); }
+  .net b { color: var(--text); font: 500 12.5px var(--tech); font-variant-numeric: tabular-nums; }
+  #netChart { grid-column: 2; grid-row: 1 / span 2; width: 100%; height: 34px; display: block; }
+  .perf { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); font: 500 11px var(--tech); letter-spacing: 0.03em; color: var(--text-3); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .perf b { color: var(--text); font-weight: 600; }
+  .sec-top { display: flex; align-items: center; gap: 13px; }
+  .sec-ring { width: 58px; height: 58px; flex: none; position: relative; }
+  .sec-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .sec-ring .track { fill: none; stroke: var(--surface-3); stroke-width: 6; }
+  .sec-ring .bar { fill: none; stroke: var(--good); stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.8s ease; }
+  .sec-ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 600 17px var(--tech); }
+  .sec-lines { font-size: 12px; color: var(--text-3); line-height: 1.6; min-width: 0; }
+  .sec-lines span { color: var(--text); }
+  .mini-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .loc-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); padding: 6px 2px; color: var(--text); cursor: pointer; }
+  .loc-row:first-child { border-top: 0; }
+  .loc-row:hover .loc-name { color: var(--accent); }
+  .loc-row svg { width: 18px; height: 18px; color: var(--text-2); grid-row: span 2; }
+  .loc-name { font-size: 13px; font-weight: 600; }
+  .loc-count { font-size: 11.5px; color: var(--text-3); grid-row: span 2; }
+  .loc-path { font: 400 11px var(--mono); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-family: var(--font-mono); font-size: 12px; }
-  .kv span:nth-child(odd) { color: var(--muted); }
-  .kv span:nth-child(even) { text-align: right; color: var(--text); }
-  #netChart { width: 100%; height: 54px; display: block; margin-top: 8px; }
+  /* lamp */
+  .lamp-row { display: flex; align-items: center; gap: 11px; }
+  .lamp-power { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); border: 0; color: var(--text-2); cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
+  .lamp-power svg { width: 19px; height: 19px; }
+  .lamp-power[aria-pressed="true"] { color: #231a06; background: var(--lamp-solid, #ffd590); box-shadow: 0 0 16px var(--lamp, rgba(255, 213, 144, 0.5)); }
+  .lamp-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); margin: 0; }
+  .lamp-pct { flex: none; width: 38px; text-align: right; font: 500 13px var(--tech); }
+  .lamp-dots { display: flex; justify-content: space-between; gap: 3px; margin-top: 10px; }
+  .lamp-dot { flex: none; width: 21px; height: 21px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.22); background: var(--c); cursor: pointer; padding: 0; transition: transform 0.12s; }
+  .lamp-dot:hover { transform: scale(1.15); }
+  #lampPanel.offline .lamp-row, #lampPanel.offline .lamp-dots, #lampPanel.offline .mini-actions { opacity: 0.45; }
 
-  .weather-main { display: flex; align-items: baseline; gap: 12px; }
-  .weather-temp { font-family: var(--font-display); font-size: 34px; font-weight: 700; color: var(--cyan-soft); text-shadow: 0 0 14px rgba(63, 216, 255, 0.4); }
-  .weather-cond { font-size: 16px; font-weight: 600; text-transform: capitalize; }
-  .weather-place { font-size: 12px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
-
-  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
-  .quick { justify-content: center; margin-top: 10px; display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto); gap: 8px; }
-  .quick .chip { width: 100%; text-align: center; }
-  @media (max-width: 1500px) { .quick { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
-  .chip { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.18em; color: var(--cyan-soft); background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); padding: 7px 10px; cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
-  .chip:hover, .chip:focus-visible { background: rgba(63, 216, 255, 0.18); box-shadow: 0 0 12px rgba(63, 216, 255, 0.35); outline: none; }
-
-  /* ── reactor ── */
+  /* the reactor and what's said */
   .center { display: flex; flex-direction: column; min-height: 0; }
   .reactor-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
-  #reactor { width: min(100%, 52vh, 460px); aspect-ratio: 1; display: block; }
-  .state-label { font-family: var(--font-display); font-weight: 700; font-size: 17px; letter-spacing: 0.5em; color: var(--accent); text-shadow: 0 0 14px var(--accent); margin-top: 6px; padding-left: 0.5em; }
-  .state-hint { font-size: 13px; letter-spacing: 0.12em; color: var(--muted); margin-top: 4px; text-align: center; }
-  .transcript { width: 100%; max-width: 760px; margin: 14px auto 0; text-align: center; min-height: 86px; }
-  .you-line { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .digidaw-line { font-size: 21px; font-weight: 600; line-height: 1.35; color: var(--text); margin-top: 6px; text-shadow: 0 0 10px rgba(63, 216, 255, 0.25); }
-  .digidaw-line .caret { display: inline-block; width: 9px; height: 1em; background: var(--cyan); margin-left: 3px; vertical-align: -2px; animation: blink 0.9s steps(1) infinite; }
-
-  .command-bar { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
-  .command-bar input { flex: 1; min-width: 0; background: var(--panel-strong); border: 1px solid var(--line-strong); color: var(--text); font-family: var(--font-body); font-size: 16px; font-weight: 500; padding: 12px 16px; outline: none; letter-spacing: 0.02em; }
-  .command-bar input:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 18px rgba(63, 216, 255, 0.25); }
-  .command-bar input::placeholder { color: var(--muted); }
-  .icon-btn { flex: none; width: 46px; height: 46px; display: grid; place-items: center; background: rgba(63, 216, 255, 0.08); border: 1px solid var(--line-strong); color: var(--cyan-soft); cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
-  .icon-btn:hover, .icon-btn:focus-visible { background: rgba(63, 216, 255, 0.2); box-shadow: 0 0 14px rgba(63, 216, 255, 0.4); outline: none; }
-  .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+  .reactor-stage { position: relative; flex: 0 1 auto; height: min(48vh, 470px); aspect-ratio: 1; max-width: 100%; display: grid; place-items: center; }
+  .reactor-stage #reactor { width: 86%; height: 86%; display: block; }
+  .hud-ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; color: var(--state); transition: color 0.4s; will-change: transform; }
+  .hud-ring text { font: 500 9px var(--tech); letter-spacing: 0.34em; fill: currentColor; opacity: 0.5; }
+  .hud-ring .thin { fill: none; stroke: currentColor; stroke-width: 0.6; opacity: 0.22; }
+  .hud-ring .dash { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-dasharray: 1.5 8; opacity: 0.4; }
+  /* (no drop-shadow on a spinning layer: Chrome re-rendered the shadow every frame — about a CPU core with the rest) */
+  .hud-ring .arcs { fill: none; stroke: currentColor; stroke-width: 2; opacity: 0.8; stroke-linecap: round; }
+  @keyframes spinCW { to { transform: rotate(360deg); } }
+  @keyframes spinCCW { to { transform: rotate(-360deg); } }
+  .hud-ring[data-spin="40"] { animation: spinCW 40s linear infinite; transform-origin: center; }
+  .hud-ring[data-spin="-26"] { animation: spinCCW 26s linear infinite; transform-origin: center; }
+  .hud-ring[data-spin="9"] { animation: spinCW 9s linear infinite; transform-origin: center; }
+  body.state-thinking .hud-ring[data-spin="9"] { animation-duration: 2.2s; }
+  body.state-listening .hud-ring[data-spin="9"] { animation-duration: 4s; }
+  /* energy: the HUD unseen, or idle without focus for a while — the rings stand still (html.calm, set by updateCalm) */
+  html.calm .hud-ring, html.calm .eq i, html.calm .dot.check, html.calm .digidaw-line .caret, html.calm .badge.show,
+  html.calm .build-bar div { animation-play-state: paused !important; }
+  html.calm .gauge .bar, html.calm .sec-ring .bar { transition: none; }
+  body.state-paused #reactor { filter: grayscale(0.85) brightness(0.72); }
+  .state-label { font: 700 16px var(--tech); letter-spacing: 0.42em; padding-left: 0.42em; color: var(--state); margin-top: 8px; transition: color 0.3s; }
+  .listen-bar { flex: none; width: 170px; height: 3px; margin: 7px auto 0; border-radius: 3px; background: var(--surface-3); overflow: hidden; visibility: hidden; }
+  .listen-bar.on { visibility: visible; }
+  .listen-bar div { height: 100%; width: 100%; background: var(--state); transform-origin: left; }
+  .state-hint { font-size: 13px; color: var(--text-3); margin-top: 4px; text-align: center; }
+  .transcript { width: 100%; max-width: 760px; margin: 12px auto 0; text-align: center; min-height: 66px; max-height: 24vh; overflow-y: auto; scrollbar-width: none; }
+  .you-line { font-size: 13.5px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .digidaw-line { font-size: 19px; font-weight: 500; line-height: 1.42; margin-top: 3px; text-wrap: balance; }
+  .digidaw-line .caret { display: inline-block; width: 8px; height: 1em; background: var(--accent); margin-left: 3px; vertical-align: -2px; animation: blink 0.9s steps(1) infinite; }
+  .command-bar { display: flex; gap: 8px; align-items: center; width: 100%; max-width: 820px; margin: 12px auto 0; padding: 5px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 18px; }
+  .command-bar:focus-within { border-color: var(--accent); }
+  .command-bar input { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: 500 15.5px var(--sans); padding: 8px 6px; outline: none; }
+  .command-bar input::placeholder { color: var(--text-3); }
+  .icon-btn { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: var(--surface-2); border: 0; color: var(--text); cursor: pointer; transition: background 0.15s; }
+  .icon-btn:hover { background: var(--surface-3); }
+  .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .icon-btn svg { width: 20px; height: 20px; }
-  .icon-btn.live { background: rgba(63, 216, 255, 0.28); box-shadow: 0 0 18px var(--cyan); animation: pulse 1.1s infinite; }
-  #stopBtn { display: none; border-color: var(--amber); color: var(--amber); }
+  .icon-btn.live { background: var(--good); color: #05261a; }
+  .icon-btn.send { background: var(--accent); color: var(--accent-ink); }
+  #stopBtn { display: none; color: var(--warm); }
   body.state-speaking #stopBtn { display: grid; }
+  .quick-area { display: grid; gap: 6px; width: 100%; max-width: 980px; margin: 10px auto 0; }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .chips-mine { display: contents; }
+  .chips-mine:empty { display: none; }
+  .chip { height: 29px; padding: 0 11px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); color: var(--text-2); font: 500 11px var(--tech); letter-spacing: 0.06em; white-space: nowrap; cursor: pointer; transition: background 0.12s, color 0.12s; }
+  .chip:hover, .chip:focus-visible { background: var(--surface-3); color: var(--text); }
+  .chip.accent { color: var(--text); border-color: var(--line-2); }
+  .chip.mine { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  #moreChips { padding-top: 2px; }
 
-  /* ── comms log ── */
-  .log-panel { flex: 1; min-height: 230px; display: flex; flex-direction: column; }
+  /* conversation */
+  .log-panel { flex: 1 1 auto; min-height: 260px; display: flex; flex-direction: column; }
+  #log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  .msg { margin-bottom: 9px; animation: fadein 0.25s ease; }
+  .msg-head { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+  .msg-body { font-size: 14px; line-height: 1.42; margin-top: 1px; overflow-wrap: anywhere; }
+  .msg.user .msg-head { color: var(--accent); } .msg.user .msg-body { color: #cdeefb; }
+  .msg.alert .msg-head { color: var(--warm); } .msg.alert .msg-body { color: #ffe6c4; }
+  .msg.tool { margin: -5px 0 8px; font: 400 10.5px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brain-tag { padding: 0 5px; border-radius: 4px; font: 600 9.5px var(--tech); letter-spacing: 0.05em; background: var(--surface-3); }
+  .brain-tag.local { color: var(--good); } .brain-tag.gemini { color: #c3b1ff; } .brain-tag.direct { color: var(--text-3); }
+  .msg.heard { font-size: 11.5px; color: var(--text-3); margin: -2px 0 8px; }
+  .msg.heard .said { font-style: italic; }
+  .alias-btn { font-size: 11px; color: var(--accent); background: var(--surface-2); border: 0; border-radius: 6px; padding: 2px 7px; margin: 4px 4px 0 0; cursor: pointer; }
+  .alias-btn:disabled { color: var(--good); cursor: default; }
 
-  /* ── workspace panels ── */
-  .loc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; width: 100%; text-align: left;
-             background: none; border: 0; border-top: 1px dashed var(--line); padding: 8px 2px; color: var(--text); cursor: pointer; font: inherit; }
-  .loc-row:first-child { border-top: 0; padding-top: 2px; }
-  .loc-row:hover .loc-name, .loc-row:focus-visible .loc-name { color: #fff; }
-  .loc-row:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-  .loc-row svg { width: 18px; height: 18px; color: var(--cyan); grid-row: span 2; }
-  .loc-name { font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.18em; color: var(--cyan-soft); text-transform: uppercase; }
-  .loc-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); grid-row: span 2; align-self: center; }
-  .loc-path { font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-  .sec-top { display: flex; align-items: center; gap: 14px; }
-  .sec-ring { width: 56px; height: 56px; flex: none; position: relative; }
-  .sec-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-  .sec-ring .track { fill: none; stroke: rgba(63, 216, 255, 0.12); stroke-width: 6; }
-  .sec-ring .bar { fill: none; stroke: var(--green); stroke-width: 6; transition: stroke-dashoffset 0.8s ease; }
-  .sec-ring b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-size: 17px; }
-  .sec-lines { font-family: var(--font-mono); font-size: 11px; color: var(--muted); line-height: 1.55; min-width: 0; }
-  .sec-lines span { color: var(--text); }
-  .mini-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .mini-actions .btn { padding: 5px 9px; font-size: 9.5px; letter-spacing: 0.12em; }
-  /* lamp (smarthome.py) */
-  .lamp-row { display: flex; align-items: center; gap: 10px; }
-  .lamp-power { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); color: var(--muted); cursor: pointer; transition: background 0.2s, box-shadow 0.2s, color 0.2s; }
-  .lamp-power svg { width: 18px; height: 18px; }
-  .lamp-power[aria-pressed="true"] { color: #fff; background: var(--lamp, rgba(255, 214, 140, 0.35)); box-shadow: 0 0 16px var(--lamp, rgba(255, 214, 140, 0.6)); border-color: transparent; }
-  .lamp-power:focus-visible, .lamp-dot:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-  .lamp-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--cyan); }
-  .lamp-pct { flex: none; width: 38px; text-align: right; font-family: var(--font-mono); font-size: 12px; color: var(--cyan-soft); }
-  .lamp-dots { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
-  .lamp-dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); background: var(--c); cursor: pointer; box-shadow: 0 0 6px var(--c); padding: 0; }
-  .lamp-dot:hover { transform: scale(1.12); }
-  #lampPanel.offline .lamp-row, #lampPanel.offline .lamp-dots, #lampPanel.offline .mini-actions { opacity: 0.45; }
+  /* now playing */
+  .np-title { font-size: 14.5px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .np-sub { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 7px; font: 500 11px var(--tech); color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .np-progress { height: 4px; border-radius: 4px; background: var(--surface-3); position: relative; overflow: hidden; }
+  .np-progress div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); border-radius: 4px; transition: width 0.9s linear; }
+  .np-controls { display: flex; justify-content: center; gap: 8px; margin-top: 7px; }
+  .np-controls .icon-btn { width: 38px; height: 38px; border-radius: 50%; background: none; }
+  .np-controls .icon-btn:hover { background: var(--surface-3); }
+  .np-controls #npToggle { background: var(--text); color: #08121c; }
+  .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 11px; margin-right: 6px; vertical-align: -1px; }
+  .eq i { width: 3px; height: 11px; background: var(--good); transform-origin: bottom; animation: eqAnim 0.85s infinite ease-in-out; }
+  .eq i:nth-child(2) { animation-delay: -0.28s; } .eq i:nth-child(3) { animation-delay: -0.56s; }
+  .eq.off i { animation: none; height: 3px; background: var(--text-3); transform: none; }
+  @keyframes eqAnim { 0%, 100% { transform: scaleY(0.2); } 50% { transform: scaleY(1); } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+  /* the parts that kept their shape: project, generate, alarm screen, sounds, routines, Control Panel */
+  .rt-list { display: grid; gap: 6px; margin: 4px 0 14px; }
+  .rt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; background: var(--panel-strong); border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; }
+  .rt-row.mine { border-left: 3px solid var(--amber); }
+  .rt-name { font-size: 15px; font-weight: 700; text-transform: capitalize; }
+  .rt-steps { font-size: 13.5px; color: var(--muted); line-height: 1.3; }
+  .rt-form { display: grid; gap: 8px; margin-bottom: 18px; }
+  .rt-form input, .rt-form textarea { width: 100%; background: var(--panel-strong); border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text); font-family: var(--font-body); font-size: 15px; padding: 8px 10px; outline: none; resize: vertical; }
+  .rt-form input:focus, .rt-form textarea:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan); }
+  .rt-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; }
+  .rt-sub { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+  .rt-hint { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+  .rt-hint b { color: var(--cyan-soft); font-weight: 600; }
   .proj-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; padding: 7px 0; border-top: 1px dashed var(--line); }
   .proj-row:first-child { border-top: 0; }
   .proj-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -202,134 +267,52 @@
   .gal-item:hover, .gal-item:focus-visible { border-color: var(--cyan); box-shadow: 0 0 10px rgba(63, 216, 255, 0.35); outline: none; }
   .gal-file { display: grid; place-items: center; height: 100%; font-family: var(--font-display); font-size: 11px; letter-spacing: 0.1em; }
   .gal-file small { display: block; font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0; margin-top: 3px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tabs { display: flex; gap: 4px; }
-  .tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-family: var(--font-display);
-         font-size: 10.5px; letter-spacing: 0.24em; padding: 0 2px 5px; cursor: pointer; text-transform: uppercase; }
-  .tab + .tab { margin-left: 14px; }
-  .tab.on { color: var(--cyan); border-bottom-color: var(--cyan); }
-  .tab:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-  .tab .n { font-family: var(--font-mono); letter-spacing: 0; margin-left: 5px; color: var(--muted); }
-  .tab .n.live { color: var(--amber); }
-  .ws-title { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
-  .ws-title .tag { font-family: var(--font-mono); font-size: 10px; color: var(--muted); padding-bottom: 6px; }
-  #netChart { height: 36px; }
-  .chip.accent { border-color: var(--cyan); color: #fff; background: rgba(63, 216, 255, 0.14); }
-  #log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-  .msg { margin-bottom: 10px; animation: fadein 0.35s ease; }
-  .msg-head { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
-  .msg-body { font-size: 14.5px; line-height: 1.35; margin-top: 2px; word-wrap: break-word; }
-  .msg.user .msg-head { color: var(--amber); }
-  .msg.user .msg-body { color: #ffe3b8; }
-  .msg.digidaw .msg-head { color: var(--cyan); }
-  .msg.tool { margin: -4px 0 8px; font-family: var(--font-mono); font-size: 10.5px; color: var(--green); opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .msg.tool:hover { opacity: 0.9; }
-  .brain-tag { margin-left: 8px; padding: 0 6px; border: 1px solid currentColor; border-radius: 3px; font-size: 9px; letter-spacing: 0.12em; vertical-align: 1px; opacity: 0.85; }
-  .brain-tag.local { color: var(--green); }
-  .brain-tag.gemini { color: #b9a4ff; }
-  .brain-tag.direct { color: var(--muted); }
-  .msg.alert .msg-head { color: var(--red); }
-  .msg.alert .msg-body { color: #ffd0d0; }
-  .empty { color: var(--muted); font-size: 13px; letter-spacing: 0.06em; }
-
-  /* ── now playing ── */
-  .np-title { font-size: 16px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .np-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .np-progress { height: 3px; background: rgba(63, 216, 255, 0.15); margin: 10px 0 4px; position: relative; overflow: hidden; }
-  .np-progress div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transition: width 0.9s linear; }
-  .np-times { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
-  .np-controls { display: flex; justify-content: center; gap: 12px; margin-top: 8px; }
-  .np-controls .icon-btn { width: 40px; height: 40px; }
-  .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; margin-right: 6px; vertical-align: -1px; }
-  .eq i { width: 3px; height: 12px; background: var(--green); transform-origin: bottom; animation: eqAnim 0.85s infinite ease-in-out; }
-  .eq i:nth-child(2) { animation-delay: -0.28s; }
-  .eq i:nth-child(3) { animation-delay: -0.56s; }
-  .eq.off i { animation: none; height: 3px; background: var(--muted); transform: none; }
-  @keyframes eqAnim {
-    0%, 100% { transform: scaleY(0.2); }
-    50% { transform: scaleY(1); }
-  }
-
-  .timer-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 22px; gap: 0 10px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
-  .timer-row:last-child { border-bottom: 0; }
-  .agenda-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 22px; gap: 0 12px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--line); }
-  .agenda-row:last-child { border-bottom: 0; }
-  .agenda-date { text-align: center; border: 1px solid var(--line-strong); border-radius: 4px; padding: 2px 0 3px; line-height: 1; }
-  .agenda-date b { display: block; font-family: var(--font-display); font-size: 17px; color: var(--cyan-soft); }
-  .agenda-date span { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: var(--muted); }
-  .agenda-row.today .agenda-date { border-color: var(--amber); box-shadow: 0 0 12px rgba(255, 181, 71, 0.3); }
-  .agenda-row.today .agenda-date b, .agenda-row.today .when { color: var(--amber); }
-  .agenda-row .t-label { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .agenda-row .t-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
-  .agenda-row .when { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--cyan-soft); }
-  .agenda-row .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; }
-  .agenda-row .x:hover, .agenda-row .x:focus-visible { color: var(--red); outline: none; }
-  .timer-row svg { width: 18px; height: 18px; color: var(--cyan); }
-  .timer-row .t-label { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .timer-row .t-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
-  .timer-row b { font-family: var(--font-mono); font-weight: 500; color: var(--cyan-soft); font-size: 14px; }
-  .timer-row .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; }
-  .timer-row .x:hover, .timer-row .x:focus-visible { color: var(--red); outline: none; }
   .alarm-banner[hidden] { display: none; }
-  .alarm-banner { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(2, 8, 14, 0.78); }
-  .alarm-card { text-align: center; padding: 28px 36px; border: 1px solid var(--amber); background: rgba(30, 20, 5, 0.95);
-                box-shadow: 0 0 60px rgba(255, 181, 71, 0.45); animation: alarmPulse 1s ease-in-out infinite; min-width: min(420px, 90vw); }
-  .alarm-card .a-kind { font-family: var(--font-display); letter-spacing: 0.4em; color: var(--amber); font-size: 13px; }
-  .alarm-card .a-time { font-family: var(--font-display); font-size: 64px; font-weight: 700; color: #fff; margin: 6px 0; text-shadow: 0 0 20px rgba(255, 181, 71, 0.8); }
-  .alarm-card .a-label { font-size: 18px; margin-bottom: 18px; }
-  .alarm-card .a-hint { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 12px; }
-  .alarm-card .btn { font-size: 13px; padding: 12px 22px; margin: 0 6px; }
-  @keyframes alarmPulse { 0%, 100% { box-shadow: 0 0 40px rgba(255, 181, 71, 0.35); } 50% { box-shadow: 0 0 80px rgba(255, 181, 71, 0.7); } }
-
-  /* ── toasts ── */
+  .alarm-banner { --ring: var(--amber); position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; overflow: hidden; background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--ring) 22%, #02070d), #02070d 62%); }
+  .alarm-banner.timer { --ring: var(--cyan); }
+  .alarm-banner.reminder { --ring: var(--green); }
+  .alarm-pulse { position: absolute; left: 50%; top: 42%; width: 340px; height: 340px; margin: -170px 0 0 -170px; border-radius: 50%; border: 2px solid var(--ring); opacity: 0; animation: alarmWave 3s ease-out infinite; pointer-events: none; }
+  .alarm-pulse:nth-child(2) { animation-delay: 1s; }
+  .alarm-pulse:nth-child(3) { animation-delay: 2s; }
+  .alarm-card { position: relative; display: grid; justify-items: center; gap: 4px; text-align: center; padding: 24px; width: min(720px, 100%); }
+  .alarm-card .a-kind { display: flex; align-items: center; gap: 12px; font-family: var(--font-display); letter-spacing: 0.42em; padding-left: 0.42em; color: var(--ring); font-size: 15px; font-weight: 700; }
+  .alarm-card .a-time { font-family: var(--font-display); font-size: clamp(84px, 19vw, 190px); font-weight: 700; line-height: 1.02; color: #fff; text-shadow: 0 0 36px var(--ring); font-variant-numeric: tabular-nums; animation: alarmGlow 1.6s ease-in-out infinite; }
+  .alarm-card .a-date { font-size: clamp(18px, 2.4vw, 24px); font-weight: 500; color: var(--text); }
+  .alarm-card .a-label { font-size: clamp(24px, 3.6vw, 36px); font-weight: 700; color: #fff; margin-top: 10px; overflow-wrap: anywhere; }
+  .alarm-card .a-label:empty { display: none; }
+  .alarm-card .a-sound { display: flex; align-items: center; gap: 7px; font-size: 15.5px; color: var(--muted); margin-top: 4px; max-width: 100%; }
+  .alarm-card .a-sound span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alarm-card .a-sound svg { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--ring); stroke-width: 2; }
+  .alarm-card .a-stop { margin-top: 26px; min-width: min(340px, 86vw); padding: 18px 40px; border: 0; border-radius: 12px; background: var(--ring); color: #03111b; font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: 0.24em; cursor: pointer; box-shadow: 0 0 34px color-mix(in srgb, var(--ring) 55%, transparent); transition: transform 0.12s; }
+  .alarm-card .a-stop:hover { transform: scale(1.03); }
+  .alarm-card .a-stop:focus-visible, .a-snooze button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .a-snooze { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin-top: 16px; font-size: 16px; color: var(--muted); }
+  .a-snooze button { background: rgba(255, 255, 255, 0.05); border: 1px solid color-mix(in srgb, var(--ring) 55%, transparent); border-radius: 8px; color: var(--text); font-family: var(--font-body); font-size: 17px; font-weight: 700; padding: 9px 18px; cursor: pointer; }
+  .a-snooze button:hover { background: color-mix(in srgb, var(--ring) 22%, transparent); }
+  .alarm-card .a-hint { font-size: 15.5px; color: var(--muted); margin-top: 22px; }
+  .alarm-card .a-hint b { color: var(--text); font-weight: 600; }
+  .a-left { width: min(340px, 86vw); height: 3px; margin-top: 12px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.1); }
+  .a-left i { display: block; height: 100%; background: var(--ring); transform-origin: left; }
+  @keyframes alarmWave { 0% { transform: scale(0.5); opacity: 0.55; } 100% { transform: scale(3.2); opacity: 0; } }
+  @keyframes alarmGlow { 50% { text-shadow: 0 0 70px var(--ring); } }
+  @media (prefers-reduced-motion: reduce) { .alarm-pulse { display: none; } .alarm-card .a-time { animation: none; } }
+  .sound-box { grid-column: 1 / -1; display: grid; gap: 6px; }
+  .sound-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; background: var(--panel-strong); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  .sound-row:hover { border-color: var(--line-strong); }
+  .sound-row.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
+  .sound-row input { accent-color: var(--cyan); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+  .sound-name { font-size: 15.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sound-len { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .sound-btn { background: none; border: 1px solid var(--line); border-radius: 5px; color: var(--cyan-soft); font-family: var(--font-body); font-size: 13.5px; font-weight: 700; padding: 4px 10px; cursor: pointer; min-width: 62px; }
+  .sound-btn:hover { border-color: var(--cyan); }
+  .sound-btn.del { min-width: 0; color: var(--muted); }
+  .sound-btn.del:hover { color: var(--red); border-color: var(--red); }
+  .sound-drop { display: grid; gap: 2px; justify-items: center; text-align: center; border: 1.5px dashed var(--line-strong); border-radius: 8px; padding: 16px; color: var(--muted); font-size: 14.5px; cursor: pointer; background: none; font-family: var(--font-body); width: 100%; }
+  .sound-drop b { color: var(--cyan-soft); font-size: 16px; }
+  .sound-drop:hover, .sound-drop.over { border-color: var(--cyan); background: rgba(63, 216, 255, 0.07); }
   #toasts { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; width: min(560px, 92vw); pointer-events: none; }
   .toast { background: rgba(40, 12, 12, 0.92); border: 1px solid var(--red); color: #ffe0e0; padding: 10px 14px; font-size: 15px; font-weight: 600; box-shadow: 0 0 24px rgba(255, 93, 93, 0.35); animation: fadein 0.3s ease; }
   .toast.info, .toast.reminder, .toast.message { background: rgba(8, 36, 58, 0.95); border-color: var(--cyan); color: var(--text); box-shadow: 0 0 24px rgba(63, 216, 255, 0.35); }
-
-  @keyframes blink { 50% { opacity: 0; } }
-  @keyframes pulse { 50% { box-shadow: 0 0 4px var(--cyan); } }
-  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  @keyframes eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
-
-  @media (max-width: 1180px) {
-    body { overflow: auto; }
-    .app { height: auto; min-height: 100vh; }
-    .main { grid-template-columns: 1fr 1fr; }
-    .center { grid-column: 1 / -1; order: -1; min-height: 560px; }
-    .log-panel { min-height: 360px; }
-  }
-  @media (max-width: 760px) {
-    .app { padding: 12px 16px; }
-    .main { grid-template-columns: 1fr; }
-    .status-strip { display: none; }
-    .brand-sub { display: none; }
-    .brand-name { font-size: 16px; letter-spacing: 0.2em; }
-    .logo { width: 30px; height: 30px; }
-    .logo::after { inset: 7px; }
-    .clock #clock { font-size: 18px; }
-    .clock #date { font-size: 10px; letter-spacing: 0.12em; }
-    .command-bar { gap: 6px; }
-    .icon-btn { width: 42px; height: 42px; }
-    .digidaw-line { font-size: 18px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; }
-    .panel { transform: none; }
-  }
-
-  /* ── top actions ── */
-  .top-right { display: flex; align-items: center; gap: 16px; }
-  .top-btn { width: 38px; height: 38px; display: grid; place-items: center; background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line-strong); color: var(--cyan-soft); cursor: pointer; transition: background 0.2s, box-shadow 0.2s; }
-  .top-btn:hover, .top-btn:focus-visible { background: rgba(63, 216, 255, 0.2); box-shadow: 0 0 14px rgba(63, 216, 255, 0.4); outline: none; }
-  .top-btn svg { width: 19px; height: 19px; }
-  .top-btn.danger { color: #ff9b9b; border-color: rgba(255, 93, 93, 0.55); }
-  .top-btn.danger:hover { background: rgba(255, 93, 93, 0.18); box-shadow: 0 0 14px rgba(255, 93, 93, 0.4); }
-
-  /* ── conversation countdown ── */
-  .listen-bar { flex: none; width: 180px; height: 3px; margin: 8px auto 0; background: rgba(63, 216, 255, 0.12); overflow: hidden; visibility: hidden; }
-  .listen-bar.on { visibility: visible; }
-  .listen-bar div { height: 100%; width: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transform-origin: left; }
-  .msg.heard { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin: -2px 0 8px; }
-  .msg.heard .said { font-style: italic; opacity: 0.75; }
   .build-status { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.2em; margin-top: 4px; }
   .build-status.building, .build-status.starting { color: var(--amber); }
   .build-status.running, .build-status.done { color: var(--green); }
@@ -351,7 +334,6 @@
   .alias-btn { font-family: var(--font-mono); font-size: 10px; color: var(--cyan-soft); background: rgba(63, 216, 255, 0.06); border: 1px solid var(--line); padding: 2px 6px; margin: 4px 4px 0 0; cursor: pointer; }
   .alias-btn:hover, .alias-btn:focus-visible { background: rgba(63, 216, 255, 0.2); outline: none; }
   .alias-btn:disabled { color: var(--green); border-color: var(--green); cursor: default; }
-
   /* ── control panel ── */
   .overlay { position: fixed; inset: 0; z-index: 20; background: rgba(1, 6, 12, 0.78); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; padding: 24px; }
   .overlay.open { display: flex; animation: fadein 0.25s ease; }
@@ -394,7 +376,6 @@
   .cp-status { font-size: 14px; color: var(--muted); min-height: 20px; }
   .cp-status.ok { color: var(--green); } .cp-status.err { color: var(--red); } .cp-status.warn { color: var(--amber); }
   .cp-foot .btns { display: flex; gap: 10px; }
-
   /* ── offline curtain ── */
   .curtain { position: fixed; inset: 0; z-index: 30; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(1, 5, 10, 0.92); }
   .curtain.open { display: flex; }
@@ -413,69 +394,49 @@
     .top-right { gap: 8px; }
     .top-btn { width: 34px; height: 34px; }
   }
+  .btn { border-radius: 8px; padding: 6px 10px; font: 600 10.5px var(--tech); letter-spacing: 0.06em; background: var(--surface-2); border: 1px solid transparent; color: var(--text); cursor: pointer; white-space: nowrap; }
+  .btn:hover, .btn:focus-visible { background: var(--surface-3); outline: none; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.1); background: var(--accent); }
+  .btn.warn { color: var(--warm); } .btn.danger { color: var(--bad); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .field input[type=text], .field input[type=password], .field input[type=number], .field select, .rt-form input, .rt-form textarea { border-radius: 9px; border-color: var(--line-2); font-size: 14px; }
+  .field-label { font-size: 14.5px; } .field-help { font-size: 12.5px; color: var(--text-2); }
+  .cp { border-radius: 18px; background: var(--surface); border-color: var(--line-2); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); overflow: hidden; }
+  .cp::before, .cp::after { display: none; }
+  .cp-title { letter-spacing: 0.1em; font-weight: 700; }
+  .cp-nav button { font: 600 13px var(--sans); letter-spacing: 0; text-transform: none; padding: 10px 18px; }
+  .cp-section-title { font: 700 17px var(--sans); letter-spacing: 0; text-transform: none; color: var(--text); }
+  .field { border-bottom-style: solid; }
+  .switch span { border-radius: 999px; } .switch span::after { border-radius: 50%; }
+  .overlay { background: rgba(2, 5, 9, 0.72); }
+  .toast { border-radius: 12px; background: #3a1a1a; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); font-size: 14px; font-weight: 500; }
+  .toast.info, .toast.reminder, .toast.message { background: var(--surface-3); border-color: var(--line-2); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
+  .proj-name { font-size: 13.5px; } .proj-sub, .build-step { font-family: var(--sans); font-size: 12px; }
+  .gal-item { border-radius: 9px; }
+  .job { border-top-style: solid; } .proj-row { border-top-style: solid; }
+  .curtain b { letter-spacing: 0.2em; font-size: 22px; color: var(--text); }
+  .sub-title { font: 600 12px var(--sans); letter-spacing: 0; color: var(--text-3); margin: 11px 0 2px; }
+  .alias-btn { font-family: var(--sans); border-radius: 6px; border: 0; }
+  .field-restart { font-family: var(--sans); font-size: 11.5px; letter-spacing: 0; }
+  .alarm-card .a-kind { letter-spacing: 0.3em; } .alarm-card .a-time { text-shadow: none; animation-name: alarmGlowSoft; }
+  @keyframes alarmGlowSoft { 50% { opacity: 0.74; } }
 
-  /* ═══════════════ Tema Cyber 2D (Smooth, Lightweight & Responsive) ═══════════════ */
-  .app { position: relative; z-index: 1; }
-  body::after { opacity: 0.25; z-index: 3; }
-
-  /* top bar: a glass strip with a light along its edge */
-  .topbar { position: relative; border-bottom: 0; padding: 8px 14px 10px;
-    background: linear-gradient(90deg, transparent, rgba(8, 30, 50, 0.55) 15%, rgba(8, 30, 50, 0.55) 85%, transparent); }
-  .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent); opacity: 0.8;
-    box-shadow: 0 0 12px var(--accent); }
-
-  /* panels: clean high-performance dark glass, cyber accent rim */
-  .panel { border: 1px solid rgba(90, 215, 255, 0.22); padding: 13px 15px 15px; border-radius: 6px;
-    background: linear-gradient(180deg, rgba(10, 36, 58, 0.86), rgba(4, 16, 28, 0.82));
-    box-shadow: inset 0 1px 0 rgba(170, 238, 255, 0.16), 0 4px 20px rgba(0, 0, 0, 0.45), inset 0 0 34px rgba(63, 216, 255, 0.05); }
-  .panel::before, .panel::after { border-color: var(--cyan); filter: drop-shadow(0 0 4px var(--cyan)); width: 14px; height: 14px; }
-  .panel-title { justify-content: flex-start; gap: 9px; font-size: 10.5px; letter-spacing: 0.2em; color: var(--cyan-soft);
-    white-space: nowrap;
-    text-shadow: 0 0 10px rgba(63, 216, 255, 0.55); padding-bottom: 8px; border-bottom: 1px solid transparent;
-    border-image: linear-gradient(90deg, rgba(63, 216, 255, 0.65), transparent 80%) 1; }
-  .panel-title::before { content: ""; flex: none; width: 6px; height: 6px; transform: rotate(45deg); background: var(--accent);
-    box-shadow: 0 0 8px var(--accent); }
-  .panel-title .tag { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-
-  .gauge .bar { filter: drop-shadow(0 0 6px rgba(63, 216, 255, 0.9)); }
-  .gauge-val { text-shadow: 0 0 12px rgba(63, 216, 255, 0.6); }
-
-  /* the reactor's stage: rotating instrument rings and a ring of text around the 2D reactor */
-  .reactor-stage { position: relative; width: min(100%, 54vh, 480px); aspect-ratio: 1; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
-  .reactor-stage #reactor { width: 100%; height: 100%; display: block; }
-  .hud-ring { position: absolute; inset: -7%; width: 114%; height: 114%; pointer-events: none; overflow: visible; color: var(--accent);
-    will-change: transform; }
-  .hud-ring text { font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.42em; fill: currentColor; opacity: 0.55; }
-  .hud-ring .thin { fill: none; stroke: currentColor; stroke-width: 0.6; opacity: 0.35; }
-  .hud-ring .dash { fill: none; stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 9; opacity: 0.5; }
-  /* (no drop-shadow on a spinning layer: Chrome re-rendered the shadow every frame — about a CPU core with the rest) */
-  .hud-ring .arcs { fill: none; stroke: currentColor; stroke-width: 3; opacity: 0.9; stroke-linecap: round; }
-
-  @keyframes spinCW { to { transform: rotate(360deg); } }
-  @keyframes spinCCW { to { transform: rotate(-360deg); } }
-  .hud-ring[data-spin="40"] { animation: spinCW 40s linear infinite; transform-origin: center; }
-  .hud-ring[data-spin="-26"] { animation: spinCCW 26s linear infinite; transform-origin: center; }
-  .hud-ring[data-spin="9"] { animation: spinCW 9s linear infinite; transform-origin: center; }
-  body.state-thinking .hud-ring[data-spin="9"] { animation-duration: 2.2s; }
-  /* energy: the HUD unseen, or idle without focus for a while — the rings stand still (html.calm, set by updateCalm) */
-  html.calm .hud-ring, html.calm .eq i, html.calm .dot.check { animation-play-state: paused !important; }
-  @media (prefers-reduced-motion: reduce) { .hud-ring { animation: none !important; } }
-  body.state-listening .hud-ring[data-spin="9"] { animation-duration: 4s; }
-
-  .reactor-stage { margin-bottom: calc(min(54vh, 480px) * 0.08); }   /* the rings reach 7% beyond the stage */
-  .state-label { font-size: 18px; letter-spacing: 0.6em; margin-top: 12px; }
-  .state-hint { margin-top: 8px; }
-  .digidaw-line { font-size: 22px; text-shadow: 0 0 14px rgba(63, 216, 255, 0.35); }
-
-  /* command bar and quick buttons: clean glass */
-  .command-bar input { background: rgba(6, 22, 38, 0.88); border-color: rgba(90, 215, 255, 0.35);
-    border-radius: 8px; padding-left: 18px; }
-  .icon-btn { border-radius: 8px; }
-  .chip { border-radius: 6px; background: rgba(10, 40, 64, 0.5);
-    border-color: rgba(90, 215, 255, 0.35); transition: background 0.15s, color 0.15s, transform 0.15s; }
-  .chip:hover, .chip:focus-visible { background: rgba(63, 216, 255, 0.28); color: #fff; transform: translateY(-2px); }
-  #toasts .toast { border-radius: 6px; }
+  /* a window that isn't full width: the reactor on top, the panels under it */
+  @media (max-width: 1240px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; }
+    .main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .center { grid-column: 1 / -1; order: -1; }
+    .reactor-stage { height: min(40vh, 400px); }
+    .col { overflow: visible; }
+    .log-panel { min-height: 340px; max-height: 480px; }
+    .brand-sub { display: none; }
+  }
+  @media (max-width: 980px) { .status-strip { display: none; } }
+  @media (max-width: 720px) { .main { grid-template-columns: minmax(0, 1fr); } .clock #date { display: none; } }
+  @media (max-height: 760px) and (min-width: 1241px) { .reactor-stage { height: min(40vh, 340px); } .state-hint { display: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition: none !important; } .hud-ring { animation: none !important; } }
 </style>
 </head>
 <body class="state-idle">
@@ -483,19 +444,17 @@
   <header class="topbar">
     <div class="brand">
       <div class="logo" aria-hidden="true"></div>
-      <div>
-        <div class="brand-name">DIGIDAW</div>
-        <div class="brand-sub">ASISTEN KECERDASAN DIGITAL</div>
-      </div>
+      <div><div class="brand-name">DIGIDAW</div><div class="brand-sub">Asisten pribadi Tuan</div></div>
     </div>
     <div class="status-strip">
       <span><span class="dot" id="connDot"></span><b id="connText">MENGHUBUNGKAN</b></span>
-      <span>MODE <b id="modeText">—</b></span>
-      <span>PUSH-TO-TALK <b id="hotkey">CTRL+ALT+D</b></span>
-      <button class="ai-ind" id="aiInd" type="button" title="Status AI — klik untuk memeriksa ulang"><span class="dot check" id="aiDot"></span>GEMINI <b id="aiText">—</b></button>
-      <span class="ai-ind" id="localInd" title="Otak lokal (Ollama): menjawab pertanyaan ringan & perintah dasar"><span class="dot check" id="localDot"></span>QWEN <b id="localText">—</b></span>
+      <span>Mode <b id="modeText">—</b></span>
+      <span title="Tombol bicara">Bicara <b id="hotkey">CTRL+ALT+D</b></span>
+      <button class="ai-ind" id="aiInd" type="button" title="Status AI, klik untuk memeriksa ulang"><span class="dot check" id="aiDot"></span>Gemini <b id="aiText">—</b></button>
+      <span class="ai-ind" id="localInd" title="Otak lokal (Ollama): menjawab pertanyaan ringan dan perintah dasar"><span class="dot check" id="localDot"></span>Qwen <b id="localText">—</b></span>
       <span class="badge" id="dictBadge">MODE DIKTE AKTIF</span>
       <span class="badge" id="briefBadge">BRIEF PROJECT</span>
+      <span class="badge" id="updateBadge"></span>
     </div>
     <div class="top-right">
       <button class="top-btn" id="pauseBtn" title="Jeda pendengaran (Digidaw berhenti mendengarkan)" aria-label="Jeda pendengaran">
@@ -505,59 +464,68 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
       <button class="top-btn" id="restartBtn" title="Restart Digidaw (memuat ulang kode &amp; pengaturan, ±10 detik)" aria-label="Restart Digidaw">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
       </button>
       <button class="top-btn danger" id="powerBtn" title="Matikan Digidaw" aria-label="Matikan Digidaw">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
       </button>
       <div class="clock"><div id="clock">00:00:00</div><div id="date">—</div></div>
     </div>
   </header>
 
   <main class="main">
-    <!-- LEFT -->
+    <!-- LEFT: today, the machine, the room -->
     <section class="col">
-      <div class="panel">
-        <div class="panel-title">Diagnostik Sistem <span class="tag" id="uptime">UPTIME —</span></div>
-        <div class="gauges">
-          <div class="gauge" id="g-cpu">
-            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
-            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
-            <div class="gauge-label">CPU</div><div class="gauge-sub" id="cpuSub">—</div>
-          </div>
-          <div class="gauge" id="g-ram">
-            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
-            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
-            <div class="gauge-label">MEMORI</div><div class="gauge-sub" id="ramSub">—</div>
-          </div>
-          <div class="gauge" id="g-bat">
-            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
-            <div class="gauge-val"><span class="num">—</span><small>%</small></div>
-            <div class="gauge-label">DAYA</div><div class="gauge-sub" id="batSub">—</div>
-          </div>
-          <div class="gauge" id="g-disk">
-            <svg viewBox="0 0 100 100"><circle class="ticks" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg>
-            <div class="gauge-val"><span class="num">0</span><small>%</small></div>
-            <div class="gauge-label">DISK C</div><div class="gauge-sub" id="diskSub">—</div>
+      <div class="panel" id="todayPanel">
+        <div class="panel-title">Hari ini <button class="link" type="button" data-cmd="buka agenda">Buka agenda</button></div>
+        <div class="wx">
+          <div class="weather-temp" id="wTemp">—</div>
+          <div style="min-width:0">
+            <div class="weather-cond" id="wCond">memuat…</div>
+            <div class="wx-sub"><span id="weatherPlace"></span> · lembap <b id="wHum">—</b> · angin <b id="wWind">—</b></div>
           </div>
         </div>
-        <div class="perf" id="perf" title="Hari ini: panggilan yang langsung berlanjut ke perintah, dan berapa cepat suara Digidaw mulai. Tanyakan &quot;Digidaw, laporan kinerja&quot; untuk lengkapnya.">KINERJA HARI INI —</div>
+        <div id="timerPanel" hidden><div class="sub-title">Alarm &amp; timer</div><div id="timers"><div class="empty">Tidak ada timer aktif.</div></div></div>
+        <div id="agendaPanel" hidden><div class="sub-title">Agenda <span class="tag" id="agendaCount">—</span></div><div id="agendaList"></div></div>
+        <div class="empty" id="todayEmpty" style="margin-top:9px">Tidak ada agenda atau alarm dekat.</div>
       </div>
 
-      <div class="panel">
-        <div class="panel-title">Jaringan · Cuaca <span class="tag" id="procCount">— PROSES</span></div>
-        <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 14px; align-items: center;">
-          <div class="kv">
-            <span>▼ UNDUH</span><span id="netDown">0 KB/s</span>
-            <span>▲ UNGGAH</span><span id="netUp">0 KB/s</span>
+      <div class="panel" id="sysPanel">
+        <div class="ws-title">
+          <div class="tabs" role="tablist">
+            <button class="tab on" type="button" role="tab" data-sys="sysMain">Sistem</button>
+            <button class="tab" type="button" role="tab" data-sys="secPanel">Keamanan</button>
+            <button class="tab" type="button" role="tab" data-sys="locPanel">Lokasi</button>
           </div>
-          <div style="text-align:right"><span class="weather-temp" id="wTemp" style="font-size:28px">—</span><div class="weather-place" id="weatherPlace" style="font-size:10px; letter-spacing:0.14em; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></div></div>
+          <span class="tag" id="uptime">UPTIME —</span>
         </div>
-        <canvas id="netChart"></canvas>
-        <div style="display:flex; gap:10px; align-items:baseline; margin-top:6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted);">
-          <span class="weather-cond" id="wCond" style="font-size:12.5px; color: var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">memuat…</span>
-          <span>LEMBAP <b id="wHum" style="color:var(--text); font-weight:500">—</b></span><span>ANGIN <b id="wWind" style="color:var(--text); font-weight:500">—</b></span>
+        <div id="sysMain">
+          <div class="gauges">
+            <div class="gauge" id="g-cpu"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg><div class="gauge-val"><span class="num">0</span><small>%</small></div><div class="gauge-label">CPU</div><div class="gauge-sub" id="cpuSub">—</div></div>
+            <div class="gauge" id="g-ram"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg><div class="gauge-val"><span class="num">0</span><small>%</small></div><div class="gauge-label">Memori</div><div class="gauge-sub" id="ramSub">—</div></div>
+            <div class="gauge" id="g-bat"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg><div class="gauge-val"><span class="num">—</span><small>%</small></div><div class="gauge-label">Daya</div><div class="gauge-sub" id="batSub">—</div></div>
+            <div class="gauge" id="g-disk"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40"/><circle class="bar" cx="50" cy="50" r="40"/></svg><div class="gauge-val"><span class="num">0</span><small>%</small></div><div class="gauge-label">Disk</div><div class="gauge-sub" id="diskSub">—</div></div>
+          </div>
+          <div class="net">
+            <span>↓ <b id="netDown">0 KB/s</b></span><canvas id="netChart"></canvas>
+            <span>↑ <b id="netUp">0 KB/s</b></span>
+          </div>
+          <div class="perf" id="perf" title="Hari ini: panggilan yang langsung berlanjut ke perintah, dan berapa cepat suara Digidaw mulai. Tanyakan &quot;Digidaw, laporan kinerja&quot; untuk lengkapnya.">KINERJA HARI INI —</div>
+          <div class="tag" id="procCount" hidden>— PROSES</div>
         </div>
+        <div id="secPanel" hidden>
+          <div class="panel-title" style="margin-bottom:6px">Pemeriksaan keamanan <span class="tag" id="secTag">—</span></div>
+          <div class="sec-top">
+            <div class="sec-ring"><svg viewBox="0 0 64 64"><circle class="track" cx="32" cy="32" r="27"/><circle class="bar" id="secBar" cx="32" cy="32" r="27"/></svg><b id="secScore">--</b></div>
+            <div class="sec-lines"><div>Terakhir: <span id="secLast">—</span></div><div>Otomatis: <span id="secNext">—</span></div><div>Penjaga unduhan: <span id="secGuard">—</span></div></div>
+          </div>
+          <div class="mini-actions">
+            <button class="btn" data-cmd="analisis keamanan sistem">SCAN</button>
+            <button class="btn" data-cmd="buka laporan keamanan" id="secReport">LAPORAN</button>
+            <button class="btn" data-cmd="jalankan quick scan">SCAN VIRUS</button>
+          </div>
+        </div>
+        <div id="locPanel" hidden><div id="locList"><div class="empty">Memuat…</div></div></div>
       </div>
 
       <div class="panel" id="lampPanel" hidden>
@@ -570,49 +538,12 @@
           <span class="lamp-pct" id="lampPct">—</span>
         </div>
         <div class="lamp-dots" id="lampDots">
-          <button class="lamp-dot" type="button" data-lamp-color="putih hangat" style="--c:#ffcf8a" title="Putih hangat"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="putih" style="--c:#fff1d6" title="Putih"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="putih dingin" style="--c:#e3efff" title="Putih dingin"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="merah" style="--c:#ff3b3b" title="Merah"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="oranye" style="--c:#ff8a1e" title="Oranye"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="kuning" style="--c:#ffd21e" title="Kuning"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="hijau" style="--c:#2ee36a" title="Hijau"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="toska" style="--c:#1ee8c8" title="Toska"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="biru" style="--c:#3c6bff" title="Biru"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="ungu" style="--c:#a04bff" title="Ungu"></button>
-          <button class="lamp-dot" type="button" data-lamp-color="pink" style="--c:#ff4fa0" title="Pink"></button>
+          <button class="lamp-dot" type="button" data-lamp-color="putih hangat" style="--c:#ffcf8a" title="Putih hangat"></button><button class="lamp-dot" type="button" data-lamp-color="putih" style="--c:#fff1d6" title="Putih"></button><button class="lamp-dot" type="button" data-lamp-color="putih dingin" style="--c:#e3efff" title="Putih dingin"></button><button class="lamp-dot" type="button" data-lamp-color="merah" style="--c:#ff3b3b" title="Merah"></button><button class="lamp-dot" type="button" data-lamp-color="oranye" style="--c:#ff8a1e" title="Oranye"></button><button class="lamp-dot" type="button" data-lamp-color="kuning" style="--c:#ffd21e" title="Kuning"></button><button class="lamp-dot" type="button" data-lamp-color="hijau" style="--c:#2ee36a" title="Hijau"></button><button class="lamp-dot" type="button" data-lamp-color="toska" style="--c:#1ee8c8" title="Toska"></button><button class="lamp-dot" type="button" data-lamp-color="biru" style="--c:#3c6bff" title="Biru"></button><button class="lamp-dot" type="button" data-lamp-color="ungu" style="--c:#a04bff" title="Ungu"></button><button class="lamp-dot" type="button" data-lamp-color="pink" style="--c:#ff4fa0" title="Pink"></button>
         </div>
         <div class="mini-actions">
-          <button class="btn" type="button" data-lamp-scene="baca">BACA</button>
-          <button class="btn" type="button" data-lamp-scene="santai">SANTAI</button>
-          <button class="btn" type="button" data-lamp-scene="film">FILM</button>
-          <button class="btn" type="button" data-lamp-scene="tidur">TIDUR</button>
-          <button class="btn" type="button" data-lamp-scene="pesta">PESTA</button>
+          <button class="btn" type="button" data-lamp-scene="baca">BACA</button><button class="btn" type="button" data-lamp-scene="santai">SANTAI</button><button class="btn" type="button" data-lamp-scene="film">FILM</button><button class="btn" type="button" data-lamp-scene="tidur">TIDUR</button><button class="btn" type="button" data-lamp-scene="pesta">PESTA</button>
         </div>
       </div>
-
-      <div class="panel" id="secPanel">
-        <div class="panel-title">Keamanan <span class="tag" id="secTag">—</span></div>
-        <div class="sec-top">
-          <div class="sec-ring"><svg viewBox="0 0 64 64"><circle class="track" cx="32" cy="32" r="27"/><circle class="bar" id="secBar" cx="32" cy="32" r="27"/></svg><b id="secScore">--</b></div>
-          <div class="sec-lines">
-            <div>Terakhir: <span id="secLast">—</span></div>
-            <div>Otomatis: <span id="secNext">—</span></div>
-            <div>Penjaga unduhan: <span id="secGuard">—</span></div>
-          </div>
-        </div>
-        <div class="mini-actions">
-          <button class="btn" data-cmd="analisis keamanan sistem">SCAN</button>
-          <button class="btn" data-cmd="buka laporan keamanan" id="secReport">LAPORAN</button>
-          <button class="btn" data-cmd="jalankan quick scan">DEFENDER</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">Lokasi <span class="tag">KLIK UNTUK MEMBUKA</span></div>
-        <div id="locList"><div class="empty">Memuat…</div></div>
-      </div>
-
     </section>
 
     <!-- CENTER -->
@@ -620,14 +551,12 @@
       <div class="reactor-wrap">
         <div class="reactor-stage">
           <canvas id="reactor" aria-label="Status DIGIDAW"></canvas>
-          <svg class="hud-ring" viewBox="0 0 400 400" aria-hidden="true">
-            <circle class="thin" cx="200" cy="200" r="196"/><circle class="thin" cx="200" cy="200" r="162"/></svg>
+          <svg class="hud-ring" viewBox="0 0 400 400" aria-hidden="true"><circle class="thin" cx="200" cy="200" r="198"/><circle class="thin" cx="200" cy="200" r="172"/></svg>
           <svg class="hud-ring" data-spin="40" viewBox="0 0 400 400" aria-hidden="true">
-            <defs><path id="ringPath" d="M200,200 m-176,0 a176,176 0 1,1 352,0 a176,176 0 1,1 -352,0"/></defs>
-            <text><textPath href="#ringPath">DIGIDAW · NEURAL CORE · VOICE LINK ACTIVE · ALL SYSTEMS NOMINAL · DIGIDAW · NEURAL CORE · VOICE LINK ACTIVE · </textPath></text></svg>
-          <svg class="hud-ring" data-spin="-26" viewBox="0 0 400 400" aria-hidden="true"><circle class="dash" cx="200" cy="200" r="188"/></svg>
-          <svg class="hud-ring" data-spin="9" data-spin-thinking="2.2" data-spin-listening="4" viewBox="0 0 400 400" aria-hidden="true">
-            <path class="arcs" d="M200,8 A192,192 0 0,1 336,64 M392,200 A192,192 0 0,1 336,336 M200,392 A192,192 0 0,1 64,336 M8,200 A192,192 0 0,1 64,64"/></svg>
+            <defs><path id="ringPath" d="M200,200 m-181,0 a181,181 0 1,1 362,0 a181,181 0 1,1 -362,0"/></defs>
+            <text><textPath href="#ringPath">DIGIDAW · ASISTEN PRIBADI · SUARA AKTIF · SEMUA SISTEM NORMAL · DIGIDAW · ASISTEN PRIBADI · SUARA AKTIF · SEMUA SISTEM NORMAL ·</textPath></text></svg>
+          <svg class="hud-ring" data-spin="-26" viewBox="0 0 400 400" aria-hidden="true"><circle class="dash" cx="200" cy="200" r="191"/></svg>
+          <svg class="hud-ring" data-spin="9" viewBox="0 0 400 400" aria-hidden="true"><path class="arcs" d="M200,2 A198,198 0 0,1 340,60 M398,200 A198,198 0 0,1 340,340 M200,398 A198,198 0 0,1 60,340 M2,200 A198,198 0 0,1 60,60"/></svg>
         </div>
         <div class="state-label" id="stateLabel">SIAGA</div>
         <div class="listen-bar" id="listenBar"><div></div></div>
@@ -639,48 +568,42 @@
       </div>
       <form class="command-bar" id="cmdForm" autocomplete="off">
         <button type="button" class="icon-btn" id="micBtn" title="Bicara sekarang">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
         </button>
-        <input id="cmdInput" placeholder="Ketik perintah untuk DIGIDAW…  (tekan / untuk fokus)" maxlength="2000">
-        <button type="button" class="icon-btn" id="stopBtn" title="Hentikan suara (Esc)">
-          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
-        </button>
-        <button type="submit" class="icon-btn" title="Kirim">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
-        </button>
+        <input id="cmdInput" placeholder="Ketik perintah untuk Digidaw…  (tekan / untuk fokus)" maxlength="2000" aria-label="Perintah">
+        <button type="button" class="icon-btn" id="stopBtn" title="Hentikan suara (Esc)"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+        <button type="submit" class="icon-btn send" title="Kirim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
       </form>
-      <div class="chips quick" aria-label="Protokol cepat">
-        <button class="chip accent" data-fill="buatkan gambar ">+ GAMBAR</button>
-        <button class="chip accent" data-fill="buatkan file ">+ FILE</button>
-        <button class="chip accent" data-cmd="buat project">+ PROJECT</button>
-        <button class="chip" data-cmd="jalankan protokol kerja">KERJA</button>
-        <button class="chip" data-cmd="jalankan protokol santai">SANTAI</button>
-        <button class="chip" data-cmd="jalankan protokol fokus">FOKUS</button>
-        <button class="chip" data-cmd="house party protocol">HOUSE PARTY</button>
-        <button class="chip" data-cmd="jalankan protokol bersih">CLEAN SLATE</button>
-        <button class="chip" data-cmd="berikan briefing harian">BRIEFING</button>
-        <button class="chip" data-cmd="lihat layar saya dan jelaskan apa yang ada">ANALISIS LAYAR</button>
-        <button class="chip" data-cmd="analisis sistem">ANALISIS SISTEM</button>
-        <button class="chip" data-cmd="analisis keamanan sistem">SCAN KEAMANAN</button>
+      <div class="quick-area">
+        <div class="chips" aria-label="Alat">
+          <button class="chip accent" data-cmd="buka agenda">AGENDA</button><button class="chip accent" data-cmd="buka skrip">SKRIP</button><button class="chip accent" data-settings="Alarm">ALARM</button><button class="chip accent" data-fill="buatkan gambar ">+ GAMBAR</button><button class="chip accent" data-fill="buatkan file ">+ FILE</button><button class="chip accent" data-cmd="buat project">+ PROJECT</button>
+          <button class="chip" id="moreBtn" aria-expanded="false" aria-controls="moreChips">LAINNYA</button>
+        </div>
+        <div class="chips">
+          <div class="chips-mine" id="quickUsed" aria-label="Yang paling sering dipakai"></div>
+          <div class="chips-mine" id="quickRoutines" aria-label="Rutinitas"><button class="chip" id="routineAdd" data-settings="Rutinitas">+ RUTINITAS</button></div>
+        </div>
+        <div class="chips" id="moreChips" hidden aria-label="Lainnya">
+          <button class="chip" data-cmd="berikan briefing harian">RINGKASAN</button><button class="chip" data-cmd="jalankan protokol pesta">HOUSE PARTY</button><button class="chip" data-cmd="jalankan protokol bersih">CLEAN SLATE</button><button class="chip" data-cmd="lihat layar saya dan jelaskan apa yang ada">ANALISIS LAYAR</button><button class="chip" data-cmd="analisis sistem">ANALISIS SISTEM</button><button class="chip" data-cmd="update sistem">UPDATE SISTEM</button><button class="chip" data-cmd="analisis keamanan sistem">SCAN KEAMANAN</button><button class="chip" data-cmd="latih panggilan" title="Digidaw belajar suara Tuan saat memanggil namanya, sekitar satu menit">LATIH PANGGILAN</button>
+        </div>
       </div>
     </section>
 
-    <!-- RIGHT -->
+    <!-- RIGHT: the conversation, music, work -->
     <section class="col">
       <div class="panel log-panel">
-        <div class="panel-title">Log Komunikasi <span class="tag" id="logCount">0</span></div>
+        <div class="panel-title">Percakapan <span class="tag" id="logCount">0</span></div>
         <div id="log"><div class="empty">Belum ada percakapan.</div></div>
       </div>
 
       <div class="panel">
-        <div class="panel-title">Sedang Diputar <span class="tag" id="npApp">—</span></div>
+        <div class="panel-title" style="margin-bottom:4px">Sedang diputar <span class="tag" id="npApp">—</span></div>
         <div class="np-title" id="npTitle"><span class="eq off" id="npEq"><i></i><i></i><i></i></span>Tidak ada media</div>
         <div class="np-sub" id="npSub">Ucapkan "Digidaw, putar lagu …"</div>
-        <div class="np-progress"><div id="npBar"></div></div>
-        <div class="np-times"><span id="npPos">0:00</span><span id="npDur">0:00</span></div>
+        <div class="np-line"><span id="npPos">0:00</span><div class="np-progress"><div id="npBar"></div></div><span id="npDur">0:00</span></div>
         <div class="np-controls">
           <button class="icon-btn" data-action="previous" title="Sebelumnya"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
-          <button class="icon-btn" data-action="toggle" title="Play / Pause" id="npToggle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>
+          <button class="icon-btn" data-action="toggle" title="Putar / jeda" id="npToggle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg></button>
           <button class="icon-btn" data-action="next" title="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
         </div>
       </div>
@@ -693,46 +616,36 @@
           </div>
           <span class="tag" id="wsTag"></span>
         </div>
-      <div id="buildPanel">
-        <span id="buildCount" hidden></span>
-        <div id="buildJobs"></div>
-        <div class="sub-title" id="projRecentTitle" hidden>TERBARU</div>
-        <div id="projList"><div class="empty">Belum ada project. Ucapkan "Digidaw, buat project …"</div></div>
-      </div>
-
-      <div id="genPanel" hidden>
-        <span id="genTag" hidden></span>
-        <div id="genJobs"></div>
-        <div class="gallery" id="gallery"></div>
-        <div class="empty" id="genEmpty">Belum ada hasil. Coba "Digidaw, buatkan gambar kucing astronot".</div>
-        <div class="mini-actions">
-          <button class="btn" data-open="images">FOLDER GAMBAR</button>
-          <button class="btn" data-open="files">FOLDER FILE</button>
+        <div id="buildPanel">
+          <span id="buildCount" hidden></span>
+          <div id="buildJobs"></div>
+          <div class="sub-title" id="projRecentTitle" hidden>TERBARU</div>
+          <div id="projList"><div class="empty">Belum ada project. Ucapkan "Digidaw, buat project …"</div></div>
         </div>
-      </div>
-      </div>
-
-      <div class="panel" id="timerPanel" hidden>
-        <div class="panel-title">Timer & Pengingat</div>
-        <div id="timers"><div class="empty">Tidak ada timer aktif.</div></div>
-      </div>
-
-      <div class="panel" id="agendaPanel" hidden>
-        <div class="panel-title">Agenda <span class="tag" id="agendaCount">—</span></div>
-        <div id="agendaList"></div>
+        <div id="genPanel" hidden>
+          <span id="genTag" hidden></span>
+          <div id="genJobs"></div>
+          <div class="gallery" id="gallery"></div>
+          <div class="empty" id="genEmpty">Belum ada hasil. Coba "Digidaw, buatkan gambar kucing astronot".</div>
+          <div class="mini-actions"><button class="btn" data-open="images">FOLDER GAMBAR</button><button class="btn" data-open="files">FOLDER FILE</button></div>
+        </div>
       </div>
     </section>
   </main>
 </div>
 <div id="toasts" aria-live="polite"></div>
-<div class="alarm-banner" id="alarmBanner" hidden role="alertdialog" aria-labelledby="alarmKind">
+<div class="alarm-banner" id="alarmBanner" hidden role="alertdialog" aria-labelledby="alarmKind" aria-describedby="alarmLabel">
+  <div class="alarm-pulse"></div><div class="alarm-pulse"></div><div class="alarm-pulse"></div>
   <div class="alarm-card">
     <div class="a-kind" id="alarmKind">ALARM</div>
-    <div class="a-time" id="alarmTime">--:--</div>
+    <div class="a-time" id="alarmTime">--.--</div>
+    <div class="a-date" id="alarmDate"></div>
     <div class="a-label" id="alarmLabel"></div>
-    <button class="btn primary" id="alarmStop">STOP</button>
-    <button class="btn" id="alarmSnooze">TUNDA</button>
-    <div class="a-hint">Ucapkan "stop" atau "tunda" · Esc / Ctrl+Alt+D untuk mematikan</div>
+    <div class="a-sound" id="alarmSound" hidden><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg><span></span></div>
+    <button class="a-stop" id="alarmStop">BERHENTI</button>
+    <div class="a-left" id="alarmLeftBar" hidden><i></i></div>
+    <div class="a-snooze" id="alarmSnoozes"></div>
+    <div class="a-hint">Atau ucapkan <b>"stop"</b> atau <b>"tunda"</b><span id="alarmLeft"></span></div>
   </div>
 </div>
 
@@ -774,6 +687,11 @@
   };
   let paused = false;
   let escToTalk = "off", lastEsc = 0;
+  function renderUpdate(u) {
+    const on = !!(u && u.running);
+    $("updateBadge").classList.toggle("show", on);
+    $("updateBadge").textContent = !on ? "" : u.phase === "memasang" && u.total ? `UPDATE ${u.done}/${u.total}` : `UPDATE: ${(u.phase || "").toUpperCase()}`;
+  }
   function renderPaused(on) {
     paused = on;
     const b = $("pauseBtn");
@@ -815,6 +733,7 @@
   $("micBtn").addEventListener("click", () => sendAction("talk"));
   $("stopBtn").addEventListener("click", () => sendAction("stop_speaking"));
   document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => sendCommand(b.dataset.cmd)));
+  document.querySelectorAll("[data-settings]").forEach((b) => b.addEventListener("click", () => openSettings(b.dataset.settings)));
   document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => sendAction(b.dataset.action)));
 
   // ── lamp (smarthome.py): state from "lamp" events, buttons send lamp:<what>:<value> actions ──
@@ -827,7 +746,7 @@
     const on = !!l.on && !!l.online;
     $("lampPower").setAttribute("aria-pressed", on ? "true" : "false");
     const glow = l.mode === "colour" && l.rgb ? l.rgb : (l.warmth != null && l.warmth > 65 ? "#dfeeff" : "#ffd590");
-    $("lampPower").style.setProperty("--lamp", glow + "99");
+    $("lampPower").style.setProperty("--lamp", glow + "99"); $("lampPower").style.setProperty("--lamp-solid", glow);
     $("lampTag").textContent = !l.online ? "OFFLINE" : !l.on ? "MATI" :
       `${l.mode === "scene" ? "SUASANA" : l.mode === "colour" ? "WARNA" : "PUTIH"} · ${l.brightness ?? "—"}%`;
     if (Date.now() - lampBusy > 2500 && l.brightness != null) { $("lampBright").value = l.brightness; }
@@ -934,10 +853,10 @@
       el.title = el.textContent;
     } else {
       el.className = `msg ${ev.type}`;
-      const label = { user: ev.source === "voice" ? "ANDA · SUARA" : ev.source === "dictation" ? "DIKTE" : "ANDA", digidaw: "DIGIDAW", alert: "PERINGATAN" }[ev.type] || ev.type.toUpperCase();
+      const label = { user: ev.source === "voice" ? "Anda · suara" : ev.source === "dictation" ? "Dikte" : "Anda", digidaw: "Digidaw", alert: "Peringatan" }[ev.type] || ev.type;
       const head = document.createElement("div");
       head.className = "msg-head";
-      head.textContent = `${label} · ${fmtTime(ev.ts)}`;
+      head.textContent = `${label} · ${fmtTime(ev.ts).slice(0, 5)}`;
       if (ev.type === "digidaw" && ev.brain !== undefined) {
         const tag = document.createElement("span");
         const kind = ev.brain === "local" ? "local" : ev.brain === "gemini" ? "gemini" : "direct";
@@ -1013,8 +932,14 @@
     ind.title = ok ? `Otak lokal ${l.model} siap: menjawab obrolan, pertanyaan ringan & perintah dasar. Gemini dipakai untuk info terbaru & tugas kompleks.`
                    : `Otak lokal tidak aktif (${l.reason || "Ollama mati"}). Semua permintaan lewat Gemini.`;
   }
+  let statsDrawnAt = 0;
   function updateStats(s) {
     if (!s || s.cpu == null) return;
+    net.down.push(s.down); net.up.push(s.up);
+    if (net.down.length > 60) { net.down.shift(); net.up.shift(); }
+    // nobody is looking: the gauges animated with a glow for 0.8 s of every 2 s, about 25% of a core and the compositor with it
+    if (motion.calm && performance.now() - statsDrawnAt < 30000) return;
+    statsDrawnAt = performance.now();
     updateLocalAi(s.local_ai);
     setGauge("g-cpu", s.cpu);
     $("cpuSub").textContent = `${Math.round(s.cpu)}% beban`;
@@ -1028,8 +953,6 @@
     $("netUp").textContent = fmtRate(s.up);
     $("uptime").textContent = fmtUptime(s.uptime);
     $("procCount").textContent = `${s.processes} PROSES`;
-    net.down.push(s.down); net.up.push(s.up);
-    if (net.down.length > 60) { net.down.shift(); net.up.shift(); }
     drawNet();
   }
   function drawNet() {
@@ -1040,7 +963,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const max = Math.max(50, ...net.down, ...net.up);
-    [["down", "rgba(63,216,255,0.9)", "rgba(63,216,255,0.12)"], ["up", "rgba(255,181,71,0.85)", null]].forEach(([k, stroke, fill]) => {
+    [["down", "rgba(74,212,255,0.9)", "rgba(74,212,255,0.12)"], ["up", "rgba(255,180,79,0.8)", null]].forEach(([k, stroke, fill]) => {
       const data = net[k];
       if (data.length < 2) return;
       ctx.beginPath();
@@ -1053,10 +976,10 @@
   // ── weather ──
   function updateWeather(w) {
     if (!w || !w.temp) return;
-    $("wTemp").textContent = w.temp.replace("C", "");
+    $("wTemp").textContent = w.temp.replace(/°?C$/, "°");
     $("wCond").textContent = w.condition;
     $("wCond").title = `${w.condition}${w.place ? " di " + w.place : ""}`;
-    $("weatherPlace").textContent = (w.place || "").split(/\s+/).slice(0, 2).join(" ").toUpperCase();
+    $("weatherPlace").textContent = (w.place || "").split(/\s+/).slice(0, 2).join(" ");
     $("wHum").textContent = w.humidity;
     $("wWind").textContent = w.wind;
   }
@@ -1094,6 +1017,7 @@
   function renderAgenda() {
     const box = $("agendaList");
     $("agendaPanel").hidden = !agendaItems.length;
+    showTodayEmpty();
     $("agendaCount").textContent = `${agendaItems.length} ACARA`;
     box.textContent = "";
     agendaItems.forEach((a) => {
@@ -1108,8 +1032,9 @@
       row.querySelector(".t-label").textContent = a.title;
       row.querySelector(".t-label").title = a.title;
       row.querySelector(".t-sub").textContent = [HARI_PENDEK[d.getDay()], a.time ? a.time.replace(":", ".") : null,
-                                                  a.yearly ? "setiap tahun" : null].filter(Boolean).join(" · ");
+                                                  a.yearly ? "setiap tahun" : null, a.weekly ? "kuliah" : null].filter(Boolean).join(" · ");
       row.querySelector(".when").textContent = a.days === 0 ? "HARI INI" : a.days === 1 ? "BESOK" : `${a.days} HR`;
+      if (a.weekly) row.querySelector(".x").style.visibility = "hidden";      /* (kept by the user's own schedule script) */
       row.querySelector(".x").addEventListener("click", () => {
         if (confirm(`Hapus "${a.title}" dari agenda?`)) sendAction(`delete_event:${a.id}`);
       });
@@ -1123,44 +1048,113 @@
     action: '<path d="M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0"/>',
   };
   const KIND_NAMES = { timer: "TIMER", alarm: "ALARM", reminder: "PENGINGAT", action: "OTOMATIS" };
+  function showTodayEmpty() { $("todayEmpty").hidden = !!(timers.length || agendaItems.length); }
   function renderTimers() {
     const box = $("timers");
     $("timerPanel").hidden = !timers.length;
-    if (!timers.length) { if (!box.querySelector(".empty")) box.innerHTML = '<div class="empty">Tidak ada timer aktif.</div>'; return; }
-    box.textContent = "";
-    timers.forEach((t) => {
-      const due = new Date(t.due), left = Math.max(0, (due - Date.now()) / 1000);
+    showTodayEmpty();
+    const key = JSON.stringify(timers.map((t) => [t.id, t.due, t.label, t.kind, t.repeat]));
+    if (box._key !== key) {
+      box._key = key; box.textContent = "";
+      timers.forEach((t) => {
+        const due = new Date(t.due), kind = t.kind || "timer";
+        const row = document.createElement("div");
+        row.className = "timer-row"; row.dataset.due = due.getTime();
+        row.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${TIMER_ICONS[kind] || TIMER_ICONS.timer}</svg>
+          <div style="min-width:0"><div class="t-label"></div><div class="t-sub"></div></div><b></b><button class="x" title="Batalkan" aria-label="Batalkan">✕</button>`;
+        const named = t.label && !["Alarm", "Timer", "Pengingat"].includes(t.label);
+        row.querySelector(".t-label").textContent = named ? t.label : { alarm: "Alarm", timer: "Timer", reminder: "Pengingat" }[kind] || t.message;
+        const clock = due.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":");
+        const sameDay = due.toDateString() === new Date().toDateString();
+        row.querySelector(".t-sub").textContent = kind === "timer" ? `${named ? "Timer · " : ""}selesai ${clock}` : `${named ? `${{ alarm: "Alarm", reminder: "Pengingat", action: "Otomatis" }[kind] || ""} · ` : ""}${sameDay ? "" : due.toLocaleDateString("id-ID", { weekday: "short", day: "numeric" }) + " "}${clock}${t.repeat ? " · " + t.repeat : ""}`;
+        row.querySelector(".x").addEventListener("click", () => {
+          if (kind === "timer" || kind === "action" || confirm(`Batalkan ${kind === "alarm" ? "alarm" : "pengingat"} ${clock}${t.label && t.label !== "Alarm" ? ` (${t.label})` : ""}?`)) sendAction(`cancel_timer:${t.id}`);
+        });
+        box.appendChild(row);
+      });
+    }
+    box.querySelectorAll(".timer-row").forEach((row) => {
+      const left = Math.max(0, (+row.dataset.due - Date.now()) / 1000);
       const h = Math.floor(left / 3600), m = Math.floor(left % 3600 / 60), s = Math.floor(left % 60);
-      const kind = t.kind || "timer";
-      const row = document.createElement("div");
-      row.className = "timer-row";
-      row.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${TIMER_ICONS[kind] || TIMER_ICONS.timer}</svg>
-        <div style="min-width:0"><div class="t-label"></div><div class="t-sub"></div></div><b></b><button class="x" title="Batalkan" aria-label="Batalkan">✕</button>`;
-      row.querySelector(".t-label").textContent = t.label || t.message;
-      const clock = due.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":");
-      const sameDay = due.toDateString() === new Date().toDateString();
-      row.querySelector(".t-sub").textContent = `${KIND_NAMES[kind] || ""}${kind !== "timer" ? ` · ${sameDay ? "" : due.toLocaleDateString("id-ID", { weekday: "short", day: "numeric" }) + " "}${clock}` : ""}${t.repeat ? " · " + t.repeat : ""}`;
       row.querySelector("b").textContent = left < 86400 ? `${h ? h + ":" : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${Math.round(left / 86400)} hr`;
-      row.querySelector(".x").addEventListener("click", () => sendAction(`cancel_timer:${t.id}`));
-      box.appendChild(row);
     });
   }
+  /* the buttons that follow the user: what they open most, and their routines (their own first) */
+  const quickChip = (label, title, fn, cls = "") => {
+    const b = document.createElement("button");
+    b.className = `chip ${cls}`.trim(); b.textContent = label.toUpperCase(); b.title = title;
+    b.addEventListener("click", fn);
+    return b;
+  };
+  function renderUsed(items) {
+    const box = $("quickUsed"); box.textContent = "";
+    (items || []).forEach((i) => box.appendChild(quickChip(i.label, `Sering dipakai: ${i.command}`, () => sendCommand(i.command))));
+  }
+  function renderRoutineChips(items) {
+    const box = $("quickRoutines");
+    box.querySelectorAll(".routine").forEach((b) => b.remove());
+    const room = 4;
+    /* one click runs it: the built-in ones that darken the room or clean files stay a step away */
+    (items || []).filter((r) => r.custom || ["kerja", "santai", "fokus"].includes(r.key)).slice(0, room).forEach((r) => {
+      const b = quickChip(r.key, r.steps.join(", "), () => sendCommand(`jalankan rutinitas ${r.key}`), `routine${r.custom ? " mine" : ""}`);
+      box.insertBefore(b, $("routineAdd"));
+    });
+  }
+  $("moreBtn").addEventListener("click", () => {
+    const more = $("moreChips"); more.hidden = !more.hidden;
+    $("moreBtn").setAttribute("aria-expanded", String(!more.hidden));
+  });
+  const HARI_PANJANG = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const BULAN_PANJANG = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+  const alarmNow = { timer: 0, until: 0, total: 0 };
+  function tickAlarm() {
+    const left = Math.max(0, alarmNow.until - Date.now() / 1000);
+    $("alarmLeftBar").hidden = !alarmNow.until;
+    const secs = Math.ceil(left);
+    $("alarmLeft").textContent = alarmNow.until ? ` · berhenti sendiri dalam ${secs > 90 ? `${Math.ceil(secs / 60)} menit` : `${secs} detik`}` : "";
+    if (alarmNow.until) $("alarmLeftBar").firstElementChild.style.transform = `scaleX(${alarmNow.total ? left / alarmNow.total : 0})`;
+  }
+  document.querySelectorAll("[data-sys]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-sys]").forEach((x) => { x.classList.toggle("on", x === b); $(x.dataset.sys).hidden = x !== b; });
+  }));
   function renderAlarm(ev) {
     const banner = $("alarmBanner");
-    if (!ev.ringing) { banner.hidden = true; return; }
-    $("alarmKind").textContent = KIND_NAMES[ev.kind] || "ALARM";
-    $("alarmTime").textContent = (ev.time || new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })).replace(".", ":");
-    $("alarmLabel").textContent = ev.label || (ev.kind === "timer" ? "Waktu habis" : "");
+    if (!ev.ringing) { banner.hidden = true; clearInterval(alarmNow.timer); alarmNow.until = 0; return; }
+    const now = new Date();
+    banner.className = `alarm-banner ${ev.kind === "alarm" ? "" : ev.kind || ""}`;
+    $("alarmKind").textContent = ev.test ? "UJI ALARM" : KIND_NAMES[ev.kind] || "ALARM";
+    $("alarmTime").textContent = (ev.time || now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })).replace(":", ".");
+    $("alarmDate").textContent = `${HARI_PANJANG[now.getDay()]}, ${now.getDate()} ${BULAN_PANJANG[now.getMonth()]} ${now.getFullYear()}`;
+    $("alarmLabel").textContent = ev.test ? "" : ev.label || (ev.kind === "timer" ? "Waktu habis" : "");
+    $("alarmSound").hidden = !ev.sound;
+    $("alarmSound").lastElementChild.textContent = ev.sound || "";
+    const snooze = $("alarmSnoozes"); snooze.textContent = "";
+    if (!ev.test) {
+      const label = document.createElement("span"); label.textContent = "Tunda"; snooze.appendChild(label);
+      [...new Set([Number(ev.snooze) || 5, 10, 15])].sort((a, b) => a - b).forEach((minutes) => {
+        const b = document.createElement("button"); b.textContent = `${minutes} menit`;
+        b.addEventListener("click", () => sendAction(`alarm_snooze:${minutes}`));
+        snooze.appendChild(b);
+      });
+    }
+    const wasHidden = banner.hidden;
     banner.hidden = false;
-    $("alarmStop").focus();
+    if (ev.until) {
+      alarmNow.until = ev.until; alarmNow.total = Math.max(1, ev.until - Date.now() / 1000);
+      clearInterval(alarmNow.timer); alarmNow.timer = setInterval(tickAlarm, 500);
+    }
+    tickAlarm();
+    if (wasHidden) $("alarmStop").focus();
   }
   $("alarmStop").addEventListener("click", () => sendAction("alarm_stop"));
-  $("alarmSnooze").addEventListener("click", () => sendAction("alarm_snooze"));
 
   // ── events ──
   function handle(ev) {
     switch (ev.type) {
       case "hello":
+        if (ev.open_settings) openSettings(ev.open_settings);
+        renderUsed(ev.shortcuts);
+        renderRoutineChips(ev.routines);
         voiceEnabled = !!ev.state.voice_enabled;
         userTitle = ev.user_title || "Sir";
         $("modeText").textContent = voiceEnabled ? "SUARA + TEKS" : "TEKS";
@@ -1183,6 +1177,7 @@
         agendaItems = ev.agenda || []; renderAgenda();
         renderBuild(ev.build);
         renderPaused(!!ev.state.paused);
+        renderUpdate(ev.state.update);
         renderAi(ev.ai);
         renderAlarm(ev.state.alarm || { ringing: false });
         renderLamp(ev.state.lamp);
@@ -1203,6 +1198,8 @@
       case "timers": timers = ev.timers || []; renderTimers(); break;
       case "agenda": agendaItems = ev.items || []; renderAgenda(); break;
       case "alarm": renderAlarm(ev); break;
+      case "open_settings": openSettings(ev.section); break;
+      case "routines": renderRoutineChips(ev.items); if (cp.open && cp.section === "Rutinitas") renderSettings("Rutinitas"); break;
       case "dictation": $("dictBadge").classList.toggle("show", !!ev.active); break;
       case "listening": startCountdown(ev.seconds, ev.kind || "wake"); break;
       case "heard": addLog({ type: "heard", text: ev.text, ts: ev.ts }); break;
@@ -1215,6 +1212,7 @@
         break;
       case "build": renderBuild(ev); updateTabCounts(); if (ACTIVE_BUILD.includes(ev.status)) autoTab("project"); if (["running", "done", "failed", "cancelled"].includes(ev.status)) refreshWorkspaceSoon(); break;
       case "generate": genJobs[ev.id] = ev; autoTab("generate"); renderGenerate({ jobs: [], results: (workspace.generate || {}).results || [] }); if (ev.status !== "working") refreshWorkspaceSoon(); break;
+      case "update": renderUpdate(ev); break;
       case "toast": toast(ev.text, ev.level || "info"); break;
       case "security": if (ev.status === "done" || ev.status === "running") refreshWorkspaceSoon();
         if (ev.status === "running" && ev.step === "Memulai analisis…") toast("Analisis keamanan berjalan…", "info");
@@ -1252,7 +1250,7 @@
     canvas: $("reactor"), state: "idle", t: 0, level: 0, ripples: [], last: performance.now(),
     ripple() { this.ripples.push({ r: 0.55, a: 0.8 }); },
   };
-  const COLORS = { idle: [63, 216, 255], listening: [120, 232, 255], thinking: [255, 181, 71], speaking: [63, 216, 255], paused: [125, 139, 153] };
+  const COLORS = { idle: [74, 212, 255], listening: [82, 229, 166], thinking: [255, 180, 79], speaking: [74, 212, 255], paused: [125, 139, 153] };
   const SPEED = { idle: 0.25, listening: 0.9, thinking: 2.2, speaking: 0.6, paused: 0.08 };
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   let col = [...COLORS.idle];
@@ -1266,24 +1264,25 @@
     return 0.05;
   }
 
-  // ── energy: most of the time the HUD is just there. Unseen (another workspace, minimized, screen off) or idle
-  //    without focus for 30 s: the rings stop and the reactor draws 8 frames a second instead of 60; listening,
-  //    thinking or speaking it is fully alive again at once ──
+  // ── energy: most of the time the HUD is just there. Unseen (another workspace, minimized, screen off), idle without
+  //    focus for 30 s or idle with it for 5 minutes: the rings and the reactor stand still (8 frames a second of it still took 50% of a
+  //    core, and as much again from the compositor); listening, thinking or speaking it is fully alive again at once ──
   const motion = { calm: false, idleSince: performance.now(), reduced: matchMedia("(prefers-reduced-motion: reduce)").matches };
   function updateCalm() {
     const idle = reactor.state === "idle" || reactor.state === "paused";
-    const calm = document.hidden || motion.reduced || (idle && !document.hasFocus() && performance.now() - motion.idleSince > 30000);
+    const calm = document.hidden || motion.reduced || (idle && performance.now() - motion.idleSince > (document.hasFocus() ? 300000 : 30000));
     if (calm !== motion.calm) { motion.calm = calm; document.documentElement.classList.toggle("calm", calm); }
   }
   document.addEventListener("visibilitychange", updateCalm);
   window.addEventListener("focus", updateCalm);
   window.addEventListener("blur", updateCalm);
   setInterval(updateCalm, 5000);
+  function reactorBusy() { return reactor.state !== "idle" && reactor.state !== "paused"; }
+  function reactorResting() { return document.hidden || (motion.calm && !reactorBusy()); }
   function nextReactorFrame() {
-    if (document.hidden) return setTimeout(() => requestAnimationFrame(drawReactor), 1000);   // not drawn while unseen
-    const busy = reactor.state !== "idle" && reactor.state !== "paused";
-    if (busy) return requestAnimationFrame(drawReactor);
-    setTimeout(() => requestAnimationFrame(drawReactor), motion.calm ? 125 : 33);
+    if (reactorResting()) return setTimeout(nextReactorFrame, 300);      // the last frame stays on the screen, nothing is drawn
+    if (reactorBusy()) return requestAnimationFrame(drawReactor);
+    setTimeout(() => requestAnimationFrame(drawReactor), 33);
   }
 
   function drawReactor(now) {
@@ -1299,119 +1298,106 @@
     reactor.t += dt * SPEED[st];
     const target = COLORS[st];
     col = col.map((v, i) => v + (target[i] - v) * 0.08);
-
     reactor.level += (reactorLevel(now) - reactor.level) * 0.18;
-    const L = reactor.level;
-
-    const cx = size / 2, cy = size / 2, R = size / 2 * 0.94;
+    const L = reactor.level, t = reactor.t;
+    const R = size / 2 * 0.98, TAU = Math.PI * 2;
     ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(size / 2, size / 2);
 
-    // glow
-    const glow = ctx.createRadialGradient(cx, cy, R * 0.05, cx, cy, R);
-    glow.addColorStop(0, rgba(col, 0.28 + L * 0.3));
-    glow.addColorStop(0.45, rgba(col, 0.07 + L * 0.06));
-    glow.addColorStop(1, "rgba(0,0,0,0)");
+    // glow behind it all (a gradient: shadowBlur on every stroke cost a whole core)
+    const glow = ctx.createRadialGradient(0, 0, R * 0.05, 0, 0, R);
+    glow.addColorStop(0, rgba(col, 0.3 + L * 0.3));
+    glow.addColorStop(0.42, rgba(col, 0.06 + L * 0.07));
+    glow.addColorStop(1, rgba(col, 0));
     ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(-R, -R, R * 2, R * 2);
 
+    // a scale around the edge
     ctx.save();
-    ctx.translate(cx, cy);
-
-    // outer tick ring
-    ctx.save();
-    ctx.rotate(reactor.t * 0.15);
+    ctx.rotate(t * 0.15);
+    ctx.beginPath();
     for (let i = 0; i < 120; i++) {
-      const a = (i / 120) * Math.PI * 2, long = i % 10 === 0;
-      const r1 = R * 0.985, r2 = R * (long ? 0.92 : 0.95);
-      ctx.strokeStyle = rgba(col, long ? 0.85 : 0.3);
-      ctx.lineWidth = long ? 2 : 1;
-      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); ctx.stroke();
+      if (i % 10 === 0) continue;
+      const a = (i / 120) * TAU, x = Math.cos(a), y = Math.sin(a);
+      ctx.moveTo(x * R * 0.985, y * R * 0.985); ctx.lineTo(x * R * 0.955, y * R * 0.955);
     }
+    ctx.strokeStyle = rgba(col, 0.26); ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * TAU, x = Math.cos(a), y = Math.sin(a);
+      ctx.moveTo(x * R * 0.985, y * R * 0.985); ctx.lineTo(x * R * 0.925, y * R * 0.925);
+    }
+    ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 1.6; ctx.stroke();
     ctx.restore();
 
-    // segmented arcs (counter-rotating)
+    // three long arcs, turning the other way
     ctx.save();
-    ctx.rotate(-reactor.t * 0.45);
-    ctx.lineWidth = R * 0.03;
-    ctx.strokeStyle = rgba(col, 0.75);
-    ctx.shadowColor = rgba(col, 0.9); ctx.shadowBlur = 12;
-    for (let i = 0; i < 6; i++) {
-      const a0 = (i / 6) * Math.PI * 2;
-      ctx.beginPath(); ctx.arc(0, 0, R * 0.845, a0, a0 + (Math.PI * 2 / 6) * 0.62); ctx.stroke();
-    }
-    ctx.restore();
+    ctx.rotate(-t * 0.45);
+    ctx.lineCap = "round"; ctx.lineWidth = Math.max(2, R * 0.016);
+    ctx.strokeStyle = rgba(col, 0.82);
+    [[0, 1.5], [2.3, 0.75], [3.6, 1.9]].forEach(([from, span]) => { ctx.beginPath(); ctx.arc(0, 0, R * 0.865, from, from + span); ctx.stroke(); });
+    ctx.lineCap = "butt"; ctx.restore();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.865, 0, TAU); ctx.strokeStyle = rgba(col, 0.12); ctx.lineWidth = 1; ctx.stroke();
 
-    // audio bars
-    const bars = 72;
-    for (let i = 0; i < bars; i++) {
-      const a = (i / bars) * Math.PI * 2 + reactor.t * 0.1;
-      const n = Math.abs(Math.sin(i * 1.7 + now / 120) * Math.cos(i * 0.6 - now / 190));
-      const len = R * (0.015 + L * 0.11 * n);
-      const r1 = R * 0.72;
-      ctx.strokeStyle = rgba(col, 0.25 + L * 0.6);
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * (r1 + len), Math.sin(a) * (r1 + len)); ctx.stroke();
+    // the voice: bars that grow while Digidaw talks and listens
+    ctx.beginPath();
+    for (let i = 0; i < 96; i++) {
+      const a = (i / 96) * TAU + t * 0.1, n = Math.abs(Math.sin(i * 1.7 + now / 120) * Math.cos(i * 0.6 - now / 190));
+      const r1 = R * 0.7, r2 = r1 + R * (0.012 + L * 0.115 * n), x = Math.cos(a), y = Math.sin(a);
+      ctx.moveTo(x * r1, y * r1); ctx.lineTo(x * r2, y * r2);
     }
+    ctx.strokeStyle = rgba(col, 0.28 + L * 0.6); ctx.lineWidth = 1.8; ctx.stroke();
 
     // dashed ring
     ctx.save();
-    ctx.rotate(reactor.t * 0.8);
-    ctx.setLineDash([R * 0.018, R * 0.03]);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = rgba(col, 0.55);
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.68, 0, Math.PI * 2); ctx.stroke();
+    ctx.rotate(t * 0.8);
+    ctx.setLineDash([R * 0.016, R * 0.034]);
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.665, 0, TAU);
+    ctx.lineWidth = 1.6; ctx.strokeStyle = rgba(col, 0.5); ctx.stroke();
     ctx.restore();
 
-    // thinking orbiters
+    // thinking: three lights going round
     if (st === "thinking") {
       for (let i = 0; i < 3; i++) {
-        const a = reactor.t * 2.4 + i * 0.5;
+        const a = t * 2.4 + i * 0.45;
         ctx.fillStyle = rgba(col, 1 - i * 0.28);
-        ctx.shadowColor = rgba(col, 1); ctx.shadowBlur = 14;
-        ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.6, Math.sin(a) * R * 0.6, R * 0.022 - i * 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.6, Math.sin(a) * R * 0.6, R * 0.02 - i * 1.2, 0, TAU); ctx.fill();
       }
-      ctx.shadowBlur = 0;
     }
 
-    // arc reactor coils
+    // the coils of the reactor
     ctx.save();
-    ctx.rotate(reactor.t * 0.12);
+    ctx.rotate(t * 0.12);
+    ctx.beginPath();
     for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2, span = (Math.PI * 2 / 10) * 0.72;
-      ctx.beginPath();
+      const a = (i / 10) * TAU, span = (TAU / 10) * 0.72;
+      ctx.moveTo(Math.cos(a) * R * 0.53, Math.sin(a) * R * 0.53);
       ctx.arc(0, 0, R * 0.53, a, a + span);
       ctx.arc(0, 0, R * 0.39, a + span, a, true);
       ctx.closePath();
-      ctx.fillStyle = rgba(col, 0.16 + L * 0.35);
-      ctx.fill();
-      ctx.strokeStyle = rgba(col, 0.85);
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
     }
+    ctx.fillStyle = rgba(col, 0.13 + L * 0.34); ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.78); ctx.lineWidth = 1.2; ctx.stroke();
     ctx.restore();
 
-    // inner ring + core
-    ctx.strokeStyle = rgba(col, 0.9);
-    ctx.lineWidth = 2;
-    ctx.shadowColor = rgba(col, 1); ctx.shadowBlur = 18;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.33, 0, Math.PI * 2); ctx.stroke();
-    const coreR = R * (0.24 + L * 0.05);
+    // the core
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.33, 0, TAU); ctx.strokeStyle = rgba(col, 0.85); ctx.lineWidth = 1.6; ctx.stroke();
+    const coreR = R * (0.25 + L * 0.05);
     const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
     core.addColorStop(0, "rgba(255,255,255,1)");
-    core.addColorStop(0.35, rgba(col.map((v) => Math.min(255, v + 90)), 0.95));
-    core.addColorStop(0.75, rgba(col, 0.45));
+    core.addColorStop(0.32, rgba(col.map((v) => Math.min(255, v + 90)), 0.95));
+    core.addColorStop(0.72, rgba(col, 0.42));
     core.addColorStop(1, rgba(col, 0));
     ctx.fillStyle = core;
-    ctx.beginPath(); ctx.arc(0, 0, coreR, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.beginPath(); ctx.arc(0, 0, coreR, 0, TAU); ctx.fill();
 
-    // ripples (listening)
+    // ripples while listening
     reactor.ripples = reactor.ripples.filter((rp) => rp.a > 0.02);
     reactor.ripples.forEach((rp) => {
       rp.r += dt * 0.35; rp.a *= 0.965;
-      ctx.strokeStyle = rgba(col, rp.a);
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(0, 0, R * rp.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = rgba(col, rp.a); ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(0, 0, R * rp.r, 0, TAU); ctx.stroke();
     });
     if (st === "listening" && Math.random() < 0.02) reactor.ripple();
 
@@ -1691,7 +1677,8 @@
   const cp = { open: false, fields: [], section: "", dirty: {} };
   function cpStatus(text, kind = "") { const el = $("cpStatus"); el.textContent = text; el.className = `cp-status ${kind}`; }
 
-  async function openSettings() {
+  async function openSettings(section) {
+    if (typeof section === "string") cp.section = section;
     cp.open = true; cp.dirty = {};
     $("cpOverlay").classList.add("open");
     $("cpRestart").hidden = true;
@@ -1703,11 +1690,12 @@
       renderSettings(cp.section || cp.fields[0].section);
     } catch (e) { cpStatus("Tidak bisa memuat pengaturan.", "err"); }
   }
-  function closeSettings() { cp.open = false; $("cpOverlay").classList.remove("open"); }
+  function closeSettings() { cp.open = false; stopSound(); $("cpOverlay").classList.remove("open"); }
 
   function renderSettings(section) {
     cp.section = section;
     const sections = [...new Set(cp.fields.map((f) => f.section)), "Tentang & Daya"];
+    sections.splice(sections.indexOf("Alarm") + 1, 0, "Rutinitas");
     const nav = $("cpNav"); nav.textContent = "";
     sections.forEach((name) => {
       const b = document.createElement("button");
@@ -1721,6 +1709,7 @@
     title.className = "cp-section-title"; title.textContent = section;
     body.appendChild(title);
     if (section === "Tentang & Daya") return renderPower(body);
+    if (section === "Rutinitas") return renderRoutines(body);
     cp.fields.filter((f) => f.section === section).forEach((f) => body.appendChild(renderField(f)));
   }
 
@@ -1735,6 +1724,10 @@
     const current = f.key in cp.dirty ? cp.dirty[f.key] : f.value;
     const set = (v) => { cp.dirty[f.key] = v; cpStatus("Ada perubahan yang belum disimpan.", "warn"); };
     let control;
+    if (f.type === "alarm_sound") {
+      row.appendChild(renderAlarmSound(f));
+      return row;
+    }
     if (f.type === "bool") {
       control = document.createElement("label"); control.className = "switch";
       const input = document.createElement("input"); input.type = "checkbox"; input.checked = !!current;
@@ -1773,6 +1766,157 @@
     return row;
   }
 
+  /* the user's alarm sounds: choosing, hearing, adding and removing take effect at once (no Save) */
+  const soundApi = (body) => fetch("/api/alarm-sounds", { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify(body) }).then((r) => r.json());
+  const soundPlay = { id: null, timer: 0 };
+  function stopSound() { clearTimeout(soundPlay.timer); if (soundPlay.id !== null) soundApi({ op: "stop" }); soundPlay.id = null; }
+  function renderAlarmSound(f) {
+    const box = document.createElement("div"); box.className = "sound-box";
+    const input = document.createElement("input"); input.type = "file"; input.hidden = true; input.accept = "audio/*,.mp3,.wav,.ogg,.oga,.opus,.flac,.m4a,.aac,.webm,.mp4";
+    let info = { sounds: [], current: "", max_mb: 40, preview_seconds: 30 };
+
+    const fmt = (n) => n ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}` : "";
+    function row(id, name, seconds) {
+      const r = document.createElement("label"); r.className = `sound-row${info.current === id ? " on" : ""}`;
+      const radio = document.createElement("input"); radio.type = "radio"; radio.name = "alarmSound"; radio.checked = info.current === id;
+      radio.addEventListener("change", async () => {
+        const res = await soundApi({ op: "choose", id });
+        if (!res.ok) return cpStatus(res.error || "Gagal memilih suara.", "err");
+        info.current = id; f.value = id; draw();
+        cpStatus(`Suara alarm: ${name}.`, "ok");
+      });
+      const label = document.createElement("span"); label.className = "sound-name"; label.textContent = name; label.title = name;
+      const len = document.createElement("span"); len.className = "sound-len"; len.textContent = fmt(seconds);
+      const play = document.createElement("button"); play.type = "button"; play.className = "sound-btn";
+      play.textContent = soundPlay.id === id ? "■ HENTIKAN" : "▶ COBA";
+      play.setAttribute("aria-label", `${play.textContent} ${name}`);
+      play.addEventListener("click", async (e) => {
+        e.preventDefault();
+        if (soundPlay.id === id) { stopSound(); return draw(); }
+        const res = await soundApi({ op: "preview", id });
+        if (!res.ok) return cpStatus("Suara ini tidak bisa diputar.", "err");
+        clearTimeout(soundPlay.timer);
+        soundPlay.id = id; soundPlay.timer = setTimeout(() => { soundPlay.id = null; draw(); }, info.preview_seconds * 1000);
+        draw();
+      });
+      r.append(radio, label, len, play);
+      if (id) {
+        const del = document.createElement("button"); del.type = "button"; del.className = "sound-btn del"; del.textContent = "✕";
+        del.title = "Hapus suara ini"; del.setAttribute("aria-label", `Hapus ${name}`);
+        del.addEventListener("click", async (e) => {
+          e.preventDefault();
+          if (!confirm(`Hapus "${name}" dari daftar suara alarm?`)) return;
+          if (soundPlay.id === id) soundPlay.id = null;
+          const res = await soundApi({ op: "delete", id });
+          if (res.ok) { await reload(); cpStatus(`${name} dihapus.`, "ok"); }
+        });
+        r.append(del);
+      } else r.append(document.createElement("span"));
+      return r;
+    }
+    async function upload(file) {
+      if (!file) return;
+      if (file.size > info.max_mb * 1024 * 1024) return cpStatus(`File terlalu besar. Batasnya ${info.max_mb} MB.`, "err");
+      cpStatus(`Menambahkan ${file.name}…`);
+      try {
+        const r = await fetch("/api/alarm-sounds/upload", { method: "POST", headers: { "X-Digidaw-Token": TOKEN, "X-Filename": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" }, body: file });
+        const res = await r.json();
+        if (!res.ok) return cpStatus(res.error || "File tidak bisa dipakai.", "err");
+        await soundApi({ op: "choose", id: res.sound.id });
+        await reload();
+        f.value = res.sound.id;
+        cpStatus(`${res.sound.name} ditambahkan dan dipakai sebagai suara alarm.`, "ok");
+      } catch (e) { cpStatus("Gagal mengirim file ke Digidaw.", "err"); }
+    }
+    function draw() {
+      box.textContent = "";
+      box.appendChild(row("", "Bawaan Digidaw", 0));
+      info.sounds.forEach((s) => box.appendChild(row(s.id, s.name, s.seconds)));
+      const drop = document.createElement("button"); drop.type = "button"; drop.className = "sound-drop";
+      const main = document.createElement("b"); main.textContent = "+ Tambah audio";
+      const sub = document.createElement("span"); sub.textContent = `Klik untuk memilih, atau seret file ke sini. MP3, WAV, OGG, FLAC, M4A, maks ${info.max_mb} MB.`;
+      drop.append(main, sub);
+      drop.addEventListener("click", () => input.click());
+      ["dragenter", "dragover"].forEach((n) => drop.addEventListener(n, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+      ["dragleave", "drop"].forEach((n) => drop.addEventListener(n, () => drop.classList.remove("over")));
+      drop.addEventListener("drop", (e) => { e.preventDefault(); upload(e.dataTransfer.files[0]); });
+      const test = document.createElement("button"); test.type = "button"; test.className = "btn"; test.textContent = "BUNYIKAN UJI ALARM";
+      test.addEventListener("click", () => { stopSound(); draw(); closeSettings(); sendAction("alarm_test"); });
+      box.append(drop, test, input);
+    }
+    async function reload() {
+      const r = await fetch(`/api/alarm-sounds?token=${encodeURIComponent(TOKEN)}`);
+      info = await r.json();
+      draw();
+    }
+    input.addEventListener("change", () => { upload(input.files[0]); input.value = ""; });
+    reload().catch(() => cpStatus("Daftar suara alarm tidak bisa dimuat.", "err"));
+    return box;
+  }
+
+  /* routines and taught words: the same as saying "buat rutinitas baru" and "kalau aku bilang X maksudnya Y" */
+  const routineApi = (body) => fetch("/api/routines", { method: "POST", headers: { "Content-Type": "application/json", "X-Digidaw-Token": TOKEN }, body: JSON.stringify(body) }).then((r) => r.json());
+  async function renderRoutines(body) {
+    const make = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+    const hint = make("div", "rt-hint");
+    hint.append("Ucapkan ", make("b", "", "\"buat rutinitas kuliah\""), ", sebutkan langkahnya satu per satu, lalu ", make("b", "", "\"selesai\""), ". Atau isi di sini. Menjalankannya: ", make("b", "", "\"mode kuliah\""), ".");
+    const list = make("div", "rt-list");
+    body.append(hint);
+
+    const form = make("form", "rt-form");
+    const name = make("input"); name.placeholder = "Nama, misalnya kuliah"; name.maxLength = 30; name.setAttribute("aria-label", "Nama rutinitas");
+    const steps = make("textarea"); steps.rows = 4; steps.setAttribute("aria-label", "Langkah, satu per baris");
+    steps.placeholder = "Satu langkah per baris, seperti saat memberi perintah:\nbuka whatsapp di workspace 1\nbuka firefox di workspace 2\nbuka situs kampus.ac.id\nlampu putih";
+    const save = make("button", "btn primary", "SIMPAN RUTINITAS"); save.type = "submit";
+    form.append(name, steps, save);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const r = await routineApi({ op: "save", name: name.value, steps: steps.value.split("\n") });
+      if (!r.ok) return cpStatus(r.error || "Gagal menyimpan.", "err");
+      cpStatus(`Rutinitas ${r.key} tersimpan. Ucapkan "mode ${r.key}" untuk menjalankannya.`, "ok");
+      name.value = ""; steps.value = "";
+    });
+    body.append(make("div", "rt-sub", "Buat rutinitas"), form, make("div", "rt-sub", "Rutinitas"), list);
+
+    const words = make("div", "rt-list");
+    const teach = make("form", "rt-form");
+    const row = make("div", "rt-two");
+    const heard = make("input"); heard.placeholder = "Kalau saya bilang…"; heard.setAttribute("aria-label", "Kata yang diucapkan");
+    const meant = make("input"); meant.placeholder = "…maksudnya, misalnya pindah ke workspace 2"; meant.setAttribute("aria-label", "Maksudnya");
+    const add = make("button", "btn", "AJARKAN"); add.type = "submit";
+    row.append(heard, meant, add); teach.append(row);
+    teach.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const r = await routineApi({ op: "teach", heard: heard.value, meant: meant.value });
+      cpStatus(r.message || "Gagal.", r.ok ? "ok" : "err");
+      if (r.ok) { heard.value = ""; meant.value = ""; }
+    });
+    body.append(make("div", "rt-sub", "Kata yang diajarkan"), words, teach);
+
+    const data = await fetch(`/api/routines?token=${encodeURIComponent(TOKEN)}`).then((r) => r.json());
+    data.routines.forEach((r) => {
+      const item = make("div", `rt-row${r.custom ? " mine" : ""}`);
+      const info = make("div"); info.append(make("div", "rt-name", r.key), make("div", "rt-steps", r.steps.join(", ")));
+      const run = make("button", "btn", "JALANKAN"); run.type = "button";
+      run.addEventListener("click", () => { closeSettings(); sendCommand(`jalankan rutinitas ${r.key}`); });
+      const del = make("button", "btn", "✕"); del.type = "button"; del.title = "Hapus"; del.setAttribute("aria-label", `Hapus ${r.key}`);
+      del.addEventListener("click", async () => {
+        if (!confirm(`Hapus rutinitas "${r.key}"?`)) return;
+        const res = await routineApi({ op: "delete", key: r.key });
+        cpStatus(res.message || "", "ok");
+      });
+      item.append(info, run, del); list.appendChild(item);
+    });
+    if (!data.words.length) words.append(make("div", "rt-hint", "Belum ada. Misalnya: kalau saya bilang \"ruang dua\", maksudnya pindah ke workspace 2."));
+    data.words.forEach((w) => {
+      const item = make("div", "rt-row");
+      const info = make("div"); info.append(make("div", "rt-name", w.heard), make("div", "rt-steps", `artinya ${w.meant}`));
+      const del = make("button", "btn", "✕"); del.type = "button"; del.title = "Lupakan"; del.setAttribute("aria-label", `Lupakan ${w.heard}`);
+      del.addEventListener("click", async () => { await routineApi({ op: "forget", heard: w.heard }); renderSettings("Rutinitas"); });
+      item.append(info, make("span"), del); words.appendChild(item);
+    });
+  }
+
   function renderPower(body) {
     const text = document.createElement("div"); text.className = "field-help";
     text.textContent = "Digidaw berjalan di latar belakang tanpa jendela CMD. Menutup HUD tidak mematikan Digidaw — panggil namanya atau tekan hotkey HUD untuk membukanya lagi.";
@@ -1802,7 +1946,7 @@
     } catch (e) { cpStatus("Gagal menyimpan.", "err"); }
   }
 
-  $("cpBtn").addEventListener("click", openSettings);
+  $("cpBtn").addEventListener("click", () => openSettings());
   $("pauseBtn").addEventListener("click", () => sendAction(paused ? "resume_listening" : "pause_listening"));
   $("cpClose").addEventListener("click", closeSettings);
   $("cpCancel").addEventListener("click", closeSettings);

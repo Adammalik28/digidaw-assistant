@@ -21,6 +21,8 @@ import daily          # noqa: E402
 import tts            # noqa: E402
 import safety         # noqa: E402
 
+watchers.STATE_FILE = Path(tempfile.mkdtemp()) / "watchers.json"      # never the real one: a test run emptied the user's saved watches
+
 
 def test_watch_download():
     folder = Path(tempfile.mkdtemp())
@@ -47,7 +49,8 @@ def test_watch_message():
     while not said and time.time() < deadline:
         time.sleep(0.02)
     assert said and "Rina sudah membalas" in said[0][0] and said[0][1] == "reminder", said
-    assert notifications.take_offer() == "Rina"                           # "ya" reads her message
+    assert notifications.offered() == "Rina"                              # "ya" reads her message
+    notifications.clear_offer()
     assert notifications.last_chat()["name"] == "Rina"                    # "balas …" answers her
     assert not watchers._watches                                          # done: watched once
 
@@ -140,19 +143,15 @@ def test_merge_stream():
 
 
 def test_barge_in():
-    """While Digidaw talks (echo cancellation on), only "Digidaw …" or "stop" interrupts it."""
+    """While Digidaw talks, only "Digidaw …" or "stop" interrupts it. (The rest of how it hears that: tests/test_interrupt.py.)"""
     import core
-    import aec
     stopped = []
-    real_stop, real_chime = core.tts.stop, core.chime
+    real_stop, real_chime, real_count = core.tts.stop, core.chime, core.metrics.count
     core.tts.stop = lambda: stopped.append(True)
     core.chime = lambda up=True: None
-    aec._ready.set()
-    saved_barge = config.BARGE_IN
-    config.BARGE_IN = True                                              # (off by default since 3 Nov)
+    core.metrics.count = lambda *a, **k: None                           # (the real day's counters stay real)
     try:
         c = core.DigidawCore(voice_enabled=False)
-        assert c.mic_muted() is False                                   # it keeps listening while it talks
         assert c._barge_in("terus dia bilang begitu") is False and not stopped     # TV / echo: ignored
         assert c._barge_in("stop") is False and stopped                 # stop: speech ends, nothing else happens
         stopped.clear()
@@ -162,10 +161,8 @@ def test_barge_in():
         stopped.clear()
         assert c._barge_in("Digidaw") is True and stopped               # stop, and listen for the command
     finally:
-        aec._ready.clear()
-        config.BARGE_IN = saved_barge
-        core.tts.stop, core.chime = real_stop, real_chime
-    assert c.mic_muted() == core.tts.is_audible()                       # without echo cancellation: as before
+        core.tts.stop, core.chime, core.metrics.count = real_stop, real_chime, real_count
+    assert c.mic_muted() == core.tts.is_audible()                       # the everyday microphone is shut while it talks
 
 
 def test_reply_needs_yes():

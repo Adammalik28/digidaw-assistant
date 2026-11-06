@@ -204,12 +204,14 @@ def _state() -> dict:
         "media": hud_server._latest.get("media") or {}, "weather": hud_server._latest.get("weather") or {},
         "battery": stats.get("battery"), "plugged": stats.get("plugged"), "volume": volume,
         "agenda": agenda.snapshot(), "timers": system_control.timers_snapshot(), "log": replies,
+        "routines": __import__("protocols").for_hud(),
         # for notifications on the phone: recent alerts (reminders, agenda, battery...) and a ringing alarm, not the
         # ones only meant for the PC (a message announcement: the phone shows the message itself)
         "alerts": [{"text": e.get("text", ""), "ts": e.get("ts"), "level": e.get("level", "info")}
                    for e in list(events.history) if e.get("type") == "alert" and e.get("push", True)][-5:],
         "alarm": events.state.get("alarm") or {"ringing": False},
         "lamp": events.state.get("lamp") or None,
+        "update": events.state.get("update") or None,
     }
 
 
@@ -357,13 +359,6 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             return self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-        if path == "/holo3d.js" and (PAGE.parent / "holo3d.js").is_file():                     # the 3D drawing code, shared with the PC HUD
-            return self._send(200, (PAGE.parent / "holo3d.js").read_bytes(), "text/javascript; charset=utf-8")
-        if path.startswith("/vendor/"):              # Three.js: kept by the phone for a week, it's ~700 KB
-            import hud_server
-            lib = hud_server.vendor_file(path)
-            return self._send(200, lib.read_bytes(), "text/javascript; charset=utf-8",
-                              {"Cache-Control": "max-age=604800"}) if lib else self._send(404, b"", "text/plain")
         if path == "/api/state":
             if not self._session_ok():
                 return self._json(401, {"login": True})
@@ -537,9 +532,7 @@ class _Handler(BaseHTTPRequestHandler):
                                                                str(data.get("time", "")))})
         if path == "/api/timer":
             import alarms
-            with alarms._lock:
-                alarms._items[:] = [i for i in alarms._items if i["id"] != str(data.get("cancel", ""))]
-            alarms._changed()
+            alarms.cancel_id(str(data.get("cancel", "")), "HUD HP")
             return self._json(200, {"ok": True})
         self._send(404, b"", "text/plain")
 

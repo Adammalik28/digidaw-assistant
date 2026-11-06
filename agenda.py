@@ -12,17 +12,20 @@ import datetime
 import json
 import re
 import threading
+import time as time_module
 import time
 import uuid
 from pathlib import Path
 
 import config
+import jadwal_kuliah
 import storage
 import events
 
 T = config.USER_TITLE
 ANNOUNCE = None                       # set by main (core.announce)
 STATE_FILE = Path(config.BASE_DIR) / "agenda.json"
+SMALL_HOURS_UNTIL = 4                 # before this hour the night isn't over yet (tomorrow_offset)
 EVENING_BEFORE = (19, 0)              # "besok ada ..." the day before
 MORNING_OF = (7, 0)                   # "hari ini ..." on the day
 HOUR_BEFORE = 60                      # minutes before an event with a time
@@ -51,7 +54,17 @@ def _save():
     events.emit("agenda", items=snapshot())
 
 
+_loaded = {"file": None}
+
+
+def _ensure_loaded():
+    """Before changing anything: a process that hadn't read the file wrote only its new event over all the others (it happened)."""
+    if _loaded["file"] != STATE_FILE:
+        _load()
+
+
 def _load():
+    _loaded["file"] = STATE_FILE
     data = storage.load_json(STATE_FILE)
     if not isinstance(data, dict):
         return
@@ -64,6 +77,15 @@ def _load():
 
 def _today() -> datetime.date:
     return datetime.date.today()
+
+
+def _hour() -> int:
+    return datetime.datetime.now().hour
+
+
+def tomorrow_offset() -> int:
+    """How many calendar days away "besok" is. Said at 00:50, before going to sleep, it is the morning ahead: "kuliah besok jam 9" was saved a day too late."""
+    return 0 if _hour() < SMALL_HOURS_UNTIL else 1
 
 
 def _num(word: str) -> int | None:
@@ -95,7 +117,7 @@ DATE_PATTERNS = [
     # 20/10/2026, 20-10, 20.10.2026
     (re.compile(r"(?:tanggal |tgl\.? )?\b(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?\b(?![.:]\d)", re.IGNORECASE), "dmy_digits"),
     # tanggal 20 (this or next month)
-    (re.compile(rf"\b(?:tanggal|tgl\.?|tg) {_DAY_NUM}\b(?!\s*(?:jam|menit))", re.IGNORECASE), "day_only"),
+    (re.compile(rf"\b(?:tanggal|tgl\.?|tg) {_DAY_NUM}\b(?!\s*(?:jam(?!\s+\d)|menit))", re.IGNORECASE), "day_only"),
     (re.compile(r"\b(hari ini|nanti malam|malam ini|besok lusa|besok|lusa)\b", re.IGNORECASE), "relative"),
     (re.compile(r"\b(minggu depan|pekan depan|bulan depan|tahun depan)\b", re.IGNORECASE), "next"),
     (re.compile(r"\b(?:hari )?(senin|selasa|rabu|kamis|jumat|jum'at|sabtu|minggu|ahad)(?: (depan|ini))?\b", re.IGNORECASE),
@@ -143,7 +165,8 @@ def parse_date(text: str) -> tuple[datetime.date | None, str]:
                     month, year = (1, year + 1) if month == 12 else (month + 1, year)
                 return datetime.date(year, month, day), m[0]
             if kind == "relative":
-                offset = {"hari ini": 0, "nanti malam": 0, "malam ini": 0, "besok": 1, "lusa": 2, "besok lusa": 2}[m[1].lower()]
+                tomorrow = tomorrow_offset()
+                offset = {"hari ini": 0, "nanti malam": 0, "malam ini": 0, "besok": tomorrow, "lusa": tomorrow + 1, "besok lusa": tomorrow + 1}[m[1].lower()]
                 return today + datetime.timedelta(days=offset), m[0]
             if kind == "next":
                 word = m[1].lower()
@@ -155,7 +178,7 @@ def parse_date(text: str) -> tuple[datetime.date | None, str]:
                 return today.replace(year=today.year + 1), m[0]
             if kind == "weekday":
                 name = {"jum'at": "jumat", "ahad": "minggu"}.get(m[1].lower(), m[1].lower())
-                ahead = (HARI.index(name) - today.weekday()) % 7 or 7
+                ahead = (HARI.index(name) - today.weekday()) % 7 or (7 if tomorrow_offset() else 0)      # (at 00:50 on a Friday, "jumat" is the morning ahead)
                 if (m[2] or "").lower() == "depan" and ahead < 7:
                     ahead += 7 if ahead <= 2 else 0
                 return today + datetime.timedelta(days=ahead), m[0]
@@ -204,15 +227,35 @@ def date_text(date: datetime.date, with_day: bool = True) -> str:
 
 def when_text(date: datetime.date) -> str:
     days = (date - _today()).days
+    tomorrow = tomorrow_offset()
+    if days == tomorrow:
+        return "besok"
     if days == 0:
         return "hari ini"
-    if days == 1:
-        return "besok"
-    if days == 2:
+    if days == tomorrow + 1:
         return "lusa"
     if days < 7:
         return f"{HARI[date.weekday()].capitalize()} ini, {days} hari lagi"
     return f"{date_text(date)}, {days} hari lagi"
+
+
+def said_back(date: datetime.date) -> str:
+    """The day in full, when an event is saved: a day misunderstood is heard at once. ("besok jam 09.00" at 00:50 told the user nothing.)"""
+    when, days = when_text(date), (date - _today()).days
+    if when in ("hari ini", "besok", "lusa"):
+        return f"{when}, {date_text(date)}"
+    return f"{date_text(date)}, {days} hari lagi" if 0 < days < 7 else when
+
+
+def _still_ahead(date: datetime.date, hhmm: str, words: str) -> datetime.date:
+    """"besok jam 2" said at 03:00 can't be an hour ago: then it is the night after."""
+    if date == _today() and hhmm and "besok" in (words or "").lower() and hhmm <= _clock():
+        return date + datetime.timedelta(days=1)
+    return date
+
+
+def _clock() -> str:
+    return datetime.datetime.now().strftime("%H:%M")
 
 
 def _title(event: dict) -> str:
@@ -280,6 +323,9 @@ def _due_now(catch_up: bool = False) -> list[tuple[str, str, bool, dict]]:
                 if late <= 120 or (catch_up and late <= CATCH_UP_HOURS * 3600 and not event_over):
                     out.append((key, text, ring and late <= 120, event))
                 _notified.add(key)        # a reminder that is too old is dropped silently
+        for key, text in jadwal_kuliah.due_reminders(_notified):
+            out.append((key, text, False, {}))
+            _notified.add(key)
     return out
 
 
@@ -341,15 +387,163 @@ def upcoming(days: int = 30, keyword: str = "") -> list[tuple[datetime.date, dic
 
 
 def snapshot() -> list[dict]:
-    return [{"id": e["id"], "title": _title(e), "date": d.isoformat(), "time": e.get("time", ""),
-             "yearly": bool(e.get("yearly")), "days": (d - _today()).days} for d, e in upcoming(60)][:8]
+    rows = [{"id": e["id"], "title": _title(e), "date": d.isoformat(), "time": e.get("time", ""),
+             "yearly": bool(e.get("yearly")), "days": (d - _today()).days} for d, e in upcoming(60)]
+    rows += [{"id": f"w{e['id']}", "title": e["name"], "date": d.isoformat(), "time": e["time"], "yearly": False,
+              "days": (d - _today()).days, "weekly": True} for d, e in jadwal_kuliah.upcoming(2, classes_only=True)]
+    return sorted(rows, key=lambda r: (r["date"], r["time"] or ""))[:8]
+
+
+def all_events() -> list[dict]:
+    """Everything on the agenda for its page: the next date of each event, and those just past (kept for a day)."""
+    today = _today()
+    rows = []
+    with _lock:
+        for event in _events:
+            day = _occurrence(event) or datetime.date.fromisoformat(event["date"])
+            rows.append({"id": event["id"], "title": _title(event), "name": event["title"], "date": day.isoformat(),
+                         "time": event.get("time", ""), "yearly": bool(event.get("yearly")),
+                         "remind_days": event.get("remind_days", 1), "days": (day - today).days, "past": day < today or _past(day, event)})
+    return sorted(rows, key=lambda r: (r["date"], r["time"] or ""))
+
+
+def update_event(event_id: str, title: str, date: str, time: str = "", yearly: bool = False, remind_days_before: int = 1) -> tuple[bool, str]:
+    """A change made on the agenda page. (done, what to tell the user)."""
+    _ensure_loaded()
+    title = re.sub(r"\s+", " ", (title or "").strip(" .,"))[:120]
+    if not title:
+        return False, "Nama acara tidak boleh kosong."
+    try:
+        day = datetime.date.fromisoformat(str(date).strip())
+    except ValueError:
+        return False, "Tanggalnya belum benar."
+    m = re.fullmatch(r"(\d{1,2})[.:](\d{2})", str(time or "").strip())
+    if time and not m:
+        return False, "Jamnya belum benar."
+    yearly = bool(yearly) or bool(YEARLY_RE.search(title))
+    if not yearly and day < _today():
+        return False, f"Tanggal {date_text(day)} sudah lewat."
+    with _lock:
+        event = next((e for e in _events if e["id"] == event_id), None)
+        if not event:
+            return False, "Acara itu sudah tidak ada."
+        event.update(title=title, date=day.isoformat(), time=f"{int(m[1]):02d}:{m[2]}" if m else "", yearly=yearly,
+                     remind_days=max(0, int(remind_days_before)))
+    _save()
+    _sync_google()
+    return True, f"{title} diperbarui."
+
+
+def _event_parts(text: str) -> dict:
+    """Title, date and time from a sentence, by rule ("MTS cyber security besok jam 07", "tanggal 7 November jam 6 acaranya
+    kuliah"). The small model lost the time every time and made up dates ("20 oktober" from this file's own docs)."""
+    t = re.sub(r"\b(jam|pukul)(?:\s+(?:jam|pukul))+\b", r"\1", re.sub(r"\s+", " ", text.strip(" .!?")), flags=re.I)
+    low = t.lower()
+    date, date_words = parse_date(low)
+    hhmm = parse_time(low)
+    if date:
+        date = _still_ahead(date, hhmm, date_words)
+    rest = re.sub(re.escape(date_words), " ", t, flags=re.I) if date_words else t
+    if date and not hhmm:                 # "7 November 6 acaranya ...": Google dropped the word "jam"
+        m = re.match(r"\s*(\d{1,2})\b(?![.:/-]\d)", rest)
+        if m and int(m[1]) <= 23:
+            hhmm, rest = f"{int(m[1]):02d}:00", rest[m.end():]
+    named = re.search(r"\b(?:acaranya|namanya|judulnya)\s+(.+)$", rest, re.I)
+    title = _title_from(named[1] if named else rest)
+    if title.lower() in GENERIC_TITLES or len(title) < 2:
+        title = ""
+    return {"title": title, "date": date, "time": hhmm}
+
+
+GENERIC_TITLES = {"agenda", "acara", "jadwal", "kegiatan", "rencana", "event", "baru", "lagi", "dong", "ini", "itu",
+                  "januari", "februari", "maret", "april", "mei", "juni", "juli", "agustus", "september", "oktober", "november", "desember",
+                  "senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu", "tanggal", "bulan", "hari"}
+DRAFT_SECONDS = 45
+_draft: dict = {}                    # an event being dictated over a few sentences: title, date, time, at
+CANCEL_DRAFT = re.compile(r"(?:batal|batalkan|tidak jadi|nggak jadi|gak jadi|enggak jadi|ga jadi|tidak usah|nggak usah|gak usah)"
+                          r"(?: (?:saja|aja|dulu|deh))?")
+OTHER_COMMAND = re.compile(r"(?:buka|tutup|pindah|putar|ubah|ganti|matikan|nyalakan|hidupkan|ketik|cari|setel|atur|jam berapa|"
+                           r"lanjutkan|pause|stop|cuaca|kipas|lampu|volume|jalankan)\b")
+
+
+def _draft_question() -> str:
+    title, date = _draft.get("title"), _draft.get("date")
+    if not title and not date:
+        return f"Acaranya apa dan kapan, {T}?"
+    if not title:
+        return f"Acaranya apa, {T}?"
+    return f"Kapan {title}, {T}?"
+
+
+def _finish_or_ask() -> str:
+    if _draft.get("title") and _draft.get("date"):
+        title, date, hhmm = _draft["title"], _draft["date"], _draft.get("time", "")
+        _draft.clear()
+        return add_event(title, date.isoformat(), hhmm)
+    return _draft_question()
+
+
+def add_from_sentence(text: str) -> str:
+    """The sentence is about adding an event: saved when it says what and when, otherwise Digidaw asks for the rest."""
+    _draft.clear()
+    _draft.update(_event_parts(text), at=time_module.time())
+    return _finish_or_ask()
+
+
+def _continue_draft(t: str, low: str) -> str | None:
+    """The next sentence after "Acaranya apa dan kapan?". None = it isn't an answer (the draft is dropped)."""
+    if time_module.time() - _draft.get("at", 0) > DRAFT_SECONDS:
+        _draft.clear()
+        return None
+    if CANCEL_DRAFT.fullmatch(low):
+        _draft.clear()
+        return f"Baik, {T}, tidak jadi."
+    parts = _event_parts(t)
+    if OTHER_COMMAND.match(low) and not parts["date"]:
+        _draft.clear()
+        return None
+    new = {k: v for k, v in parts.items() if v and not _draft.get(k)}
+    if not new or (re.search(r"\b(?:apa|apakah|kenapa|siapa|bagaimana|gimana)\b", low) and not parts["date"]):
+        _draft.clear()
+        return None
+    _draft.update(new, at=time_module.time())
+    return _finish_or_ask()
+
+
+def open_agenda_page() -> str:
+    """Open the agenda on its own page: every event with its date, day and time ('buka agenda', 'tampilkan jadwal saya')."""
+    import hud_server
+    if not hud_server.open_agenda():
+        return f"Halaman agenda tidak bisa dibuka, {T}."
+    items = [r for r in all_events() if not r["past"]]
+    if not items:
+        return f"Agenda saya buka, {T}. Belum ada acara yang tercatat."
+    first = items[0]
+    at = f" jam {first['time'].replace(':', '.')}" if first["time"] else ""
+    return f"Agenda saya buka, {T}. Ada {len(items)} acara, terdekat {first['title']} {when_text(datetime.date.fromisoformat(first['date']))}{at}."
+
+
+def page_data() -> dict:
+    """Everything the agenda page shows."""
+    import alarms
+    import pc_control
+    return {"events": all_events(), "alarms": alarms.snapshot(), "weekly": jadwal_kuliah.entries(),
+            "weekly_editable": pc_control.is_my_script("pengingat jadwal")}
+
+
+def close_agenda_page() -> str:
+    """Close the agenda page ('tutup agenda')."""
+    import hud_server
+    return f"Agenda saya tutup, {T}." if hud_server.close_agenda() else f"Halaman agenda sedang tidak terbuka, {T}."
 
 
 def briefing_line() -> str:
     soon = upcoming(7)
+    classes = jadwal_kuliah.briefing_line()
     if not soon:
-        return ""
-    return "Agenda minggu ini: " + "; ".join(f"{e['title']} {when_text(d)}" for d, e in soon[:3]) + "."
+        return classes
+    line = "Agenda minggu ini: " + "; ".join(f"{e['title']} {when_text(d)}" for d, e in soon[:3]) + "."
+    return f"{classes} {line}".strip()
 
 
 # ───────────────────────────── skills ─────────────────────────────
@@ -360,7 +554,8 @@ def add_event(title: str, date: str, time: str = "", yearly: bool = False, remin
     time: 'HH:MM' (optional). yearly: repeats every year (birthdays are yearly automatically).
     remind_days_before: leave it out (-1) unless the user says how early to be reminded ("seminggu sebelumnya" = 7);
     by default the reminder comes the evening before."""
-    title = re.sub(r"\s+", " ", (title or "").strip(" .,")) or "acara"
+    _ensure_loaded()
+    title = re.sub(r"\s+", " ", (title or "").strip(" .,"))
     try:
         day = datetime.date.fromisoformat(date.strip())
     except ValueError:
@@ -371,6 +566,10 @@ def add_event(title: str, date: str, time: str = "", yearly: bool = False, remin
     if time:
         m = re.match(r"^\s*(\d{1,2})[.:](\d{2})\s*$", time)
         hhmm = f"{int(m[1]):02d}:{m[2]}" if m else parse_time(time)
+    if not title or title.lower() in GENERIC_TITLES:     # "tambahkan agenda" became an event named "agenda"
+        _draft.clear()
+        _draft.update(title="", date=day, time=hhmm, at=time_module.time())
+        return _draft_question()
     yearly = bool(yearly) or bool(YEARLY_RE.search(title))
     if not yearly and day < _today():
         return f"Tanggal {date_text(day)} sudah lewat, {T}."
@@ -386,22 +585,37 @@ def add_event(title: str, date: str, time: str = "", yearly: bool = False, remin
     _sync_google()
     occurrence = _occurrence(event) or day
     extra = " Saya ingatkan setiap tahun." if yearly else ""
-    before = ("" if not remind else " Saya kabari malam sebelumnya juga." if remind == 1 else
+    # (no promise of a reminder whose moment has already gone by: at 00:50 for the morning ahead there is no evening before)
+    gone = datetime.datetime.combine(occurrence - datetime.timedelta(days=remind), datetime.time(*EVENING_BEFORE)) <= datetime.datetime.now()
+    before = ("" if not remind or gone else " Saya kabari malam sebelumnya juga." if remind == 1 else
               f" Saya kabari juga {remind} hari sebelumnya.")
-    at = f" jam {hhmm.replace(':', '.')}" if hhmm else ""
-    return f"Siap, {T}. {_title(event)} saya catat {when_text(occurrence)}{at}.{before}{extra}"
+    at = f", jam {hhmm.replace(':', '.')}" if hhmm else ""
+    return f"Siap, {T}. {_title(event)} saya catat {said_back(occurrence)}{at}.{before}{extra}"
 
 
 def list_events(days: int = 30, keyword: str = "", start: int = 0) -> str:
-    """The user's schedule / upcoming events ('apa saja jadwal saya', 'acara apa saja bulan ini', 'jadwal besok',
-    'kapan ulang tahun ibu' with keyword). days: how far ahead (0 = today only); start: skip the first N days
+    """The user's schedule / upcoming events, with their weekly classes ('apa saja jadwal saya', 'acara apa saja bulan ini',
+    'jadwal besok', 'kapan ulang tahun ibu' with keyword). days: how far ahead (0 = today only); start: skip the first N days
     (start=1, days=1 = tomorrow only). ALWAYS call this to answer about the schedule; never guess."""
+    events_said = _events_said(days, keyword, start)
+    classes = "" if keyword else jadwal_kuliah.agenda_sentence(days, start)
+    if not classes:
+        return events_said
+    if events_said.startswith("Tidak ada jadwal"):         # (the classes are a schedule too)
+        events_said = events_said.replace("Tidak ada jadwal", "Tidak ada acara lain", 1)
+    return f"{classes.replace(f', {T}.', '.')} {events_said}"
+
+
+def _events_said(days: int = 30, keyword: str = "", start: int = 0) -> str:
     items = [(d, e) for d, e in upcoming(366 if keyword else days, keyword) if (d - _today()).days >= start]
     if not items:
         if keyword:
             return f"Tidak ada acara '{keyword}' di agenda, {T}."
-        span = ("hari ini" if days == 0 else "besok" if (start, days) == (1, 1) else "lusa" if (start, days) == (2, 2)
-                else f"dalam {days} hari ke depan")
+        if start == days and start <= 2:
+            day = _today() + datetime.timedelta(days=start)      # (after midnight its name can't be mistaken, whatever word was asked with)
+            span = date_text(day) if not tomorrow_offset() else when_text(day)
+        else:
+            span = f"dalam {days} hari ke depan"
         later = upcoming(366)
         hint = f" Acara terdekat: {later[0][1]['title']} {when_text(later[0][0])}." if later else ""
         return f"Tidak ada jadwal {span}, {T}.{hint}"
@@ -425,7 +639,7 @@ def _past(day: datetime.date, event: dict) -> bool:
         hour, minute = (int(x) for x in event["time"].split(":")[:2])
     except ValueError:
         return False
-    return datetime.datetime.now().time() > datetime.time(hour, minute)
+    return _clock() > f"{hour:02d}:{minute:02d}"
 
 
 def _match_title(phrase: str) -> str:
@@ -444,13 +658,29 @@ def _match_title(phrase: str) -> str:
     return best
 
 
+def _several_days(key: str) -> list[str]:
+    """"tanggal 7 dan 8", "besok dan lusa": each day on its own. Only when every part is a day: "makan dan minum" is one title."""
+    parts = [p.strip() for p in re.split(r"\s+dan\s+|\s*,\s*", key) if p.strip()]
+    if len(parts) < 2:
+        return []
+    parts = [p if not p.isdigit() else f"tanggal {p}" for p in parts]
+    return parts if all(parse_date(p)[0] for p in parts) else []
+
+
 def delete_event(keyword: str) -> str:
-    """Remove an event from the agenda ('hapus acara wisuda', 'batalkan agenda rapat')."""
+    """Remove an event from the agenda ('hapus acara wisuda', 'batalkan agenda rapat', 'hapus agenda besok', 'hapus agenda tanggal 6')."""
+    _ensure_loaded()
     key = keyword.lower().strip()
-    with _lock:
-        hits = [e for e in _events if key and (key in e["title"].lower() or e["id"] == key)]
-        for e in hits:
-            _events.remove(e)
+    hits: list[dict] = []
+    for one in _several_days(key) or [key]:
+        day = parse_date(one)[0]
+        with _lock:
+            found = [e for e in _events if one and (one in e["title"].lower() or e["id"] == one)]
+            if not found and day:        # by its day ("hapus agenda tanggal 6" found nothing while the event was there)
+                found = [e for e in _events if e["date"] == day.isoformat()]
+            for e in found:
+                _events.remove(e)
+        hits += found
     if not hits:
         return f"Tidak ada acara '{keyword}' di agenda, {T}."
     _save()
@@ -478,7 +708,8 @@ EVENT_WORD = re.compile(r"\b(?:acara|agenda|janji|undangan|ulang ?tahun|ultah|ra
                         r"kontrol|jadwal)\b", re.IGNORECASE)
 _TITLE_FILLER = re.compile(
     r"\b(?:tolong|coba|dong|ya|deh|saya|aku|gue|gua|nanti|ingatkan|ingetin|ingatin|catat|catatkan|simpan|tambahkan|"
-    r"tambah|jadwalkan|masukkan|pasang|pengingat|reminder|agenda|di agenda|ke agenda|kalau|bahwa|ada|punya|acara|"
+    r"tambah|tambahkan|buatkan|bikin|bikinkan|jadwal|kegiatan|jadwalkan|masukkan|pasang|pengingat|reminder|agenda|di agenda|"
+    r"ke agenda|kalau|bahwa|ada|punya|acara|acaranya|namanya|judulnya|baru|"
     r"pada|di|ke|untuk|buat|tentang|setiap tahun|tiap tahun|tahunan|yang|nya|tolongin|nih|sebelumnya|sebelum)\b",
     re.IGNORECASE)
 
@@ -500,7 +731,7 @@ def _remind_days(text: str) -> int:
 
 
 def _title_from(text: str, *used: str) -> str:
-    t = text
+    t = re.sub(r"\b(jam|pukul)(?:\s+(?:jam|pukul))+\b", r"\1", text, flags=re.I)
     for part in used:
         if part:
             t = re.sub(re.escape(part), " ", t, flags=re.IGNORECASE)
@@ -512,10 +743,57 @@ def _title_from(text: str, *used: str) -> str:
     return re.sub(r"\s+", " ", t).strip(" .,:-")
 
 
+OPEN_PAGE = re.compile(rf"(?:tolong |coba )?(?:buka|bukakan|tampilkan|perlihatkan|lihat|liat|lihatkan)(?: halaman)? {_AGENDA_NOUN}|"
+                       r"(?:tolong |coba )?(?:buka|tampilkan|lihat)(?: halaman)? kalender (?:saya|ku|aku|agenda)")
+# (a word after it is a scrap: "tutup agenda hijau" was "tutup agenda, Digidaw", and it closed the whole browser)
+CLOSE_PAGE = re.compile(rf"(?:tolong |coba )?(?:tutup|sembunyikan)(?: halaman)? {_AGENDA_NOUN}(?: \w{{1,10}})?")
+START_DRAFT = re.compile(r"(?:tolong |coba )?(?:tambah|tambahkan|buat|buatkan|bikin|bikinkan|catat|catatkan|masukkan|simpan)"
+                         rf"(?: ke)? {_AGENDA_NOUN}(?: baru)?(?: (?:dong|ya|deh))?")
+
+
+_DAY_WORDS = r"hari ini|sekarang|besok|lusa|minggu ini|minggu depan|pekan ini|(?:hari )?(?:senin|selasa|rabu|kamis|jumat|jum'at|sabtu)|hari minggu"
+_DAY_ASKED = r"(?:apa )?ada apa(?: saja| aja)?|ngapain(?: saja| aja)?|ada (?:acara|kegiatan|agenda)(?: apa(?: saja| aja)?)?|jadwal(?:nya)?(?: saya|ku)?(?: apa(?: saja| aja)?)?"
+DAY_QUESTION = re.compile(rf"(?:{_DAY_ASKED}) (?P<day>{_DAY_WORDS})|(?P<day2>{_DAY_WORDS})(?: saya| aku)? (?:{_DAY_ASKED})")
+_WEEKDAYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"]
+
+
+def _list_day(said: str) -> str:
+    """"besok ada apa", "jadwal saya hari senin", "minggu ini ada apa"."""
+    said = said.replace("jum'at", "jumat").replace("hari ", "", 1) if said.startswith("hari ") and said != "hari ini" else said.replace("jum'at", "jumat")
+    if said in ("hari ini", "sekarang"):
+        return list_events(0)
+    if said == "besok":
+        return list_events(tomorrow_offset(), start=tomorrow_offset())
+    if said == "lusa":
+        return list_events(tomorrow_offset() + 1, start=tomorrow_offset() + 1)
+    if said in ("minggu ini", "pekan ini"):
+        return list_events(7)
+    if said == "minggu depan":
+        return list_events(14)
+    offset = (_WEEKDAYS.index(said) - datetime.date.today().weekday()) % 7
+    return list_events(offset, start=offset)
+
+
 def handle(text: str) -> str | None:
     """Understand an agenda sentence locally. None = not about the agenda (alarms / the AI take it)."""
-    t = re.sub(r"\s+", " ", text.strip(" .!?"))
+    t = re.sub(r"\b(jam|pukul)(?:\s+(?:jam|pukul))+\b", r"\1", re.sub(r"\s+", " ", text.strip(" .!?")), flags=re.I)
     low = t.lower()
+    if _draft:
+        answer = _continue_draft(t, low)
+        if answer:
+            return answer
+    answer = jadwal_kuliah.answer(low)
+    if answer:
+        return answer
+    day = DAY_QUESTION.fullmatch(low)
+    if day:
+        return _list_day(day["day"] or day["day2"])
+    if OPEN_PAGE.fullmatch(low):
+        return open_agenda_page()
+    if CLOSE_PAGE.fullmatch(low):
+        return close_agenda_page()
+    if START_DRAFT.fullmatch(low):
+        return add_from_sentence("")
     # list / ask
     m = re.search(r"\bkapan (?:acara |agenda )?((?:ulang ?tahun|ultah|hari jadi|anniversary|rapat|meeting|ujian|wisuda|"
                   r"pernikahan|kondangan|arisan|seminar|deadline|konser|acara)(?: .+)?)$", low)
@@ -531,9 +809,9 @@ def handle(text: str) -> str | None:
         if re.search(r"\bhari ini\b|\bsekarang\b", low):
             return list_events(0)
         if re.search(r"\bbesok\b", low):
-            return list_events(1, start=1)
+            return list_events(tomorrow_offset(), start=tomorrow_offset())
         if re.search(r"\blusa\b", low):
-            return list_events(2, start=2)
+            return list_events(tomorrow_offset() + 1, start=tomorrow_offset() + 1)
         days = 7 if re.search(r"minggu ini|pekan ini", low) else 31 if re.search(r"bulan ini", low) else \
             14 if re.search(r"minggu depan|pekan depan", low) else 60 if re.search(r"bulan depan", low) else 30
         return list_events(days)
@@ -550,6 +828,7 @@ def handle(text: str) -> str | None:
     if not ADD_TRIGGER.search(low) and not (EVENT_WORD.search(low) and not asking):
         return None
     hhmm = parse_time(low)
+    date = _still_ahead(date, hhmm, date_words)
     # "ingatkan saya besok jam 7 telepon ibu" (a clock reminder without an explicit date) stays with alarms.py
     if hhmm and not EXPLICIT_DATE.search(low) and not EVENT_WORD.search(low):
         return None
@@ -561,4 +840,4 @@ def handle(text: str) -> str | None:
     return add_event(title, date.isoformat(), hhmm, yearly=bool(YEARLY_RE.search(low)), remind_days_before=_remind_days(low))
 
 
-AI_TOOLS = [add_event, list_events, delete_event]
+AI_TOOLS = [add_event, list_events, delete_event, open_agenda_page, close_agenda_page] + jadwal_kuliah.AI_TOOLS

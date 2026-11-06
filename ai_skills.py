@@ -6,6 +6,7 @@ import io
 import re
 import html
 import datetime
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -115,15 +116,34 @@ def web_search(query: str) -> str:
     schedules, public figures, facts after your knowledge cutoff, or anything the user wants
     'dicari/dicek'. Returns dated news headlines, a Wikipedia summary and web snippets; answer
     the user from them (prefer the newest dated information)."""
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {name: pool.submit(fn, query) for name, fn in
-                   (("news", _news_search), ("wiki", _wikipedia), ("web", _bing))}
-        results = {}
-        for name, future in futures.items():
-            try:
-                results[name] = future.result(timeout=12)
-            except Exception:
-                results[name] = None
+    return _search(query, 12)
+
+
+def quick_search(query: str) -> str:
+    """The same in about 2.5 s, with whatever has arrived by then (one source can take 5 s: it held up everything)."""
+    return _search(query, 2.5)
+
+
+SEARCH_ENOUGH_SECONDS = 4
+
+
+def _search(query: str, patience: float) -> str:
+    pool = ThreadPoolExecutor(max_workers=3)
+    futures = {name: pool.submit(fn, query) for name, fn in
+               (("news", _news_search), ("wiki", _wikipedia), ("web", _bing))}
+    pool.shutdown(wait=False)
+    deadline = time.time() + patience
+    enough_at = time.time() + SEARCH_ENOUGH_SECONDS
+    while time.time() < deadline and not all(f.done() for f in futures.values()):
+        if time.time() >= enough_at and any(f.done() and not f.exception() and f.result() for f in futures.values()):
+            break                          # one slow source doesn't hold an answer that's already there (web_search: 13 s at the median)
+        time.sleep(0.05)
+    results = {}
+    for name, future in futures.items():
+        try:
+            results[name] = future.result(timeout=0) if future.done() else None
+        except Exception:
+            results[name] = None
 
     sections = [f"Hasil pencarian untuk '{query}' (hari ini {datetime.date.today():%d-%m-%Y}):"]
     if results["news"]:

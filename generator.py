@@ -139,7 +139,10 @@ def _say(text: str, level: str = "info"):
 def _submit(kind: str, request: str, prompt: str) -> str:
     import project_builder
     agent = "antigravity"
-    if not project_builder.agent_exe(agent):
+    out_of_quota = project_builder.quota_left()
+    if out_of_quota and kind != "image":
+        return f"Maaf {T}, {out_of_quota[0].lower()}{out_of_quota[1:]}, jadi belum bisa membuat {'file' if kind == 'file' else 'itu'}."
+    if not project_builder.agent_exe(agent) or out_of_quota:     # (an image is then made by the backup service)
         agent = "" if kind == "image" else "claude" if project_builder.agent_exe("claude") else ""
         if not agent and kind != "image":         # (an image is then made by the backup service)
             return f"Antigravity CLI tidak ditemukan di komputer ini, {T}."
@@ -227,7 +230,7 @@ def _run(job: dict):
         moved = _collect(job) if backup else []
     shutil.rmtree(work, ignore_errors=True)
     if not moved:
-        job.update(status="failed", error=job["error"] or (job.get("agent_summary") or "tidak ada file yang dihasilkan")[:200])
+        job.update(status="failed", error=job["error"] or job.get("agent_error") or (job.get("agent_summary") or "tidak ada file yang dihasilkan")[:200])
         _emit(job)
         _say(f"Maaf {T}, {_label(job)} tidak berhasil dibuat. {job['error']}", "warning")
         return

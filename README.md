@@ -90,9 +90,10 @@ Sertakan hasilnya (dan potongan `logs/digidaw.log`) saat membuat *issue*.
 | Permintaan | Ditangani oleh |
 | :--- | :--- |
 | Perintah jelas: *buka/tutup aplikasi, workspace, volume, alarm, ketik, putar lagu* | Langsung dijalankan, tanpa AI (instan) |
-| Obrolan, pertanyaan ringan, perintah yang perlu dipahami | **Qwen** lokal: memilih satu tindakan dari daftar tetap (±0,6 dtk) |
-| Butuh internet / data terbaru (berita, harga, skor, *"hari ini"*, *"terbaru"*) | **Gemini** |
-| Kompleks (analisis, bandingkan, kode, penjelasan detail), layar, dokumen, project | **Gemini** |
+| Obrolan, perintah yang perlu dipahami, kalimat yang memuat kata seperti *layar* atau *sekarang* tapi jelas perintah biasa | **Qwen** lokal: memilih satu tindakan dari daftar tetap (±1 dtk) |
+| Pengetahuan umum: *"ibu kota kanada apa"*, *"apa itu inflasi"*, *"siapa presiden ketiga"* | **Qwen** lokal, kalau jawabannya bisa dipercaya (±0,5 dtk) |
+| Butuh internet / data terbaru (berita, harga, skor), kompleks (analisis, bandingkan, kode), layar, dokumen, karangan | **Qwen** menilai dulu (0,3 dtk), lalu **Gemini** |
+| Beberapa perintah sekaligus, atau kalimat sangat panjang | **Gemini** |
 | Qwen ragu, tidak punya tool yang cocok, atau mengaku beraksi tanpa benar-benar beraksi | Otomatis diteruskan ke **Gemini** |
 | Gemini tidak tersedia (kuota habis / offline) | **Qwen** menjawab sebisanya |
 
@@ -106,6 +107,8 @@ menjadi salah satu nama di daftar (skema JSON), lalu argumennya diisi terpisah; 
 dipakai, dan kalau ragu Gemini yang mengambil alih. **Belajar dari Gemini** (`experience.py`): setiap perintah yang
 berhasil lewat Gemini dicatat di `logs/experience.json` dan dipakai sebagai contoh untuk kalimat serupa, jadi Qwen
 makin jarang perlu bantuan; *"bukan, maksudnya …"* menghapus contoh yang salah.
+
+**Cerita, pantun, puisi, lelucon** langsung diucapkan oleh AI online (*"coba buat cerita"*, *"berikan saya pantun"*), sekitar 6 kalimat paling banyak; baru menjadi file kalau Anda menyebut file, dokumen, surat, atau sejenisnya.
 
 **Mengukur kecerdasannya:** `tests/exam_brain.py [model] [holdout|real|memory]` memberi nilai tanpa menjalankan alat apa
 pun, jadi model baru bisa dibandingkan secara adil sebelum dipakai. Saat pertama dijalankan (4 Nov 2026) pada soal yang
@@ -171,11 +174,16 @@ langsung aktif tanpa restart (yang perlu restart diberi tanda; ada tombol **Rest
 - **Jawaban diucapkan sambil ditulis**: untuk pertanyaan yang dijawab Gemini, kalimat pertama sudah terdengar
   sementara sisa jawaban masih ditulis (Control Panel → Suara). Jawaban otak lokal tetap utuh dulu, karena Digidaw
   baru tahu jawaban lokal itu ragu (dan perlu Gemini) setelah selesai.
-- **Bisa disela**: saat Digidaw bicara, ucapkan *"Digidaw, stop"*, *"cukup"*, atau langsung *"Digidaw, putar musik"*.
-  Memakai peredam gema PipeWire (WebRTC) khusus untuk mic & suara Digidaw: suara Digidaw dihapus dari yang didengar
-  mic (terukur ±25 dB), suara Anda tetap lolos. Selama Digidaw bicara hanya "Digidaw …" atau kata berhenti yang
-  dianggap; obrolan lain diabaikan. Perangkat audio default tidak diubah (Control Panel → Pendengaran).
-- Ukuran tipikal (selesai bicara → jawaban siap): jalur cepat ±0.8 detik, via AI ±2–3.5 detik, lalu suara mulai ±0.4–1 detik.
+- **Bisa disela**: saat Digidaw bicara, ucapkan *"cukup"*, *"stop"*, atau langsung *"Digidaw, putar musik"* dengan suara jelas
+  (`aec.py`, Control Panel → Pendengaran). Digidaw menahan suaranya begitu mendengar suara orang di atas gema suaranya sendiri,
+  lalu membaca kata itu: kata henti atau namanya menghentikan ucapan, kata lain membuatnya melanjutkan dari titik tertahan, dan
+  suara pendek yang tak terbaca dianggap *"stop"* kalau Whisper di laptop menemukan orang bicara di dalamnya (batuk, ketukan, dan gema suara Digidaw sendiri tidak). Mikrofon sehari-hari, suara Digidaw, dan suara aplikasi lain tidak diubah.
+  Hanya pada saat Digidaw bicara, dan hanya bila cukup keras, kalimat tanpa nama dikirim ke Google untuk dibaca.
+  Batas: semakin keras speaker dibanding suara Anda, semakin keras Anda perlu bicara. Dengan speaker 90%, uji langsung (kata dari speaker kedua)
+  menangkap semua kata mulai level mikrofon ±6000 dan separuh pada ±4000.
+- Ukuran tipikal (selesai bicara → jawaban siap): jalur cepat ±0.8 detik, via AI ±2–3.5 detik. Suara lalu mulai: kalimat yang sudah
+  tersimpan langsung, kalimat baru ±2 detik (terlama ±4 detik; server suara Edge butuh ±1 detik + 20 ms per huruf, jadi kalimat panjang
+  mulai dari anak kalimat pertamanya).
 
 ---
 
@@ -205,7 +213,7 @@ Perangkat ada di `smarthome.json` (nama, nama lain, Device ID, IP, versi protoko
 `.env` sebagai `TUYA_KEY_<device id>` (platform.tuya.com → tautkan akun Smart Life → API Explorer → Query Devices in
 Project, kolom `localKey`). Kalau router memberi lampu IP baru, Digidaw mencarinya lagi lewat Device ID.
 
-- **HUD & HP**: panel *Lampu* (nyala/mati, kecerahan, warna, suasana) di HUD dan di tab Bicara pada HUD HP.
+- **HUD & HP**: panel *Lampu* (nyala/mati, kecerahan, warna, suasana) di HUD dan di Beranda pada HUD HP.
 - **Lampu otomatis** (Control Panel → Rumah): menyala putih hangat 15 menit sebelum matahari terbenam bila Anda di
   depan laptop (jam terbenam dihitung dari kota cuaca, tanpa internet), menyala saat Anda kembali setelah gelap
   (sebelum tengah malam, dan tidak bila Anda sendiri mematikannya malam itu), diredupkan mulai jam 22.00, dan
@@ -230,6 +238,89 @@ Project, kolom `localKey`). Kalau router memberi lampu IP baru, Digidaw mencarin
 Aplikasi yang dibuka Digidaw (Notepad, folder, file, catatan, browser) kini langsung **tampil di depan**.
 
 ---
+
+### Menyusun jendela
+- *"Buka sistem"* (atau *"buka HUD"*) membuka HUD, *"tutup sistem"* menyembunyikannya; Digidaw tetap mendengar.
+- *"Bagi layar Firefox dan terminal"*, *"Firefox kiri terminal kanan"*: berdampingan (kalau di workspace ini ada jendela lain, keduanya pindah ke workspace kosong).
+- *"Taruh Firefox di kiri"*, *"buka terminal di kanan"*, *"geser ke kanan"*, *"tukar posisi jendela"*, *"rapikan jendela"*.
+- *"Buka Firefox di workspace 3"*, *"pindahkan semua ke workspace 2"*, *"kembali ke aplikasi tadi"*, *"buka terminal di folder project"*.
+- *"Tutup semua kecuali Firefox dan terminal"* menunggu "ya", dan HUD serta pemutar musik tidak ikut tertutup.
+
+### Cara Qwen belajar
+Bobot model Qwen tidak bisa dilatih di laptop ini (pelatihan LoRA butuh sekitar 10 GB memori video, laptop ini 4 GB). Yang dilatih adalah cara memakainya: kalimat nyata yang pernah sampai ke Qwen diberi label di `teaching.py` dan diperlihatkan sebagai contoh saat ada kalimat yang mirip. Pilihan Qwen hanya dijalankan kalau cocok dengan kalimatnya (`local_router.settle`).
+
+- `tests/teach_eval.py`: nilai pilihan alat pada kalimat yang tidak ikut diajarkan. `tests/talk_exam.py`: nilai cara bicaranya. `tests/know_exam.py`: nilai pengetahuannya. `tests/follow_exam.py`: nilai kalimat lanjutan. Semuanya butuh Ollama dan tidak menjalankan apa pun.
+- `scripts/teach_review.py`: kalimat baru yang sampai ke Qwen dan belum diberi label, untuk putaran belajar berikutnya.
+
+### Pengetahuan umum tanpa menunggu internet
+Model kecil yakin saat salah ("ibu kota Kalimantan Barat: Samarinda"), jadi jawabannya melewati tiga jalur (`knowledge.py`, `brain._know_answer`):
+
+1. **Lembar fakta:** sekitar 500 fakta (presiden, ibu kota, hari nasional, singkatan, sains dasar). Dipakai hanya kalau semua kata pertanyaannya ada di fakta itu, jadi "gunung tertinggi kedua" tidak dijawab dengan Everest.
+2. **Penjelasan** (*apa itu, kenapa, bedanya*): dijawab langsung, paling banyak dua kalimat, karena kalimat ketiga sering mengarang.
+3. **Lainnya:** Qwen ditanya tiga kali, lalu diminta memeriksa jawabannya sendiri. Kalau tidak sepakat, Gemini yang menjawab. Pertanyaan paling-paling (*terbesar, tertinggi*) dan bahasa daerah langsung ke Gemini, karena di sini Qwen sepakat dengan jawaban yang salah.
+
+Pada 71 soal yang ditulis terakhir dan dijalankan sekali (`tests/know_exam.py akhir`): 56 dijawab sendiri, median 0,5 dtk, semuanya lolos pola jawaban, 15 ke Gemini; cara lama 54 dari 71 benar. Dibaca satu per satu pada putaran berikutnya tetap ada yang keliru, jadi perkirakan sekitar 90–95% benar, bukan 100%.
+
+Kalimat lanjutan seperti *"kalau besok"* atau *"mata uangnya apa"* ditulis ulang menjadi kalimat lengkap dulu (`local_router.expand`), lalu dibaca aturan dan Qwen seperti biasa. Nilainya di `tests/follow_exam.py`.
+
+Web search + Qwen tetap hanya cadangan: dari 14 pertanyaan data terbaru banyak yang "belum ketemu", jadi Gemini tetap jalur utamanya.
+
+### Mengajari Digidaw suara panggilan Anda
+*"Latih panggilan"*: sekitar semenit, ucapkan "Digidaw" setelah bunyi ting, lalu beberapa kalimat biasa. Digidaw lalu melatih pendeteksi namanya di laptop ini (sekitar satu menit, sambil tetap bisa dipakai). Rekamannya hanya tersimpan di `models/wake/`; *"hapus latihan panggilan"* menghapusnya. Sebelum dilatih, pendeteksi hanya mengamati. Sesudahnya, frasa yang terdengar berisi nama diteruskan ke Google walau pengenal lokal salah baca; Google tetap yang memastikan perintahnya.
+
+### Hal-hal kecil sehari-hari
+Semua ini dijawab langsung, tanpa menunggu AI:
+- **Musik:** *"volume berapa"*, *"ini lagu siapa"*, *"mundur 10 detik"*, *"maju 1 menit"*, *"putar dari awal"*, *"ulang terus"*, *"simpan lagu ini"* (masuk favorit), *"putar lagu terakhir"*, *"layar penuh"*.
+- **Timer:** *"tambah 5 menit"* (menambah timer yang berjalan), *"sisa timer berapa"*, *"stopwatch"*, *"stopwatch berapa"*, *"hentikan stopwatch"*.
+- **Catatan:** *"catat beli susu"* (tersimpan tanpa membuka jendela), *"tambahkan ke catatan beli gula"*, *"baca catatan"*, *"catatan saya apa saja"*, *"buka catatan"*, *"hapus catatan terakhir"* (bertanya dulu).
+- **Laptop:** *"sisa penyimpanan"*, *"aplikasi apa yang berat"*, *"tutup aplikasi yang berat"* (bertanya dulu), *"berapa lama laptop menyala"*, *"kecerahan berapa"*, *"layar lebih redup"*, *"mode gelap"*, *"kosongkan sampah"*, *"cek update"*, *"update sistem"* (membuka terminal).
+- **Internet:** *"tes kecepatan internet"*, *"ip saya berapa"*, *"wifi apa"*, *"bluetooth nyala gak"*.
+- **Mengedit:** *"salin"*, *"tempel"*, *"potong"*, *"undo"*, *"simpan"*, *"pilih semua"*, *"hapus teks"*, *"ctrl s"*: tombolnya mengikuti jendela yang aktif (di terminal *"salin"* tidak menghentikan program). *"Baca clipboard"*, *"baca yang saya pilih"*.
+- **Tanggal:** *"hari apa besok"*, *"tanggal berapa lusa"*, *"berapa hari lagi tanggal 10 Desember"*, *"besok ada apa"*, *"jadwal saya hari senin"*.
+- **Percakapan:** *"tadi kamu bilang apa"*, *"ulangi"*, *"kamu bisa apa"*, *"batal"*, *"tutup itu"* (aplikasi yang baru dibuka), *"buka lagi"* (yang baru ditutup), *"ingat nama kucing saya Mochi"*.
+- *"Rekam layar"* perlu `wf-recorder`.
+
+Pilihan otak lokal hanya dijalankan kalau cocok dengan kalimatnya: kata yang salah dengar tidak lagi mengubah lampu atau menutup tab.
+
+### Membuka dan berpindah aplikasi
+- *"Buka Firefox"* atau *"pindah ke WhatsApp"* saat aplikasinya sudah terbuka: jendelanya ditampilkan, tidak membuka salinan baru. Terminal,
+  file manager, dan editor teks tetap membuka jendela baru. Rutinitas tidak memindahkan layar: aplikasi masuk ke workspace-nya sendiri.
+- *"Buka folder skripsi"*: dicari sampai beberapa tingkat di folder home. *"Buka folder"* membuka home, *"tutup folder"* menutup file manager.
+- *"Buka situs medanpedia"*: alamatnya dicari dari riwayat browser, nama domain, lalu hasil pertama Google kalau alamatnya memang mirip namanya.
+  *"Cari LMS kampus"* … *"buka yang pertama"* membuka hasil teratas.
+- *"Pindahkan WhatsApp ke workspace"* tanpa nomor: Digidaw bertanya workspace berapa.
+
+### Rutinitas & kata buatan sendiri
+- *"Buat rutinitas kuliah"*, lalu sebutkan langkahnya satu per satu (*"buka Firefox"*, *"lampu warna putih"*, *"tunggu 3 detik"*), lalu *"selesai"*.
+  Bisa juga sekaligus: *"buat rutinitas pagi buka firefox lalu volume 20"*. *"Hapus yang tadi"* membatalkan langkah terakhir.
+- Langkah bisa memilih workspace dan membuka situs: *"buka WhatsApp di workspace 1"*, *"Firefox di workspace 2"*, *"buka situs medanpedia"*, *"buka youtube di workspace 3"*.
+  Alamat situs yang belum dikenal dicari dari riwayat browser Anda (di laptop ini saja), lalu dari domain umum; alamatnya diulang supaya bisa Anda periksa.
+- *"Mode kuliah"* menjalankannya, tanpa AI, jadi langsung dan selalu sama. Langkah yang butuh "ya" ditanyakan di akhir. Pesan dan tugas di
+  layar tidak bisa masuk rutinitas. *"Apa isi mode kuliah"*, *"rutinitas saya apa saja"*, *"hapus rutinitas kuliah"*.
+- *"Kalau aku bilang ruang dua maksudnya pindah ke workspace 2"* mengajarkan kata. *"Lupakan kata ruang dua"* membatalkannya.
+- Semua ini juga ada di Control Panel → Rutinitas. Tombol HUD mengikuti aplikasi dan situs yang paling sering Anda buka, dan rutinitas Anda
+  muncul di HUD serta di HP.
+
+### Jadwal kuliah & menambah acara lewat suara
+- Jadwal mingguan dibaca dari skrip Anda sendiri (`~/.local/share/jadwal-kuliah/jadwal.tsv`, milik `pengingat_jadwal.sh`), tidak disalin:
+  ubah di skrip, Digidaw langsung ikut. *"Besok kuliah apa"*, *"kuliah berikutnya"*, *"Pancasila jam berapa"*, *"jadwal kuliah"*.
+- Digidaw mengingatkan 30 menit sebelum kuliah, lewat suara dan HP (Control Panel → Asisten Proaktif; jam 06.00 sampai 22.00).
+  *"Cek jadwal"*, ringkasan pagi, dan halaman Agenda ikut menampilkannya.
+- **"Besok" setelah tengah malam**: sampai pukul 04.00 *"besok"* berarti pagi nanti, sebelum Anda tidur (juga untuk alarm, cuaca, dan jadwal), dan acara yang disimpan selalu disebut lengkap dengan hari dan tanggalnya: *"…saya catat besok, Jumat, 6 November, jam 09.00"*.
+- *"Tambah agenda"*: Digidaw bertanya acaranya apa dan kapan, jadi boleh dijawab bertahap. Nama, tanggal, dan jam diambil dari
+  kalimat Anda dengan aturan tetap, tidak ditebak. Tanggal yang tidak disebut akan ditanyakan.
+
+### Halaman Agenda & suara alarm sendiri
+- *"Buka agenda"*, *"tampilkan jadwal saya"*: jendela khusus berisi semua acara dengan hari, tanggal, jam, dan sisa waktunya,
+  dikelompokkan (hari ini, besok, minggu ini, ...). Ada kalender, pencarian, formulir tambah, ubah, hapus, serta daftar alarm dan
+  pengingat. Perubahan lewat suara atau HP langsung terlihat. *"Tutup agenda"* menutupnya. *"Agenda minggu ini"* tetap dijawab lisan.
+- Suara pilihan dipakai alarm, timer, dan pengingat; di Control Panel bisa dibatasi untuk alarm saja.
+- *"Jadikan lagu ini alarm"* (lagu yang sedang diputar) atau *"jadikan Be My Baby sebagai alarm"*: lagunya diambil dari
+  YouTube dengan `yt-dlp` di latar belakang, lalu langsung dipakai; Digidaw memberi tahu kalau sudah. Maksimal 15 menit.
+- Alarm atau timer yang jatuh tempo saat Digidaw restart atau PC baru menyala (sampai 15 menit lalu) tetap berbunyi, sebentar setelah Digidaw siap.
+- **Control Panel → Alarm** atau *"ganti suara alarm"*: tambahkan audio sendiri (MP3, WAV, OGG, FLAC, M4A, maks 40 MB; disimpan di
+  `alarm_sounds/`), coba putar, pilih, atau hapus. File yang rusak atau hilang digantikan bunyi bawaan, jadi alarm tetap terdengar.
+- *"Tes alarm"* membunyikan uji 20 detik. Alarm mulai pelan lalu naik sampai volume penuh (bisa diatur atau dimatikan).
 
 ## 🔒 Mode Privat & Tanpa Internet
 
@@ -271,7 +362,7 @@ Digidaw memperhatikan keadaan tanpa diminta, seperti butler yang tahu kapan haru
   ([Open-Meteo](https://open-meteo.com), gratis tanpa API key), bukan tebakan AI. Ringkasan pagi menyebut peluang
   hujan hari itu bila tinggi.
 - **Suhu laptop**: *"suhu laptop berapa"*, *"laptop panas nggak"*: suhu CPU, GPU, SSD, dan kecepatan kipas.
-  Digidaw memperingatkan bila CPU bertahan ≥ 95 °C lebih dari semenit (atur di Control Panel → Keamanan & Sistem).
+  Digidaw memperingatkan bila CPU bertahan ≥ 95 °C lebih dari semenit (atur di Control Panel → Keamanan & Sistem). Antara pukul 23.00 dan 06.00 (`QUIET_WELCOME_HOURS`), menyentuh laptop tidak memancing suara: tidak ada sapaan, kabar kecil menunggu sampai pagi, hanya pesan yang belum dibaca yang tetap disampaikan.
 
 - **"Kabari saya kalau …"**: *"kabari saya kalau unduhan selesai"*, *"kabari kalau Rina membalas"*,
   *"kabari kalau hujan reda"* / *"kalau mau hujan"*, *"kabari kalau baterai penuh"* / *"di bawah 20 persen"*,
@@ -378,6 +469,8 @@ Log agen ada di `<folder project>\.digidaw\build.log`; brief lengkap di `BRIEF.m
 
 ## ⚙️ Analisis Sistem dengan Antigravity AI Agent
 
+Kalau Antigravity tidak bisa dipakai (misalnya kuotanya habis), Digidaw mengatakannya dan kapan pulih, lalu menyebut angka dasar dari laptop sendiri; tidak ada laporan atau jendela browser yang dibuka.
+
 Ucapkan *"Digidaw, analisis sistem"* (juga: *"analisis seluruh sistem"*, *"analisis sistem dengan antigravity"*, *"cek sistem"*, atau tombol **ANALISIS SISTEM** di HUD).
 
 Digidaw akan langsung menyambungkan ke **Antigravity AI Agent** (`agy`) untuk memeriksa dan mendiagnosis seluruh kondisi sistem komputer Anda secara cerdas dan mendalam:
@@ -448,6 +541,10 @@ berurutan; langkah web mengikuti browser yang Anda sebut.
 
 ## 🩺 Kalau Digidaw Lambat atau Tidak Merespons
 
+Mikrofon laptop bisa menangkap dengung rendah terus-menerus, yang lalu terbaca sebagai ucapan tanpa henti. Suara di bawah 200 Hz sudah
+disaring (`STT_HIGHPASS_HZ`). Kalau masih sulit, nyalakan sementara *Catat obrolan yang diabaikan* di Control Panel → Pendengaran untuk
+melihat di `logs/digidaw.log` apa yang sebenarnya terdengar, lalu matikan lagi.
+
 **Indikator AI** di bagian atas HUD menunjukkan kondisi AI yang sebenarnya, bukan selalu "kuota":
 🟢 normal (model & pemakaian per menit) · 🟡 *KUOTA PENUH · 40 dtk* (hitung mundur) / *SERVER SIBUK* ·
 🔴 *OFFLINE* (internet), *API KEY DITOLAK*, *BELUM DIATUR*, atau *ERROR* (masalah di dalam Digidaw; arahkan
@@ -506,14 +603,42 @@ diperbarui.
   Nama yang kurang pasti ditanyakan dulu; kalimat Anda sendiri tidak pernah dijalankan sebagai perintah.
 - *"Tutup skrip"*: menutup jendela pengelola atau skrip yang dibuka Digidaw, tidak yang lain.
 - *"Kipas 50 persen"*, *"fanset 70"*, *"kipas maksimal"*, *"kipas otomatis"*, *"kipas berapa persen"*: lewat `nbfc`.
-  *"Matikan kipas"* menunggu "ya".
+  *"Matikan kipas"* menunggu "ya". Di laptop ini kipas tidak bisa benar-benar berhenti: nilai 0 tetap sekitar 2480 RPM.
+  Kipas yang diatur manual tidak mengikuti suhu, jadi kalau CPU bertahan di 75°C (`FAN_SAFE_CELSIUS`) kipas kembali otomatis dan Digidaw memberi tahu.
+
+## 💱 Harga dan waktu, langsung dari sumbernya
+
+*"Harga emas hari ini"*, *"harga bitcoin"*, *"kurs dolar"*, *"100 dolar berapa rupiah"*, *"jam berapa di Tokyo"* dijawab dalam sekejap dari sumber publik, tanpa lewat pencarian dan AI.
+Harga emas adalah harga dunia per gram; emas Antam biasanya sedikit lebih mahal. Kalau sumbernya tak terjangkau, Digidaw mengatakannya, bukan menebak.
+
+## 🔐 Update Arch dan perintah sudo
+
+- *"Update sistem"*: Digidaw menyebut jumlah paketnya dan bertanya dulu. Setelah *"ya"*, ketik kata sandi di jendela sistem yang muncul di laptop. Update berjalan di latar
+  belakang sebagai unit sistem (tetap selesai walau Digidaw atau sesi desktop mati; Digidaw yang menyala lagi meneruskan pemantauannya), laptop tidak tidur selama itu, dan hasilnya
+  dikabarkan, juga ke HP. *"Status update"* menyebut progresnya, dan HUD PC serta HP menampilkannya. Log lengkapnya di `/var/log/digidaw-update.log`. Dengan baterai di bawah 30 persen tanpa charger, update tidak dimulai.
+- *"Update AUR"* dan *"update lewat terminal"* membuka terminal, supaya isi paket AUR bisa dibaca sebelum dibangun.
+- *"Sudo systemctl restart bluetooth"*: perintahnya dibacakan persis, ditanya, lalu kata sandi di jendela sistem. Bisa juga dengan kalimat biasa (*"pasang paket htop"*), AI yang menyusun
+  perintahnya dan Digidaw tetap membacakannya dulu. Perintah yang menghapus atau memformat disk ditolak; pakai terminal untuk itu.
+- Kata sandi tidak pernah sampai ke Digidaw dan tidak disimpan. Karena jendelanya di laptop, dari HP kata sandinya tetap harus diketik di laptop.
 
 ## 🖥️ HUD Holografik
 
-Panel tambahan: **Keamanan** (skor, scan terakhir/berikutnya, penjaga unduhan, tombol SCAN / LAPORAN / DEFENDER),
-**Lokasi** (folder Project Builder, hasil generate, catatan, screenshot; klik untuk membuka), dan panel bertab
-**Project / Generate** (pengerjaan aktif, project terbaru dengan status berjalan & jumlah versi, galeri hasil generate).
-Tab berpindah otomatis ke pekerjaan yang sedang berjalan. Tombol ⏸ di atas menjeda pendengaran.
+**Di PC**, tiga kolom yang tertata menurut kegunaannya. Kiri: **Hari ini** (cuaca, alarm & timer, agenda), panel bertab
+**Sistem / Keamanan / Lokasi**, dan **Lampu**. Tengah: reaktor, status, ucapan terakhir, kotak perintah, tombol cepat.
+Kanan: **Percakapan**, **Sedang diputar**, dan panel bertab **Project / Generate**. Warna mengikuti keadaan Digidaw:
+biru siaga, hijau mendengarkan, jingga memproses. Di jendela yang sempit, reaktor pindah ke atas dan panel di bawahnya.
+
+**Di HP**, seperti aplikasi: tombol **mic di tengah** tersedia di setiap halaman (ketuk lalu bicara, atau tahan seperti
+walkie-talkie), jawabannya muncul di kotak tepat di atasnya.
+- **Beranda**: sapaan, cuaca, baterai, volume, *Berikutnya* (alarm dan agenda terdekat), percakapan, musik, lampu.
+- **Kendali**: workspace, jendela terbuka (ketuk untuk menampilkan, ⋯ untuk memindah atau menutup), buka cepat, berbagi dengan PC.
+- **Layar**: gambar PC (*Perbesar* memutarnya memenuhi layar HP), lalu pilih *Touchpad* atau *Keyboard*.
+- **Agenda**: alarm & timer (pasang alarm tanpa suara dengan *+ Alarm*), agenda per *Hari ini / Besok / Minggu ini / Nanti*.
+- **Pengaturan** (ikon gerigi) dan tombol **Dengar** untuk mode tanpa sentuh ada di bagian atas.
+
+Membatalkan alarm atau pengingat lewat HUD selalu ditanya dulu, dan pembatalannya tercatat di log. Saat alarm berbunyi,
+layar HP penuh dengan jam, tombol **BERHENTI** dan **Tunda**. Halaman HUD dibaca ulang setiap dibuka, jadi perubahan tampilan
+cukup dimuat ulang (Ctrl+R di PC, tutup lalu buka di HP) tanpa me-restart Digidaw.
 
 **Tampilan HUD 2D Ringan & Responsif**: antarmuka futuristik ala Iron Man berbasis Canvas 2D dan CSS hardware-accelerated
 yang sangat halus (60+ FPS konstan) dengan beban CPU/GPU mendekati 0%. Arc reactor reaktif (efek pendar, kisi coil tembaga,
@@ -612,6 +737,13 @@ catatan di folder Documents/Digidaw Notes, screenshot di Pictures/Screenshots.
 | `core.py` | Orkestrator: antrean perintah, wake word, follow-up, dikte, push-to-talk |
 | `brain.py` | Router perintah cepat, otak hybrid (Qwen lokal + Gemini agent), koreksi & penjaga klaim palsu |
 | `local_llm.py` · `llm.py` | Klien Ollama · klien & rotasi model Gemini |
+| `alarm_sounds.py` · `hud/agenda.html` · `jadwal_kuliah.py` | Suara alarm milik pengguna · halaman agenda · jadwal mingguan |
+| `hearing.py` | Memilih tebakan Google yang paling dipahami |
+| `site_finder.py` | Mencari alamat situs dari namanya |
+| `name_spotter.py` · `scripts/train_wake.py` | Mendengar nama dari suaranya (openWakeWord) · melatihnya, termasuk dengan suara pengguna |
+| `teaching.py` | Contoh dari pemakaian nyata untuk otak lokal |
+| `everyday.py` | Hal kecil sehari-hari: volume, kecerahan, penyimpanan, aplikasi berat, kecepatan internet, salin-tempel, stopwatch, catatan |
+| `routines.py` · `protocols.py` | Mengajarkan rutinitas dan kata lewat percakapan · menyimpan dan menjalankannya |
 | `local_router.py` · `experience.py` | Pilihan paksa otak lokal (daftar alat, argumen) · belajar dari Gemini |
 | `screen_agent.py` · `pc_control.py` · `file_tools.py` | Tugas di layar · mouse, tangkapan layar, Wi-Fi/Bluetooth/daya/audio · file |
 | `persona.py` · `habits.py` · `memory.py` | Gaya bicara natural · kebiasaan & koreksi salah dengar · memori jangka panjang |
@@ -624,7 +756,8 @@ catatan di folder Documents/Digidaw Notes, screenshot di Pictures/Screenshots.
 | `presence.py` · `notifications.py` · `weather.py` | Tahu Anda pergi/kembali · pesan masuk · prakiraan & peringatan hujan |
 | `smarthome.py` · `home_auto.py` | Lampu Bardi/Tuya (koneksi tetap, suasana, kedip, fajar) · lampu otomatis ikut matahari & Anda |
 | `watchers.py` · `daily.py` · `whatsapp.py` | "Kabari saya kalau …" · waktu layar & rangkuman hari · balas WhatsApp (Whatsie) |
-| `aec.py` | Peredam gema PipeWire untuk mic & suara Digidaw (bisa disela saat bicara) |
+| `aec.py` | Peredam gema sendiri: Digidaw bisa disela saat bicara |
+| `sysadmin.py` · `quick_facts.py` | Perintah sudo dan update Arch · harga kripto, emas, kurs, jam di kota lain |
 | `hud_server.py` · `hud/index.html` | Server & tampilan HUD |
 | `project_builder.py` · `generator.py` | Buat project · gambar & dokumen dengan suara |
 | `settings.py` | Skema & penyimpanan Control Panel (`settings.json`), autostart, pemilih folder |

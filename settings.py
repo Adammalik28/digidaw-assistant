@@ -37,9 +37,19 @@ FIELDS = [
     ("Umum", "STARTUP_BRIEFING", "Ringkasan harian saat pertama memanggil \"Digidaw\"", "bool",
      {"help": "Saat Digidaw pertama kali menyala hari itu (juga saat ikut menyala bersama Windows): tanggal, cuaca, "
               "pengingat, dan catatan keamanan."}),
-    ("Umum", "ALARM_RING_SECONDS", "Lama alarm berbunyi (detik)", "int",
-     {"min": 10, "max": 300, "help": "Alarm berhenti sendiri setelah ini kalau tidak dimatikan / ditunda."}),
-    ("Umum", "ALARM_SNOOZE_MINUTES", "Tunda alarm (menit)", "int", {"min": 1, "max": 30}),
+    ("Alarm", "ALARM_SOUND", "Suara alarm", "alarm_sound",
+     {"help": "Tambahkan audio Anda sendiri (lagu, nada dering, rekaman). Yang dipilih langsung dipakai."}),
+    ("Alarm", "ALARM_SOUND_FOR_ALL", "Pakai juga untuk timer dan pengingat", "bool",
+     {"help": "Mati = hanya alarm yang memakai suara pilihan; timer dan pengingat memakai bunyi pendek bawaan."}),
+    ("Alarm", "ALARM_RISE_SECONDS", "Volume naik perlahan (detik, 0 = langsung penuh)", "int",
+     {"min": 0, "max": 120, "help": "Alarm mulai pelan lalu naik sampai volume penuh, supaya tidak mengagetkan."}),
+    ("Alarm", "ALARM_MIN_VOLUME", "Volume alarm paling kecil (%)", "int",
+     {"min": 20, "max": 100, "help": "Alarm tetap terdengar walau volume laptop sedang kecil atau dibisukan."}),
+    ("Alarm", "ALARM_RING_SECONDS", "Lama alarm berbunyi (detik)", "int",
+     {"min": 10, "max": 600, "help": "Alarm berhenti sendiri setelah ini kalau tidak dimatikan / ditunda."}),
+    ("Alarm", "ALARM_SNOOZE_MINUTES", "Tunda alarm (menit)", "int", {"min": 1, "max": 60}),
+    ("Alarm", "ALARM_SHOW_HUD", "Tampilkan layar alarm saat berbunyi", "bool",
+     {"help": "HUD terbuka sendiri dengan tombol berhenti dan tunda."}),
     ("Umum", "HUD_AUTO_OPEN", "Buka HUD saat Digidaw dijalankan", "bool", {}),
 
     ("Folder & Project", "PROJECT_DIR", "Folder project fokus", "folder",
@@ -102,10 +112,9 @@ FIELDS = [
     ("Pendengaran", "PUSH_TO_TALK_HOTKEY", "Hotkey bicara / menyela", "text", {"restart": True}),
     ("Pendengaran", "SHOW_HUD_HOTKEY", "Hotkey menampilkan HUD", "text", {"restart": True}),
     ("Pendengaran", "ACK_SOUND", "Bunyi \"tik\" saat perintah dipahami", "bool", {}),
-    ("Pendengaran", "BARGE_IN", "Bisa disela dengan suara saat Digidaw bicara (eksperimental)", "bool",
-     {"help": "Ucapkan \"Digidaw, stop\" atau \"Digidaw, <perintah lain>\" saat Digidaw sedang bicara. Memakai peredam "
-              "gema PipeWire khusus untuk mic & suara Digidaw; perangkat audio lain tidak diubah. Suara mic jadi "
-              "diolah, sehingga panggilan \"Digidaw\" bisa lebih sering tidak terdengar: matikan lagi kalau begitu.",
+    ("Pendengaran", "BARGE_IN", "Bisa disela dengan suara saat Digidaw bicara", "bool",
+     {"help": "Ucapkan \"cukup\", \"stop\", atau \"Digidaw, <perintah lain>\" dengan suara jelas saat Digidaw sedang bicara. Suara pendek yang "
+              "jelas juga dianggap \"stop\". Suara Digidaw, aplikasi lain, dan mikrofon sehari-hari tidak diubah.",
       "restart": True}),
 
     ("Suara", "TTS_ENGINE", "Mesin suara", "choice",
@@ -152,6 +161,8 @@ FIELDS = [
     ("Keamanan & Sistem", "CONFIRM_DANGEROUS_ACTIONS", "Minta konfirmasi untuk aksi berbahaya", "bool",
      {"help": "Shutdown, kosongkan Recycle Bin, jalankan perintah PowerShell, dll."}),
     ("Keamanan & Sistem", "PROACTIVE_ALERTS", "Peringatan otomatis (baterai, CPU, RAM, disk)", "bool", {}),
+    ("Keamanan & Sistem", "FAN_SAFE_CELSIUS", "Kipas kembali otomatis kalau CPU sepanas ini (°C, 0 = mati)", "int",
+     {"min": 0, "max": 95, "help": "Berlaku saat kipas diatur manual, karena mode manual tidak mengikuti suhu. Sesudah itu kipas tetap otomatis sampai diatur lagi."}),
     ("Keamanan & Sistem", "HEAT_ALERT_CELSIUS", "Peringatan CPU terlalu panas (°C, 0 = mati)", "int",
      {"min": 0, "max": 110, "help": "Diucapkan kalau suhu CPU bertahan setinggi ini lebih dari semenit."}),
 
@@ -166,6 +177,8 @@ FIELDS = [
                                     "dan pengingat tetap diucapkan langsung."}),
     ("Asisten Proaktif", "WELCOME_BACK", "Sapa & ceritakan yang terlewat saat Anda kembali", "bool",
      {"help": "Pagi hari setelah semalaman pergi: langsung ringkasan hari ini (agenda, cuaca, pesan)."}),
+    ("Asisten Proaktif", "WEEKLY_REMIND_MINUTES", "Ingatkan sebelum kuliah (menit, 0 = mati)", "int",
+     {"min": 0, "max": 180, "help": "Dari jadwal di skrip pengingat_jadwal. Diucapkan dan dikirim ke HP, jam 06.00 sampai 22.00."}),
     ("Asisten Proaktif", "RAIN_ALERTS", "Peringatan sebelum hujan", "bool",
      {"help": "Prakiraan Open-Meteo untuk kota di Umum → Kota untuk cuaca. Paling banyak sekali per 3 jam, "
               "jam 06.00–21.00."}),
@@ -231,6 +244,12 @@ def _validate(key: str, value):
             if item and item not in clean and item not in ("digidaw",):
                 clean.append(item)
         return clean[:25]
+    if kind == "alarm_sound":
+        import alarm_sounds
+        value = str(value or "")
+        if value and not alarm_sounds.exists(value):
+            raise ValueError(f"Suara alarm tidak ditemukan: {value}")
+        return value
     if kind == "folder":
         value = str(value or "").strip()
         if value and not os.path.isdir(value):
@@ -385,10 +404,19 @@ WantedBy=graphical-session.target
 """
 
 
+def _temporary_copy() -> bool:
+    """Is this Digidaw a copy in a temporary folder? Only the real one may be what starts at login."""
+    import tempfile
+    here = Path(config.BASE_DIR).resolve()
+    return any(here.is_relative_to(Path(t).resolve()) for t in {tempfile.gettempdir(), "/tmp", "/var/tmp"})
+
+
 def install_service() -> bool:
     """Write (or update) the user service. True when it is in place."""
     if os.name == "nt" or not shutil.which("systemctl"):
         return False
+    if _temporary_copy():
+        return False                     # (a working copy under /tmp pointed the real service at itself; gone after a reboot, Digidaw couldn't start: 6 Nov)
     try:
         text = service_unit()
         if not (LINUX_SERVICE.exists() and LINUX_SERVICE.read_text(encoding="utf-8") == text):

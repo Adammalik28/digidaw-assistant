@@ -17,7 +17,7 @@ import os
 import subprocess
 import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 import psutil
 
@@ -27,19 +27,14 @@ import oscompat
 
 TOKEN = secrets.token_urlsafe(24)
 HUD_FILE = config.BASE_DIR / "hud" / "index.html"
-HOLO3D_FILE = HUD_FILE.parent / "holo3d.js"
-VENDOR_DIR = (HUD_FILE.parent / "vendor").resolve()
-
-
-def vendor_file(url_path: str):
-    """A file of the 3D library (hud/vendor: Three.js), never anything outside that folder."""
-    path = (VENDOR_DIR / url_path.removeprefix("/vendor/")).resolve()
-    return path if path.suffix == ".js" and VENDOR_DIR in path.parents and path.is_file() else None
+AGENDA_FILE = HUD_FILE.parent / "agenda.html"
+AGENDA_TITLE = "Agenda Digidaw"
 ALLOWED_HOSTS = {f"127.0.0.1:{config.HUD_PORT}", f"localhost:{config.HUD_PORT}"}
 
 _handlers = {"command": None, "action": None}
 _latest = {"stats": {}, "media": {}, "weather": {}}
 _server = None
+_pending_section = {"name": ""}    # the Control Panel part to show once a HUD just being opened has loaded
 
 
 def url() -> str:
@@ -196,6 +191,8 @@ def snapshot() -> dict:
         "hotkey": config.PUSH_TO_TALK_HOTKEY.upper(),
         "ai": __import__("llm").health(),
         "esc_to_talk": config.ESC_TO_TALK,
+        "shortcuts": __import__("habits").shortcuts(),
+        "routines": __import__("protocols").for_hud(),
     }
 
 
@@ -223,19 +220,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _library(self, url_path: str):
-        """Three.js: the same for a whole release, so the browser may keep it (unlike the rest, which is no-store)."""
-        path = vendor_file(url_path)
-        if not path:
-            return self._json(404, {"error": "not found"})
-        body = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/javascript; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "max-age=604800")
-        self.end_headers()
-        self.wfile.write(body)
-
     def _json(self, code: int, obj):
         self._send(code, json.dumps(obj, default=str).encode("utf-8"), "application/json")
 
@@ -247,10 +231,9 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/", "/index.html"):
             page = HUD_FILE.read_text(encoding="utf-8").replace("__DIGIDAW_TOKEN__", TOKEN)
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
-        if parsed.path == "/holo3d.js" and HOLO3D_FILE.is_file():            # the 3D drawing code (no secrets in it)
-            return self._send(200, HOLO3D_FILE.read_bytes(), "text/javascript; charset=utf-8")
-        if parsed.path.startswith("/vendor/"):
-            return self._library(parsed.path)
+        if parsed.path == "/agenda":
+            page = AGENDA_FILE.read_text(encoding="utf-8").replace("__DIGIDAW_TOKEN__", TOKEN)
+            return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         if not self._token_ok(query):
             return self._json(401, {"error": "unauthorized"})
         if parsed.path == "/api/events":
@@ -260,6 +243,17 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/settings":
             import settings
             return self._json(200, {"fields": settings.schema(), "base_dir": str(config.BASE_DIR)})
+        if parsed.path == "/api/agenda":
+            import agenda
+            return self._json(200, agenda.page_data())
+        if parsed.path == "/api/routines":
+            import routines
+            return self._json(200, routines.page_data())
+        if parsed.path == "/api/alarm-sounds":
+            import alarm_sounds
+            return self._json(200, {"sounds": alarm_sounds.listing(), "current": config.ALARM_SOUND,
+                                    "max_mb": alarm_sounds.MAX_BYTES // 1024 // 1024, "preview_seconds": alarm_sounds.PREVIEW_SECONDS,
+                                    "formats": sorted(alarm_sounds.EXTENSIONS)})
         if parsed.path == "/api/workspace":
             return self._json(200, workspace())
         if parsed.path == "/api/generated-file":
@@ -285,6 +279,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok() or not self._token_ok():
             return self._json(403, {"error": "forbidden"})
         length = int(self.headers.get("Content-Length") or 0)
+        if self.path == "/api/alarm-sounds/upload":
+            return self._upload_alarm_sound(length)
         if length > 20_000:
             return self._json(413, {"error": "too large"})
         try:
@@ -328,6 +324,20 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": str(e)})
             events.emit("settings", changed=result["changed"])
             return self._json(200, {"ok": True, **result, "fields": settings.schema()})
+        if self.path == "/api/agenda":
+            return self._json(200, self._agenda_change(data))
+        if self.path == "/api/alarms":
+            import alarms
+            if data.get("cancel"):
+                alarms.cancel_id(str(data["cancel"]))
+                return self._json(200, {"ok": True})
+            days = [int(d) for d in data.get("days") or [] if str(d).isdigit() and 0 <= int(d) <= 6]
+            message = alarms._set_alarm(str(data.get("time", "")), str(data.get("label", ""))[:80], repeat_days=days or None)
+            return self._json(200, {"ok": "diset" in message, "message": message})
+        if self.path == "/api/alarm-sounds":
+            return self._json(200, self._alarm_sound_change(data))
+        if self.path == "/api/routines":
+            return self._json(200, self._routine_change(data))
         if self.path == "/api/wake-alias":
             import settings
             alias = str(data.get("alias", "")).strip()[:30]
@@ -344,6 +354,83 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"path": settings.pick_folder(str(data.get("initial") or ""))})
         self._json(404, {"error": "not found"})
 
+    def _upload_alarm_sound(self, length: int):
+        import alarm_sounds
+        if length > alarm_sounds.MAX_BYTES:
+            self.close_connection = True          # (the body stays unread: the connection can't be used again)
+            return self._json(413, {"ok": False, "error": f"File terlalu besar. Batasnya {alarm_sounds.MAX_BYTES // 1024 // 1024} MB."})
+        try:
+            added = alarm_sounds.add(unquote(self.headers.get("X-Filename") or ""), self.rfile.read(length))
+        except ValueError as e:
+            return self._json(400, {"ok": False, "error": str(e)})
+        except OSError as e:
+            return self._json(500, {"ok": False, "error": f"File tidak bisa disimpan: {e}"})
+        return self._json(200, {"ok": True, "sound": added})
+
+    @staticmethod
+    def _routine_change(data: dict) -> dict:
+        import habits
+        import routines
+        op = str(data.get("op", ""))
+        if op == "save":
+            return routines.save_typed(str(data.get("name", ""))[:40], [str(s)[:120] for s in (data.get("steps") or [])][:40])
+        if op == "delete":
+            return {"ok": True, "message": routines.delete(str(data.get("key", "")))}
+        if op == "teach":
+            message = routines.teach_word(str(data.get("heard", ""))[:60], str(data.get("meant", ""))[:100])
+            return {"ok": message.startswith("Siap"), "message": message}
+        if op == "forget":
+            return {"ok": habits.forget_alias(str(data.get("heard", "")))}
+        return {"ok": False, "error": "tidak dikenal"}
+
+    @staticmethod
+    def _alarm_sound_change(data: dict) -> dict:
+        import alarm_sounds
+        import settings
+        op, sound = str(data.get("op", "")), str(data.get("id", ""))
+        if op == "preview":
+            return {"ok": alarm_sounds.preview(sound)}
+        if op == "stop":
+            alarm_sounds.stop_preview()
+            return {"ok": True}
+        if op == "delete":
+            return {"ok": alarm_sounds.remove(sound), "current": config.ALARM_SOUND}
+        if op == "choose":
+            try:
+                settings.save({"ALARM_SOUND": sound})
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+            events.emit("settings", changed=["ALARM_SOUND"])
+            return {"ok": True, "current": config.ALARM_SOUND}
+        return {"ok": False, "error": "tidak dikenal"}
+
+    @staticmethod
+    def _agenda_change(data: dict) -> dict:
+        import agenda
+        op = str(data.get("op", ""))
+        title, date, at = str(data.get("title", ""))[:120], str(data.get("date", "")), str(data.get("time", ""))
+        yearly = bool(data.get("yearly"))
+        try:
+            remind = int(data.get("remind_days", 1))
+        except (TypeError, ValueError):
+            remind = 1
+        if op == "edit_weekly":
+            import jadwal_kuliah
+            return {"ok": True, "message": jadwal_kuliah.open_editor()}
+        if op == "delete":
+            event_id = str(data.get("id", ""))
+            if not any(e["id"] == event_id for e in agenda.all_events()):
+                return {"ok": False, "message": "Acara itu sudah tidak ada."}
+            return {"ok": True, "message": agenda.delete_event(event_id)}
+        if op == "update":
+            done, message = agenda.update_event(str(data.get("id", "")), title, date, at, yearly, remind)
+            return {"ok": done, "message": message}
+        if op == "add":
+            before = {e["id"] for e in agenda.all_events()}
+            message = agenda.add_event(title, date, at, yearly, remind)
+            return {"ok": bool({e["id"] for e in agenda.all_events()} - before), "message": message}
+        return {"ok": False, "message": "Perintah tidak dikenal."}
+
     def _stream(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -351,7 +438,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         q = events.subscribe()
         try:
-            self._event({"type": "hello", **snapshot()})
+            section, _pending_section["name"] = _pending_section["name"], ""
+            self._event({"type": "hello", **snapshot(), "open_settings": section})
             while True:
                 try:
                     self._event(q.get(timeout=15))
@@ -417,6 +505,74 @@ def open_window():
                          **oscompat.detached())
     else:
         webbrowser.open(url())
+
+
+def open_settings(section: str):
+    """Show the HUD with this part of the Control Panel open."""
+    if _hud_window():
+        open_window()
+        events.emit("open_settings", section=section)
+        return
+    _pending_section["name"] = section
+    open_window()
+
+
+def _agenda_window():
+    import window_manager
+    return next((w for w in window_manager._windows() if w["title"].startswith(AGENDA_TITLE)), None)
+
+
+def _float_agenda():
+    """The agenda floats in the middle of the screen, sized to it, whichever way the browser started the window."""
+    if not oscompat.IS_LINUX:
+        return
+    import linux_desktop as ld
+    for _ in range(40):
+        window = _agenda_window()
+        if window:
+            break
+        time.sleep(0.15)
+    else:
+        return
+    address = f"address:{window['hwnd']}"
+    monitor = next((m for m in ld._hypr_json("monitors") or [] if m.get("focused")), None)
+    if not monitor:
+        return
+    scale = monitor.get("scale") or 1
+    width, height = int(min(1280, monitor["width"] / scale * 0.92)), int(min(880, monitor["height"] / scale * 0.92))
+    client = next((c for c in ld._hypr_json("clients") or [] if c.get("address") == window["hwnd"]), {})
+    if not client.get("floating"):
+        ld.dispatch("togglefloating", address)
+    ld.dispatch("resizewindowpixel", f"exact {width} {height},{address}")
+    ld.dispatch("centerwindow")
+
+
+def open_agenda() -> bool:
+    """The agenda's own page, in its own window: brought forward if it's already open."""
+    import media
+    import window_manager
+    existing = _agenda_window()
+    if existing:
+        window_manager._force_foreground(existing["hwnd"])
+        return True
+    if not _server:
+        return False
+    page = f"{url()}agenda"
+    exe = media.browser_exe()
+    if exe:
+        subprocess.Popen([exe, f"--app={page}", "--window-size=1280,880"], **oscompat.detached())
+        threading.Thread(target=_float_agenda, daemon=True, name="agenda-window").start()
+    else:
+        webbrowser.open(page)
+    return True
+
+
+def close_agenda() -> bool:
+    import linux_desktop as ld
+    window = _agenda_window()
+    if window:
+        ld.dispatch("closewindow", f"address:{window['hwnd']}")
+    return bool(window)
 
 
 def show_hud() -> str:

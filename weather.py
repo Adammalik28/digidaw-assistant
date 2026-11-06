@@ -171,7 +171,8 @@ def _day(data: dict, name: str, index: int) -> str:
     d = data["daily"]
     date = datetime.date.fromisoformat(d["time"][index])
     pct = d["precipitation_probability_max"][index] or 0
-    text = (f"{'Besok' if index == 1 else 'Lusa'}, {HARI[date.weekday()]}, di {name}: {describe(d['weather_code'][index])}, "
+    import agenda
+    text = (f"{'Besok' if index == agenda.tomorrow_offset() else 'Lusa'}, {HARI[date.weekday()]}, di {name}: {describe(d['weather_code'][index])}, "
             f"suhu {d['temperature_2m_min'][index]:.0f} sampai {d['temperature_2m_max'][index]:.0f} derajat")
     day = datetime.datetime.combine(date, datetime.time())
     rainy = [(end - datetime.timedelta(hours=1), p) for end, p, mm, code in _hours(data)
@@ -221,10 +222,11 @@ def get_forecast(when: str = "besok", city: str = "") -> str:
     if not data:
         return f"Maaf {T}, prakiraan cuaca sedang tidak bisa diakses."
     when = (when or "").lower()
+    import agenda
     if "lusa" in when:
-        return _day(data, where["name"], 2)
+        return _day(data, where["name"], agenda.tomorrow_offset() + 1)
     if "besok" in when or "tomorrow" in when:
-        return _day(data, where["name"], 1)
+        return _day(data, where["name"], agenda.tomorrow_offset())
     return _coming_hours(data, where["name"], with_day="hari ini" in when or "today" in when)
 
 

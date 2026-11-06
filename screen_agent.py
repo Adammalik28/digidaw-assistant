@@ -75,10 +75,11 @@ Aturan:
 - berisiko=true untuk langkah yang tidak bisa dibatalkan (mengirim, membayar, menghapus, memasang, masuk akun, menyetujui).
 - Begitu tugas tercapai menurut gambar, pilih selesai. Jangan mengulang langkah yang sudah berhasil.
 - Kalau layar berpindah ke hal lain yang bukan hasil langkahmu (situs atau aplikasi lain), berarti user sedang memakai komputer: pilih gagal dan sebutkan alasannya. Jangan mencari ulang dan jangan membuka kembali apa pun.
-- Pastikan dari gambar bahwa langkah sebelumnya berhasil sebelum lanjut. Kalau tidak berubah, coba cara lain. Jendela DIGIDAW HUD adalah milikmu sendiri; abaikan kecuali diminta.
+- Pastikan dari gambar bahwa langkah sebelumnya berhasil sebelum lanjut. Kalau tidak berubah, coba cara lain. Jendela DIGIDAW HUD adalah milikmu sendiri dan biasanya tampak sebagai kotak gelap polos; abaikan kecuali diminta.
 - Tulis "langkah" dan semua kalimat untuk user dalam bahasa Indonesia, singkat."""
 
 CLICKS = ("klik", "klik_dobel", "klik_kanan")
+OWN_WINDOW_RE = re.compile(r"\b(?:digidaw|hud|control panel)\b", re.IGNORECASE)     # the task is about Digidaw's own windows: then they stay in the picture
 MAX_MISSES = 3                     # a click target not found this many times: the job ends instead of clicking around
 MAX_SAME = 3                       # the same click or skill this many times in one job: it isn't working (stuck)
 MAX_STALE = 3                      # steps in a row dropped because the screen moved on: nobody can work like that
@@ -183,7 +184,8 @@ def _say(text: str, level: str = "reminder", listen: float = 0):
     print(f"[tugas] {text}")
     if ANNOUNCE:
         try:
-            ANNOUNCE(text, level, listen=listen, push=False)
+            # a question also goes to the phone: a job started from there would otherwise wait unseen, then give up
+            ANNOUNCE(text, level, listen=listen, push=bool(listen))
         except Exception as e:
             diag.warn_once("agent.say", "tugas layar tidak bisa bersuara", e)
 
@@ -328,7 +330,7 @@ def _run(task: str, job: int | None = None, max_steps: int = MAX_STEPS):
         if not _wait_calm(stopped):
             return f"Tugasnya saya hentikan karena {T} sedang memakai komputer."
         try:
-            image, monitor = pc_control.capture()
+            image, monitor = pc_control.capture(hide_own=not OWN_WINDOW_RE.search(task))
             looked_at, front = time.time(), pc_control.front_window()
             step = _decide(task, history, image)
             if step.get("aksi") in CLICKS:

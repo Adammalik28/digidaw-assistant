@@ -1,39 +1,4 @@
 {
-  "kerja": {
-    "aliases": [
-      "work",
-      "mode kerja",
-      "work mode",
-      "kantor"
-    ],
-    "description": "Siapkan lingkungan kerja: VS Code, GitHub, volume pelan",
-    "steps": [
-      {
-        "tool": "media_control",
-        "args": {
-          "action": "pause"
-        }
-      },
-      {
-        "tool": "open_application",
-        "args": {
-          "name": "vs code"
-        }
-      },
-      {
-        "tool": "open_website",
-        "args": {
-          "site": "github"
-        }
-      },
-      {
-        "tool": "set_volume",
-        "args": {
-          "level": 30
-        }
-      }
-    ]
-  },
   "santai": {
     "aliases": [
       "relax",
@@ -61,8 +26,15 @@
         "args": {
           "level": 60
         }
+      },
+      {
+        "tool": "lamp_scene",
+        "args": {
+          "scene": "santai"
+        }
       }
-    ]
+    ],
+    "lamp_added": true
   },
   "fokus": {
     "aliases": [
@@ -93,13 +65,20 @@
         }
       },
       {
+        "tool": "lamp_scene",
+        "args": {
+          "scene": "fokus"
+        }
+      },
+      {
         "tool": "set_timer",
         "args": {
           "minutes": 25,
           "message": "Sesi fokus 25 menit selesai. Saatnya istirahat 5 menit."
         }
       }
-    ]
+    ],
+    "lamp_added": true
   },
   "tidur": {
     "aliases": [
@@ -130,10 +109,17 @@
         }
       },
       {
+        "tool": "lamp_power",
+        "args": {
+          "on": false
+        }
+      },
+      {
         "tool": "sleep_pc",
         "args": {}
       }
-    ]
+    ],
+    "lamp_added": true
   },
   "bersih": {
     "aliases": [
@@ -170,6 +156,105 @@
         "args": {
           "level": 70
         }
+      },
+      {
+        "tool": "lamp_scene",
+        "args": {
+          "scene": "pesta"
+        }
+      }
+    ],
+    "lamp_added": true
+  },
+  "jam terbang": {
+    "aliases": [
+      "mode jam terbang",
+      "rutinitas jam terbang"
+    ],
+    "description": "buka WhatsApp, buka wasistlos, buka discord, buka telegram, buka Firefox, Cari YouTube Tik Tok dan Instagram, cari medanpedia dan uneedpanel",
+    "custom": true,
+    "lamp_added": true,
+    "steps": [
+      {
+        "say": "buka WhatsApp"
+      },
+      {
+        "say": "buka wasistlos"
+      },
+      {
+        "say": "buka discord"
+      },
+      {
+        "say": "buka telegram"
+      },
+      {
+        "say": "buka Firefox"
+      },
+      {
+        "say": "Cari YouTube Tik Tok dan Instagram"
+      },
+      {
+        "say": "cari medanpedia dan uneedpanel"
+      }
+    ]
+  },
+  "gabut": {
+    "aliases": [
+      "mode gabut",
+      "rutinitas gabut"
+    ],
+    "description": "buka whatsapp di workspace 1, buka wasistlos di workspace 1, buka discord di workspace 1, buka telegram di workspace 1, buka firefox di workspace 2, Buka Instagram YouTube dan tiktok, buka X, ubah warna lampu ke merah",
+    "custom": true,
+    "lamp_added": true,
+    "steps": [
+      {
+        "say": "buka whatsapp di workspace 1",
+        "tool": "open_on_workspace",
+        "args": {
+          "name": "whatsapp",
+          "workspace": "1"
+        }
+      },
+      {
+        "say": "buka wasistlos di workspace 1",
+        "tool": "open_on_workspace",
+        "args": {
+          "name": "wasistlos",
+          "workspace": "1"
+        }
+      },
+      {
+        "say": "buka discord di workspace 1",
+        "tool": "open_on_workspace",
+        "args": {
+          "name": "discord",
+          "workspace": "1"
+        }
+      },
+      {
+        "say": "buka telegram di workspace 1",
+        "tool": "open_on_workspace",
+        "args": {
+          "name": "telegram",
+          "workspace": "1"
+        }
+      },
+      {
+        "say": "buka firefox di workspace 2",
+        "tool": "open_on_workspace",
+        "args": {
+          "name": "firefox",
+          "workspace": "2"
+        }
+      },
+      {
+        "say": "Buka Instagram YouTube dan tiktok"
+      },
+      {
+        "say": "buka X"
+      },
+      {
+        "say": "ubah warna lampu ke merah"
       }
     ]
   }

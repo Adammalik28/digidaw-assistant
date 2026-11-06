@@ -13,6 +13,8 @@ speaking the microphone is gated (fed silence) so he never hears himself.
 
 Without webrtcvad (or if the mic can't run at 16 kHz) an energy-threshold detector is used instead.
 """
+import array
+import math
 import re
 import sys
 import time
@@ -29,6 +31,8 @@ import speech_recognition as sr
 
 import config
 import diag
+import metrics
+import name_spotter
 
 # Google's speech service, over one kept-alive connection instead of a new one per sentence (the library's way: a
 # DNS lookup and a TCP handshake every time; on a lossy network the lookup alone sometimes took 5 s). HTTPS: what the
@@ -68,8 +72,10 @@ def confirm_alias(local: str | None, text: str) -> str:
 
 
 # a phrase ending like this isn't finished ("lebih…", "pindah ke…"): wait a little longer for the rest of it
+# a verb alone too: "buka" (17 times in the log), the user then said it all over again ("buka" … "buka Firefox")
 DANGLING_RE = re.compile(r"\b(?:lebih|agak|paling|kurang|ke|di|dari|yang|dan|atau|tapi|untuk|buat|dengan|kalau|"
-                         r"jadi|biar|supaya|mau|ingin|pengen|tolong|coba|warna|mode|sama)[\s,.]*$", re.IGNORECASE)
+                         r"jadi|biar|supaya|mau|ingin|pengen|tolong|coba|warna|mode|sama)[\s,.]*$|"
+                         r"^\s*(?:buka|tutup|pindah|matikan|nyalakan|hidupkan|putar|jalankan|ubah|ganti|atur)[\s,.]*$", re.IGNORECASE)
 DANGLING_HOLD = 1.6        # seconds after such a phrase ends (the usual mid-sentence gap is config.STT_MERGE_GAP)
 
 
@@ -132,15 +138,48 @@ def _keep_portaudio(microphone):
     microphone.pyaudio_module = _SharedPortAudio(microphone.pyaudio_module)
     return microphone
 
+GATE_TAIL_SECONDS = 8.0
+
+
+class _HighPass:
+    """Takes away what's below the voice. A low rumble in the room (22-42 Hz, 3000+ on the meter, 5 Nov) passes for speech: phrases
+    never ended, so a call came out 3.4 s late inside 5 s of noise. Two Butterworth biquads, 24 dB per octave."""
+
+    def __init__(self, cutoff: float, rate: int):
+        w = 2 * math.pi * cutoff / rate
+        cos, alpha = math.cos(w), math.sin(w) / math.sqrt(2)
+        norm = 1 + alpha
+        self.b0, self.b1 = (1 + cos) / 2 / norm, -(1 + cos) / norm
+        self.a1, self.a2 = -2 * cos / norm, (1 - alpha) / norm
+        self.state = [0.0, 0.0, 0.0, 0.0]
+
+    def __call__(self, frame: bytes) -> bytes:
+        samples = array.array("h", frame)
+        b0, b1, a1, a2 = self.b0, self.b1, self.a1, self.a2
+        s1, s2, s3, s4 = self.state
+        for i, x in enumerate(samples):
+            y = b0 * x + s1                  # (b2 == b0)
+            s1 = b1 * x - a1 * y + s2
+            s2 = b0 * x - a2 * y
+            z = b0 * y + s3
+            s3 = b1 * y - a1 * z + s4
+            s4 = b0 * y - a2 * z
+            samples[i] = -32768 if z < -32768 else 32767 if z > 32767 else int(z)
+        self.state = [s1, s2, s3, s4]
+        return samples.tobytes()
+
+
 class _VadSegmenter:
     """Turns a stream of 30 ms frames into phrases using WebRTC VAD + a relative energy gate."""
 
     FRAME_MS = 30
     START_WINDOW, START_VOICED = 5, 3      # 3 voiced frames out of the last 5 (~90 ms) starts a phrase
     PREROLL_MS = 300                       # audio kept from just before speech started
-    TRAIL_KEEP_MS = 300                    # silence kept after the last word (helps recognition)
+    TRAIL_KEEP_MS = 500                    # what the detector calls silence after the last word is kept: a soft ending ("Fire-fox", "kuli-ah")
+                                           # is often in it. (All of it: costs nothing, the phrase ended anyway.)
     MIN_VOICED_MS = 240                    # shorter blips (clicks, coughs) are dropped
-    ENERGY_FACTOR = 1.8                    # a speech frame must also be this much louder than the room
+    ENERGY_FACTOR = 2.5                    # a speech frame must also be this much louder than the room (1.8: phrases never ended in
+                                           # a noisy room; 3.5: a soft call was lost. Measured on recordings, 5 Nov)
 
     def __init__(self, sample_rate: int):
         self.rate = sample_rate
@@ -367,6 +406,7 @@ class SpeechToText:
         return True
 
     MIC_STALL_SECONDS = 8          # no sound at all from the microphone this long: its stream is stuck
+    MIC_LOUD_LEVEL = 26000         # the limit is 32767: at 142% Google missed the name in 38% of calls instead of 11%
     MIC_SILENT_LEVEL = 3           # a real room is never this quiet: the microphone only sends zeros (muted?)
 
     def mic_report(self) -> str:
@@ -375,7 +415,8 @@ class SpeechToText:
         levels = sorted(seg.energies) if seg and seg.energies else []
         if not levels:
             return "belum ada suara dari mikrofon"
-        return f"level ruangan {levels[len(levels) // 5]}–{levels[-1]}, {self.phrases_heard} frasa tertangkap"
+        loud = " (mikrofon terlalu keras: suara bisa pecah, cek volumenya)" if levels[-1] >= self.MIC_LOUD_LEVEL else ""
+        return f"level ruangan {levels[len(levels) // 5]}–{levels[-1]}, {self.phrases_heard} frasa tertangkap{loud}"
 
     def _watch_mic(self, is_muted):
         """A microphone that stops delivering sound (its stream stuck after a device change) or delivers only
@@ -431,10 +472,23 @@ class SpeechToText:
     def stop_background(self):
         self._running.clear()
 
+    _recording = None
+
+    def record_for(self, seconds: float) -> bytes:
+        """The microphone for this long; while a lesson runs (until stop_recording) no phrase is formed from what is said."""
+        self._recording = []
+        time.sleep(seconds)
+        heard, self._recording = self._recording, []
+        return b"".join(heard)
+
+    def stop_recording(self):
+        self._recording = None
+
     def _capture_loop_vad(self, is_muted):
         segmenter = _VadSegmenter(16000)
         self._segmenter = segmenter
         frame_samples = segmenter.frame_samples
+        highpass = _HighPass(config.STT_HIGHPASS_HZ, 16000) if config.STT_HIGHPASS_HZ else None
         gen = self._capture_gen
         while self._running.is_set() and gen == self._capture_gen:
             try:
@@ -447,10 +501,18 @@ class SpeechToText:
                         if gen != self._capture_gen:
                             return                        # this stream got stuck and was replaced meanwhile
                         self.last_frame_at = now
+                        if highpass:
+                            frame = highpass(frame)
                         if is_muted():
                             segmenter.reset()             # DIGIDAW is talking: hear nothing
                             self.phrase_in_progress_since = None
                             continue
+                        if self._recording is not None:   # a lesson in saying the name: nothing else is listened to meanwhile
+                            self._recording.append(frame)
+                            segmenter.reset()
+                            self.phrase_in_progress_since = None
+                            continue
+                        name_spotter.spotter.feed(frame, now)
                         audio = segmenter.feed(frame, now)
                         self.phrase_in_progress_since = segmenter.started_at if segmenter.triggered else None
                         if audio:
@@ -507,18 +569,33 @@ class SpeechToText:
             raise sr.RequestError(f"recognition request failed: {response.status_code} {response.reason}")
         return google.OutputParser(show_all=True, with_confidence=False).parse(response.text)
 
+    def guesses(self, audio) -> list[str]:
+        """All of Google's readings of a phrase, best first; the laptop's own reading when it can't be reached."""
+        try:
+            result = self._google(audio)
+            self._set_online(True)
+            return [a.get("transcript", "").strip() for a in result.get("alternative", [])] if isinstance(result, dict) else []
+        except sr.UnknownValueError:
+            return []
+        except (sr.RequestError, OSError) as e:
+            self._set_online(False, e)
+        import local_stt
+        return [text for text in [local_stt.speech_in(audio)] if text]    # (not the prompted reading: that one "hears" the name in an echo)
+
     def _recognize(self, audio) -> str:
         """Best transcript — but if any of Google's alternatives contains the assistant's name, use
         that one (Google's top guess usually "corrects" an unusual name like Digidaw to "digital")."""
         try:
             result = self._google(audio)
             self._set_online(True)          # Google answered (even "nothing recognised" means we're online)
-            alternatives = [a.get("transcript", "") for a in result.get("alternative", [])] \
+            alternatives = [a.get("transcript", "").strip() for a in result.get("alternative", [])] \
                 if isinstance(result, dict) else []
+            self._guesses.items = alternatives
             if not alternatives:
                 return ""
             name = config.WAKE_WORDS[0].lower()
-            return next((a for a in alternatives if name in a.lower()), alternatives[0]).strip()
+            named = next((a for a in alternatives if name in a.lower()), None)
+            return named or self._understood_guess(alternatives)
         except sr.UnknownValueError:
             return ""
         except sr.RequestError as e:
@@ -526,6 +603,23 @@ class SpeechToText:
             return ""
         except Exception:
             return ""
+
+    def _understood_guess(self, guesses: list[str]) -> str:
+        """Which of Google's guesses to use: see hearing.py. Whatever goes wrong there, Google's first choice stands."""
+        chosen = guesses[0]
+        if self.choose_guess and len(guesses) > 1:
+            try:
+                chosen = self.choose_guess(guesses) or chosen
+            except Exception as e:
+                diag.warn_once("stt.guess", "tebakan Google gagal dipilih", e)
+        if chosen != guesses[0]:
+            print(f"[STT] tebakan lain dipakai: \"{chosen}\" (pilihan pertama Google: \"{guesses[0]}\")")
+            try:
+                import metrics
+                metrics.count("tebakan_lain")
+            except Exception:
+                pass
+        return chosen
 
     def _user_kept_talking(self, ended: float, next_started: float | None = None, gap: float | None = None) -> bool:
         """Did a new phrase start within STT_MERGE_GAP (or `gap`) of this one ending? (mid-sentence pause)"""
@@ -545,6 +639,8 @@ class SpeechToText:
     on_wake_hint = None        # fn(local_text) -> bool: the laptop heard the name; True = it already chimed
     on_wake_unconfirmed = None  # fn(): ...but Google heard something else: undo the chime
     on_phrase_for_us = None    # fn(): a phrase Digidaw is waiting for goes to Google (warm the voice up)
+    choose_guess = None        # fn(guesses) -> the one to use (hearing.best_guess)
+    _guesses = threading.local()    # all of Google's guesses for the phrase this thread just sent
     gated = 0                  # phrases that stayed on this PC (privacy mode)
 
     @staticmethod
@@ -555,7 +651,30 @@ class SpeechToText:
             print(f"[STT callback error] {e}")
             return None
 
-    def _recognize_smart(self, audio, duration: float) -> str:
+    @staticmethod
+    def _tail(audio, duration: float):
+        """Of a long phrase nobody is waiting for, the laptop reads the end: reading all of it held up the next one (a call came out
+        8 s late), and a call within a long sound is mostly what ends it."""
+        if duration <= GATE_TAIL_SECONDS:
+            return audio
+        keep = int(GATE_TAIL_SECONDS * audio.sample_rate) * audio.sample_width
+        return sr.AudioData(audio.get_raw_data()[-keep:], audio.sample_rate, audio.sample_width)
+
+    @staticmethod
+    def _with_spot(text: str, spot: float, duration: float) -> str:
+        """The laptop heard the name in the sound, and Google's words don't have it. Alone: the call. Before something that starts like a command:
+        the name was misheard. Otherwise the words stand. An alias, not the name: what follows still has to look like a command."""
+        import core
+        if not name_spotter.spotter.sure(spot) or core.detect_wake(text)[0] or not config.WAKE_ALIASES:
+            return text
+        metrics.count("nama_tertolong")
+        print(f"[nama] nama terdengar (skor {spot:.2f}, {duration:.1f} dtk) walau Google menulis lain")
+        alias = config.WAKE_ALIASES[0]
+        if not text.strip() or len(text.split()) <= 2 and WAKE_LENGTH[0] <= duration <= WAKE_LENGTH[1] + 0.4 and not core.COMMAND_START_RE.match(text):
+            return alias
+        return f"{alias} {text}" if core.COMMAND_START_RE.match(text) and len(text.split()) <= 8 else text
+
+    def _recognize_smart(self, audio, duration: float, spot: float = 0.0) -> str:
         """Local-first recognition: see local_stt. Falls back to Google-only if no local model."""
         import local_stt
         if not self.online and config.OFFLINE_STT and local_stt.available(local_stt.OFFLINE_MODEL):
@@ -565,10 +684,11 @@ class SpeechToText:
             return text
         chimed = False
         local = None
-        expected = self.needs_full_text()
+        expected = self.needs_full_text() or name_spotter.spotter.sure(spot)
+        self._guesses.items = []
         if config.STT_PRIVACY_MODE and local_stt.available(local_stt.GATE_MODEL) and not expected:
             try:
-                local = local_stt.transcribe(audio, local_stt.GATE_MODEL)
+                local = local_stt.transcribe(self._tail(audio, duration), local_stt.GATE_MODEL)
             except Exception as e:
                 print(f"[STT lokal] {e}")
                 local = None
@@ -582,10 +702,12 @@ class SpeechToText:
                     chimed = bool(self._call(self.on_wake_hint, local))
         elif expected:
             self._call(self.on_phrase_for_us)
-        text = confirm_alias(local, self._recognize(audio))
+        text = self._with_spot(confirm_alias(local, self._recognize(audio)), spot, duration)
+        if WAKE_LENGTH[0] <= duration <= WAKE_LENGTH[1] and sounds_like_name(text):
+            metrics.timing("skor_nama_panggilan", spot)      # how the detector does on real calls (it only watches until it has learned)
         # the early chime stands when Google heard the name or something like it ("pigi chord"); nothing at all or
         # other words means the laptop's recognizer imagined it in noise / a song (it chimed for "tulang lunak")
-        if chimed and not sounds_like_name(text):
+        if chimed and not any(sounds_like_name(g) for g in [text, *getattr(self._guesses, "items", [])]):
             self._call(self.on_wake_unconfirmed)
         if not text and not self.online and config.OFFLINE_STT and local_stt.available(local_stt.OFFLINE_MODEL):
             text = local_stt.transcribe(audio, local_stt.OFFLINE_MODEL)   # Google just failed: use the local one
@@ -631,12 +753,15 @@ class SpeechToText:
                 stale = time.time() - ended > 20 and not pending and not inflight
                 too_long = self.max_phrase_seconds and ended - started > self.max_phrase_seconds
                 if not stale and not too_long:
-                    inflight.append((pool.submit(self._recognize_smart, audio, ended - started), started, ended))
+                    spot = name_spotter.spotter.score_during(started, ended)
+                    inflight.append((pool.submit(self._recognize_smart, audio, ended - started, spot), started, ended))
             except queue.Empty:
                 pass
             while inflight and inflight[0][0].done():
                 future, started, ended = inflight.popleft()
                 text = future.result()
+                if not text and config.LOG_OVERHEARD:
+                    print(f"· frasa {ended - started:.1f} dtk tidak terbaca")
                 if text:
                     try:
                         import presence

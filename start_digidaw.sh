@@ -10,6 +10,11 @@ if [[ ! -x "$VENV/bin/python" ]]; then
     exit 1
 fi
 
+# from the app menu or a terminal: through the service, which brings Digidaw back after a crash or a hang (on its own nothing would)
+if ! grep -q '/digidaw\.service' /proc/self/cgroup 2>/dev/null && systemctl --user cat digidaw >/dev/null 2>&1; then
+    exec systemctl --user start digidaw
+fi
+
 # started from autostart / the app menu the session variables may be incomplete: find Hyprland and Wayland
 RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -d "$RUNTIME/hypr" ]]; then

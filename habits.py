@@ -15,6 +15,7 @@ import storage
 
 HABITS_FILE = config.BASE_DIR / "habits.json"
 TOP_IN_PROMPT = 6
+SHORTCUT_MIN_USES = 3
 FAILED_RESULT = re.compile(r"tidak ditemukan|tidak ada|gagal|belum terpasang|tidak dikenal|error", re.IGNORECASE)
 # misheard often enough to fix from the start; learned aliases are added to these
 BUILTIN_ALIASES = {
@@ -84,6 +85,15 @@ def record(tool: str, kwargs: dict, result: str):
         _save()
 
 
+def like(kind: str, name: str):
+    """The user said this one is a favourite: counts as played often."""
+    with _lock:
+        entry = _load()["usage"].setdefault(kind, {}).setdefault(name.lower().strip(), {"count": 0, "last": 0})
+        entry["count"] += 5
+        entry["last"] = int(time.time())
+        _save()
+
+
 def usage_count(kind: str, name: str) -> int:
     with _lock:
         return _load()["usage"].get(kind, {}).get(name.lower().strip(), {}).get("count", 0)
@@ -96,6 +106,23 @@ def favourites(kind: str, n: int = TOP_IN_PROMPT) -> list[str]:
     return [name for name, v in ranked[:n] if v["count"] >= 2]
 
 
+def shortcuts(n: int = 6) -> list[dict]:
+    """The apps and sites used most, for the HUD's buttons. Only what was opened a few times and is a name Digidaw knows:
+    a misheard word that once opened something ("www") isn't a habit."""
+    import resolver
+    with _lock:
+        usage = _load()["usage"]
+        ranked = [(v["count"], v["last"], name) for kind in ("app", "web") for name, v in usage.get(kind, {}).items() if v["count"] >= SHORTCUT_MIN_USES]
+    found = []
+    for _, _, name in sorted(ranked, reverse=True):
+        verdict, matches = resolver.resolve(name, ("app", "site"), sure_only=True)
+        if verdict == "sure" and matches[0].key not in {f["key"] for f in found}:
+            found.append({"key": matches[0].key, "label": matches[0].label, "command": f"buka {name}"})
+        if len(found) >= n:
+            break
+    return found
+
+
 # ───────────────────────────── aliases ─────────────────────────────
 
 def aliases() -> dict[str, str]:
@@ -103,9 +130,14 @@ def aliases() -> dict[str, str]:
         return {**BUILTIN_ALIASES, **_load()["aliases"]}
 
 
-def learn_alias(heard: str, meant: str) -> bool:
+def learned_aliases() -> dict[str, str]:
+    with _lock:
+        return dict(_load()["aliases"])
+
+
+def learn_alias(heard: str, meant: str, max_words: int = 3) -> bool:
     heard, meant = heard.lower().strip(), meant.lower().strip()
-    if not heard or not meant or heard == meant or len(heard.split()) > 3:
+    if not heard or not meant or heard == meant or len(heard.split()) > max_words:
         return False
     with _lock:
         _load()["aliases"][heard] = meant

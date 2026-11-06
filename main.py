@@ -13,6 +13,7 @@ import sys
 import json
 import time
 import argparse
+import hashlib
 import importlib.util
 import threading
 import subprocess
@@ -36,7 +37,6 @@ if NO_CONSOLE:
             pass
     import logfile
     sys.stdout = sys.stderr = logfile.TimestampedLog(_log)
-    print(f"\n===== Digidaw start {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
 else:
     # Configure UTF-8 encoding for standard Windows consoles
     for stream in (sys.stdout, sys.stderr):
@@ -96,7 +96,8 @@ def _single_instance(args) -> bool:
 
 ARGS = _parse_args()
 if not _single_instance(ARGS):
-    sys.exit(0)
+    sys.exit(0)                      # (the launcher icon, while Digidaw runs: the HUD comes forward, nothing else happens)
+print(f"\n===== Digidaw start {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
 
 from rich.console import Console
 from rich.panel import Panel
@@ -138,6 +139,7 @@ if not oscompat.IS_WINDOWS:
     signal.signal(signal.SIGHUP, signal.SIG_DFL)
 import stt
 import brain
+import llm
 import memory
 import media
 import monitor
@@ -150,6 +152,7 @@ import security_scan
 import screen_context
 import generator
 import alarms
+import sysadmin
 import agenda
 import antigravity_analysis
 import presence
@@ -245,7 +248,8 @@ def print_dashboard(voice_enabled: bool, hud_ok: bool, hotkey_ok: bool, missing:
     table.add_row("Neural Core (Gemini AI)", gemini_status)
     import local_llm
     if config.BRAIN_MODE != "gemini":
-        local_llm.warm_up(brain._local_system_prompt(offline=False))
+        local_llm.warm_up(brain._local_system_prompt(offline=False), [lambda: brain.local_router.pick("halo"),
+                                                                     lambda: brain._local_talk("halo", False)])
         table.add_row("Local Brain (Ollama)", f"[green]{config.LOCAL_MODEL} · mode {config.BRAIN_MODE}[/green]"
                       if local_llm.available(refresh=True)
                       else f"[yellow]Tidak aktif: {local_llm.status_reason()} (semua lewat Gemini)[/yellow]")
@@ -266,6 +270,31 @@ def print_dashboard(voice_enabled: bool, hud_ok: bool, hotkey_ok: bool, missing:
     console.print()
 
 
+AI_CHECK_HOURS = 6              # Digidaw restarted 14 times one evening, each check a request or more of a small daily quota
+AI_CHECK_FILE = config.LOG_DIR / "ai_check.json"
+
+
+def _key_id() -> str:
+    return hashlib.sha256(config.GEMINI_API_KEY.encode()).hexdigest()[:12]
+
+
+def _ai_checked_lately() -> str:
+    """The model that answered the check a little while ago, with this key and these tools; "" = check now."""
+    try:
+        state = json.loads(AI_CHECK_FILE.read_text(encoding="utf-8"))
+        fresh = time.time() - state["at"] < AI_CHECK_HOURS * 3600 and state["key"] == _key_id() and state["tools"] == len(brain.TOOL_MAP)
+        return state["model"] if fresh and state["model"] in llm.candidates() and not brain.DROPPED_TOOLS else ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def _remember_ai_check(model: str):
+    try:
+        AI_CHECK_FILE.write_text(json.dumps({"at": time.time(), "model": model, "key": _key_id(), "tools": len(brain.TOOL_MAP)}), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _startup_ai_check(core):
     """Right after start: does the AI really work with every tool? Wait for the network first (the PC may
     have just booted). Problems are announced once; a working AI only shows on the HUD indicator."""
@@ -276,7 +305,14 @@ def _startup_ai_check(core):
         time.sleep(5)
     else:
         return                       # still offline: the connectivity notice covers it; checked again when online
+    checked = _ai_checked_lately()
+    if checked:
+        llm.mark_ok(checked)         # (a real command finds out if it changed, and says why)
+        console.print(f"[dim]   AI dianggap siap: {checked} (dicek belum lama ini)[/dim]")
+        return
     result = brain.self_check()
+    if result["ok"]:
+        _remember_ai_check(result["model"])
     if result["dropped"]:
         core.announce(f"Perhatian, {config.USER_TITLE}: {len(result['dropped'])} fitur AI saya nonaktifkan karena error "
                       f"({', '.join(result['dropped'][:3])}). Detailnya di log.", "warning")
@@ -387,12 +423,14 @@ def main(args=ARGS):
     generator.ANNOUNCE = core.announce
     _later(15, generator.recover)       # a job cut off by the restart: said, not waited for forever
     alarms.ANNOUNCE = core.announce
+    sysadmin.ANNOUNCE = core.announce
     agenda.ANNOUNCE = core.announce
     antigravity_analysis.ANNOUNCE = core.announce
     notifications.ANNOUNCE = core.announce
     weather.ANNOUNCE = core.announce
     presence.on_return(core.welcome_back)
     alarms.start()
+    sysadmin.start()
     agenda.start()
     presence.start()            # away / back: news waits for the user, then a welcome back
     weather.start()             # a warning shortly before rain
@@ -405,6 +443,7 @@ def main(args=ARGS):
     watchers.ANNOUNCE = core.announce
     watchers.start()            # "kabari saya kalau …"
     daily.ANNOUNCE = core.announce
+    media.restore_left_ducked()
     daily.start()               # screen time + the evening recap
     import metrics
     metrics.start()             # how well Digidaw hears and answers, per day ("laporan kinerja")

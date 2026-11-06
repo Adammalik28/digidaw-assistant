@@ -18,6 +18,8 @@ import notifications        # noqa: E402
 import presence             # noqa: E402
 import system_control       # noqa: E402
 import weather              # noqa: E402
+import agenda               # noqa: E402
+agenda.SMALL_HOURS_UNTIL = 0                # (these run at any hour; what "besok" means after midnight: tests/test_real_use.py)
 
 T = config.USER_TITLE
 
@@ -79,7 +81,9 @@ def test_messages():
     finally:
         notifications._items.clear()
     notifications.offer_reading("Rina")
-    assert notifications.take_offer() == "Rina" and notifications.take_offer() is None
+    assert notifications.offered() == "Rina" and notifications.offered() == "Rina"      # looking doesn't use it up
+    notifications.clear_offer()
+    assert notifications.offered() is None
 
 
 def _forecast() -> dict:

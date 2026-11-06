@@ -18,6 +18,7 @@ import datetime
 import threading
 from pathlib import Path
 
+import alarm_sounds
 import config
 import diag
 import storage
@@ -32,6 +33,10 @@ else:
 T = config.USER_TITLE
 ANNOUNCE = None          # set by main (core.announce)
 STATE_FILE = Path(config.BASE_DIR) / "alarms.json"
+LATE_RING_SECONDS = 15 * 60
+LATE_RING_DELAY = 8                     # (Digidaw has only just started: let the voice and the HUD come up first)
+TEST_SECONDS = 20
+RISE_FROM = 15           # % the softest an alarm starts at
 SOUNDS = {"alarm": "Alarm01.wav", "timer": "Alarm03.wav", "reminder": "Alarm02.wav"}
 DAYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"]
 DAY_ALIASES = {"jum'at": "jumat", "jumaat": "jumat", "ahad": "minggu"}
@@ -104,15 +109,31 @@ def _when_text(due: float) -> str:
 
 # ───────────────────────────── scheduling ─────────────────────────────
 
+_loaded = {"file": None}
+
+
+def _note(item: dict, what: str):
+    """Why an alarm didn't ring must be answerable the next morning (6 Nov: 05.00 and 06.00 gone, and nothing said where)."""
+    if item.get("action"):
+        return
+    when = datetime.datetime.fromtimestamp(item["due"]).strftime("%d-%m %H:%M") if item.get("due") else item.get("time", "")
+    named = f" ({item['label']})" if item.get("label") else ""
+    print(f"⏰ {item['kind']} {when}{named} {what}")
+
+
 def add(kind: str, label: str, due: datetime.datetime, repeat=None, action=None) -> dict:
     item = {"id": uuid.uuid4().hex[:8], "kind": kind, "label": label.strip(), "due": due.timestamp(),
             "repeat": sorted(set(repeat)) if repeat else None, "time": f"{due:%H:%M}", "created": time.time()}
     if action:
         item["action"] = action
     with _lock:
+        if _loaded["file"] != STATE_FILE:    # a process that never started the alarms must not write its one item over the saved ones
+            _loaded["file"] = STATE_FILE
+            _items.extend(i for i in _load() if i.get("id") not in {x.get("id") for x in _items} and i.get("due", 0) > time.time())
         _items.append(item)
         _items.sort(key=lambda i: i["due"])
     _changed()
+    _note(item, "dipasang")
     return item
 
 
@@ -151,6 +172,7 @@ def _fire(item: dict):
             result = f"gagal: {e}"
         _say(f"{item['label']}. {result}" if isinstance(result, str) and result else item["label"])
         return
+    global _ringing
     kind, label = item["kind"], item["label"]
     if kind == "timer":
         text = f"Timer {label} selesai, {T}." if label else f"Waktu habis, {T}. Timer sudah selesai."
@@ -158,7 +180,16 @@ def _fire(item: dict):
         text = f"Alarm {item['time'].replace(':', '.')}, {T}." + (f" {label}." if label else "")
     else:
         text = f"Pengingat, {T}: {label}."
-    _ring(item, text)
+    _note(item, "berbunyi")
+    try:
+        _ring(item, text)
+    except Exception as e:                 # whatever broke, it isn't kept quiet
+        _note(item, f"GAGAL berbunyi: {type(e).__name__}: {str(e)[:120]}")
+        if _ringing is item:
+            _ringing = None
+            events.state["alarm"] = {"ringing": False}
+            events.emit("alarm", ringing=False, id=item["id"])
+        _say(text, "warning")
 
 
 def _say(text: str, level: str = "reminder"):
@@ -175,8 +206,10 @@ def _ring(item: dict, text: str):
     time.sleep(0.2)
     _stop_ring.clear()
     _ringing = item
+    custom = alarm_sounds.custom_file(item["kind"])
     info = {"ringing": True, "id": item["id"], "kind": item["kind"], "label": item["label"], "text": text,
-            "time": item.get("time")}
+            "time": item.get("time"), "sound": alarm_sounds.sound_name(item["kind"]), "snooze": config.ALARM_SNOOZE_MINUTES,
+            "test": bool(item.get("test"))}
     events.state["alarm"] = info
     events.emit("alarm", **info)
     try:
@@ -187,15 +220,23 @@ def _ring(item: dict, text: str):
         diag.warn_once("alarm.hud", "HUD tidak bisa dibuka saat alarm berbunyi", e)
     try:
         import home_auto
-        home_auto.on_alarm(item["kind"])    # the lamp: a sunrise for an alarm, a blink for a timer / reminder
+        if not item.get("test"):
+            home_auto.on_alarm(item["kind"])    # the lamp: a sunrise for an alarm, a blink for a timer / reminder
     except Exception as e:
         diag.warn_once("alarm.lamp", "lampu tidak ikut menyala saat alarm", e)
     if not oscompat.IS_WINDOWS:
-        ld.run(["hyprctl", "dispatch", "dpms", "on"]) if shutil.which("hyprctl") else None   # "mode tidur" turned it off
+        ld.dispatch("dpms", "on") if shutil.which("hyprctl") else None   # "mode tidur" turned it off
     restore = _loud_enough()
-    _say(text)
+    if not item.get("test"):             # (a test is announced by whoever asked for it)
+        _say(text)
     seconds = config.ALARM_RING_SECONDS if item["kind"] == "alarm" else min(config.ALARM_RING_SECONDS, 20)
-    sound = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Media", SOUNDS.get(item["kind"], SOUNDS["alarm"]))
+    if item.get("test"):
+        seconds = min(seconds, TEST_SECONDS)
+    info = {**info, "until": time.time() + seconds}      # (counted from here: the voice took a moment)
+    if _ringing is item:
+        events.state["alarm"] = info
+        events.emit("alarm", **info)
+    sound = custom or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Media", SOUNDS.get(item["kind"], SOUNDS["alarm"]))
     try:
         import media
         media.duck()
@@ -208,10 +249,14 @@ def _ring(item: dict, text: str):
         except RuntimeError:
             pass
     else:
-        looping = ld.LoopingSound(ld.sound_for(item["kind"]))
+        rising = _rise(item)
+        looping = ld.LoopingSound(custom or ld.sound_for(item["kind"]), fallback=ld.sound_for(item["kind"]))
     _stop_ring.wait(seconds)
     if looping:
         looping.stop()
+        if rising:
+            rising.join(timeout=2)
+            _set_volume_quietly(rising.full)
     else:
         winsound.PlaySound(None, 0)
     if media:
@@ -227,6 +272,56 @@ def _ring(item: dict, text: str):
         _ringing = None
         events.state["alarm"] = {"ringing": False}
         events.emit("alarm", ringing=False, id=item["id"])
+
+
+def _set_volume_quietly(level: int):
+    try:
+        ld.set_volume(level)
+    except Exception as e:
+        diag.warn_once("alarm.volume", "volume alarm tidak bisa diubah", e)
+
+
+def _rise(item: dict):
+    """An alarm starts soft and reaches the volume it should have after ALARM_RISE_SECONDS. Timers and reminders are short
+    and don't. Returns the thread (its .full is that volume), or None."""
+    if item["kind"] != "alarm" or config.ALARM_RISE_SECONDS <= 0:
+        return None
+    try:
+        volume = ld.get_volume()
+    except Exception as e:
+        diag.warn_once("alarm.volume", "volume alarm tidak terbaca", e)
+        return None
+    if not volume or volume[0] <= RISE_FROM:
+        return None
+    full, start = volume[0], max(RISE_FROM, volume[0] * 0.4)
+    _set_volume_quietly(int(start))
+
+    def climb():
+        began = time.time()
+        while not _stop_ring.wait(1):
+            share = min(1.0, (time.time() - began) / config.ALARM_RISE_SECONDS)
+            _set_volume_quietly(int(start + (full - start) * share))
+            if share >= 1:
+                return
+    thread = threading.Thread(target=climb, daemon=True, name="alarm-rise")
+    thread.full = full
+    thread.start()
+    return thread
+
+
+def test_alarm() -> str:
+    """Ring a short test so the user can see and hear the alarm ('tes alarm', 'coba bunyikan alarm')."""
+    now = datetime.datetime.now()
+    item = {"id": "test", "kind": "alarm", "label": "Uji alarm", "time": f"{now:%H:%M}", "test": True}
+    threading.Thread(target=_ring, args=(item, ""), daemon=True, name="alarm-test").start()
+    return f"Ini uji alarm, {T}."
+
+
+def sound_settings() -> str:
+    """Open the alarm settings, where the user adds and chooses the sound ('ganti suara alarm', 'pilih lagu alarm')."""
+    import hud_server
+    hud_server.open_settings("Alarm")
+    return f"Pengaturan alarm saya buka, {T}. Di sana Anda bisa menambahkan audio sendiri."
 
 
 def next_ring(within_hours: float = 24) -> dict | None:
@@ -251,6 +346,16 @@ def _loud_enough():
     return None
 
 
+def cancel_id(item_id: str, via: str = "HUD"):
+    """A button took it away. Said in the log: an alarm that didn't ring must be explainable the next morning."""
+    with _lock:
+        gone = [i for i in _items if i["id"] == item_id]
+        _items[:] = [i for i in _items if i["id"] != item_id]
+    for item in gone:
+        _note(item, f"dibatalkan lewat {via}")
+    _changed()
+
+
 def is_ringing() -> bool:
     return _ringing is not None
 
@@ -259,20 +364,27 @@ def start():
     """Restore saved alarms; report the ones missed while Digidaw was off."""
     now = datetime.datetime.now()
     missed = []
+    _loaded["file"] = STATE_FILE
     with _lock:
         for item in _load():
-            if item["due"] > now.timestamp():
+            late = now.timestamp() - item["due"]
+            if late < 0:
+                _items.append(item)
+            elif late <= LATE_RING_SECONDS:      # it fell during a restart or just before the PC came on: it still rings, a moment later
+                item["due"] = now.timestamp() + LATE_RING_DELAY
                 _items.append(item)
             elif item.get("repeat"):
                 hh, mm = map(int, item["time"].split(":"))
                 item["due"] = _next_on(item["repeat"], hh, mm, now).timestamp()
                 _items.append(item)
-                if now.timestamp() - item["due"] < 6 * 3600:
+                if late < 6 * 3600:
                     missed.append(item)
             else:
                 missed.append(item)
         _items.sort(key=lambda i: i["due"])
     _changed()
+    for item in _items:
+        _note(item, "dimuat dari berkas")
     threading.Thread(target=_loop, daemon=True, name="alarms").start()
     recent = [m for m in missed if m["kind"] != "timer"]
     if recent:
@@ -401,10 +513,13 @@ def _day_offset(text: str, hour: int, minute: int) -> datetime.datetime:
     for alias, name in DAY_ALIASES.items():
         t = t.replace(alias, name)
     base = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    import agenda
+    tomorrow = agenda.tomorrow_offset()               # (after midnight "besok" is the morning ahead)
     if re.search(r"\blusa\b", t):
-        return base + datetime.timedelta(days=2)
+        return base + datetime.timedelta(days=tomorrow + 1)
     if re.search(r"\bbesok\b", t):
-        return base + datetime.timedelta(days=1)
+        when = base + datetime.timedelta(days=tomorrow)
+        return when if when > now else when + datetime.timedelta(days=1)
     m = re.search(r"(?:hari |pada )?(senin|selasa|rabu|kamis|jumat|sabtu|minggu)\b", t)
     if m and not re.search(r"setiap|tiap", t):
         return _next_on([DAYS.index(m.group(1))], hour, minute, now)
@@ -554,6 +669,22 @@ def set_reminder_at(time_hhmm: str, message: str, date: str = "") -> str:
     return _reminder_at(int(m.group(1)), int(m.group(2)), message, date, parse_repeat(date) if date else None)
 
 
+def extend_timer(minutes: float) -> str:
+    """Add time to the timer running now ('tambah 5 menit', 'tambah timernya 5 menit'); the one ending first if there are several."""
+    seconds = float(minutes) * 60
+    with _lock:
+        running = [i for i in _items if i["kind"] == "timer"]
+        if not running:
+            return f"Tidak ada timer yang sedang jalan, {T}."
+        item = min(running, key=lambda i: i["due"])
+        item["due"] += seconds
+        item["time"] = datetime.datetime.fromtimestamp(item["due"]).strftime("%H:%M")
+        _items.sort(key=lambda i: i["due"])
+        left = item["due"] - time.time()
+    _changed()
+    return f"Timer ditambah, sekarang sisa {_fmt_left(left + 1)}, {T}."      # (a second has gone by while saying it)
+
+
 def list_timers() -> str:
     """List active timers, alarms and reminders with their remaining time ('timer apa saja', 'alarm saya')."""
     with _lock:
@@ -591,6 +722,8 @@ def cancel_timers(keyword: str = "") -> str:
             _items.remove(i)
     if targets:
         _changed()
+        for i in targets:
+            _note(i, "dibatalkan lewat perintah")
         names = ", ".join((i["label"] or i["kind"]) + (f" ({i['time'].replace(':', '.')})" if i["kind"] == "alarm" else "")
                           for i in targets[:3])
         return f"{len(targets)} dibatalkan: {names}, {T}."
@@ -598,6 +731,29 @@ def cancel_timers(keyword: str = "") -> str:
         what = {"timer": "timer", "alarm": "alarm", "pengingat": "pengingat", "reminder": "pengingat"}.get(key, "timer atau alarm")
         return f"Tidak ada {what} yang sedang berjalan, {T}."
     return f"Tidak ada timer atau alarm yang cocok dengan '{keyword}', {T}."
+
+
+UNDO_SECONDS = 120
+
+
+def just_added() -> bool:
+    """Was a timer, alarm or reminder set a moment ago? ("batal" right after one means that one.)"""
+    with _lock:
+        return any(i["kind"] != "action" and time.time() - i.get("created", 0) < UNDO_SECONDS for i in _items)
+
+
+def undo_last_alarm() -> str:
+    """Cancel only the timer, alarm or reminder that was just set ('batal' right after setting one); the others stay."""
+    with _lock:
+        recent = [i for i in _items if i["kind"] != "action" and time.time() - i.get("created", 0) < UNDO_SECONDS]
+        if not recent:
+            return f"Tidak ada timer atau alarm yang baru dipasang, {T}."
+        item = max(recent, key=lambda i: i["created"])
+        _items.remove(item)
+    _changed()
+    _note(item, "dibatalkan lewat perintah (urungkan)")
+    what = item["label"] or {"timer": "timer", "alarm": "alarm", "reminder": "pengingat"}.get(item["kind"], "timer")
+    return f"Baik, {T}, {what} tadi dibatalkan."
 
 
 def stop_alarm() -> str:
@@ -614,10 +770,12 @@ def snooze_alarm(minutes: float = 5) -> str:
     if not item:
         return f"Tidak ada alarm yang sedang berbunyi, {T}."
     _stop_ring.set()
+    if item.get("test"):
+        return f"Uji alarm selesai, {T}."
     minutes = float(minutes or config.ALARM_SNOOZE_MINUTES)
     due = datetime.datetime.now() + datetime.timedelta(minutes=minutes)
     add(item["kind"] if item["kind"] != "timer" else "reminder", item["label"] or "alarm", due)
     return f"Alarm ditunda {minutes:g} menit, berbunyi lagi pukul {due:%H.%M}, {T}."
 
 
-AI_TOOLS = [set_timer, set_alarm, set_reminder_at, list_timers, cancel_timers, stop_alarm, snooze_alarm]
+AI_TOOLS = [alarm_sounds.song_as_alarm, extend_timer, undo_last_alarm, set_timer, set_alarm, set_reminder_at, list_timers, cancel_timers, stop_alarm, snooze_alarm, test_alarm, sound_settings]

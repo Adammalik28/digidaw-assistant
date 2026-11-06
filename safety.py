@@ -34,6 +34,17 @@ def guard(description: str, fn, always: bool = False, asking: str = "", **kwargs
             f"Tanyakan ke user apakah yakin, minta jawab 'ya' atau 'tidak'.")
 
 
+def then(fn, **kwargs):
+    """What to do after the action now waiting for "ya" has run. A "tidak" drops both."""
+    if not _pending:
+        return
+    first, first_kwargs = _pending["fn"], _pending["kwargs"]
+
+    def both():
+        return f"{first(**first_kwargs)} {fn(**kwargs)}"
+    _pending.update(fn=both, kwargs={})
+
+
 def has_pending() -> bool:
     global _pending
     if _pending is not None and time.time() - _pending["at"] > PENDING_SECONDS:
